@@ -1,0 +1,90 @@
+
+version: "3.5"
+services:
+  tensorrt:
+    build:
+      context: .
+      dockerfile: ./deployment_build/dockerfile
+      args:
+        GITHUB_TOKEN: ${GITHUB_TOKEN}
+    profiles:
+      - tensorrt
+    volumes:
+      - ./:/u/home/src
+      - ~/.config/gcloud:/root/.config/gcloud
+    deploy:
+      resources:
+        limits:
+          # match production limits
+          cpus: '7'
+          memory: 25000M
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    working_dir: /u/home/src
+    entrypoint:
+      - python
+      - -m
+      - wav2wav.converter
+  base:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        GITHUB_TOKEN: ${GITHUB_TOKEN}
+    volumes:
+      - .:/u/home/src
+      - ~/.wav2wav:/u/home/.wav2wav
+      - ${PATH_TO_DATA}:/data
+      - ${PATH_TO_RUNS}:/runs
+      - ~/.config/gcloud:/u/home/.config/gcloud
+      - ~/.zsh_history:/u/home/.zsh_history
+    environment:
+      - GITHUB_TOKEN
+      - DISCOURSE_API_USERNAME
+      - DISCOURSE_SERVER
+      - DISCOURSE_API_KEY
+      - HOST_USER_ID
+      - HOST_USER_GID
+      - JUPYTER_TOKEN
+      - PATH_TO_DATA=/data
+      - PATH_TO_RUNS=/runs
+      - TENSORBOARD_PATH
+      - MPLCONFIGDIR=/u/home/.mplconfig
+    shm_size: 32G
+    working_dir: /u/home/src
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+  dev:
+    extends: base
+    profiles:
+      - interactive
+    stdin_open: true
+    tty: true
+  jupyter:
+    extends: base
+    ports:
+      - ${JUPYTER_PORT}:8888
+    entrypoint:
+      - /bin/bash
+      - /entry_script_jupyter.sh
+  tensorboard:
+    extends: base
+    ports:
+      - ${TENSORBOARD_PORT}:6006
+    entrypoint:
+      - /bin/bash
+      - /entry_script_tensorboard.sh
+  gradio:
+    extends: base
+    ports:
+      - 7860:7860
+    entrypoint:
+      - /bin/bash
+      - /entry_script_gradio.sh

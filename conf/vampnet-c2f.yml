@@ -1,0 +1,9 @@
+$include:
+  - conf/vampnet.yml
+
+VampNet.n_codebooks: 9
+VampNet.n_conditioning_codebooks: 3
+
+train/AudioDataset.duration: 3
+val/AudioDataset.duration: 3
+test/AudioDataset.duration: 3

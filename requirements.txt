@@ -1,0 +1,29 @@
+argbind>=0.3.1
+pytorch-ignite
+rich
+audiotools @ git+https://github.com/descriptinc/lyrebird-audiotools.git@0.6.3
+tqdm
+tensorboard
+google-cloud-logging==2.2.0
+pytest
+pytest-cov
+papaya_client @ git+https://github.com/descriptinc/lyrebird-papaya.git@master
+pynvml
+psutil
+pandas
+onnx
+onnx-simplifier
+seaborn
+jupyterlab
+jupyterlab-link-share
+pandas
+watchdog
+pesq
+tabulate
+torchmetrics
+codebraid==0.5.0
+jupyter-client==6.1.12
+tensorboardX
+gradio
+einops
+flash-attn
