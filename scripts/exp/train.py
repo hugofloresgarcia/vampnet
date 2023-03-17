@@ -216,6 +216,7 @@ def accuracy(
     return accuracy
 
 def sample_prefix_suffix_amt(
+        z,
         n_batch, 
         prefix_amt, 
         suffix_amt, 
@@ -362,7 +363,7 @@ def train(
                 n_batch = z.shape[0]
                 r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-                n_prefix, n_suffix = sample_prefix_suffix_amt(
+                n_prefix, n_suffix = sample_prefix_suffix_amt(z=z, 
                     n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
                     prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
                     rng=rng
@@ -448,7 +449,7 @@ def train(
             n_batch = z.shape[0]
             r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-            n_prefix, n_suffix = sample_prefix_suffix_amt(
+            n_prefix, n_suffix = sample_prefix_suffix_amt(z=z,
                 n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
                 prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
                 rng=rng
@@ -606,7 +607,7 @@ def train(
 
             n_batch = z.shape[0]
 
-            n_prefix, n_suffix = sample_prefix_suffix_amt(
+            n_prefix, n_suffix = sample_prefix_suffix_amt(z=z,
                 n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
                 prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
                 rng=rng
