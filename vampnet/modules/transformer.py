@@ -377,7 +377,7 @@ class TransformerStack(nn.Module):
                     n_heads,
                     bidirectional,
                     is_decoder,
-                    has_relative_attention_bias=(i == 0),
+                    has_relative_attention_bias=True if (i == 0) else False,
                     flash_attn=flash_attn,
                     dropout=dropout,
                 )
