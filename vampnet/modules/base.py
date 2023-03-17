@@ -85,8 +85,6 @@ class VampBase(at.ml.BaseModel):
             mask = mask[:, self.n_conditioning_codebooks :, :]
 
             truth = F.one_hot(z_true, self.vocab_size)
-            print(truth.shape)
-            # truth = rearrange(truth, "b c t p -> b p (t c)")
             mask = mask[:, :, :, None].expand(-1, -1, -1, self.vocab_size)
             z_hat = rearrange(
                 z_hat,
@@ -127,16 +125,16 @@ class VampBase(at.ml.BaseModel):
             return r
 
     @torch.no_grad()
-    def to_signal(self, z, vqvae):
+    def to_signal(self, z, codec):
         if z.ndim == 2:
             z = self.embedding.unflatten(z)
         assert z.ndim == 3
 
         signal = at.AudioSignal(
-            vqvae.decode(
-                vqvae.quantizer.from_latents(self.embedding.from_codes(z, vqvae))[0]
+            codec.decode(
+                codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
             )["audio"],
-            vqvae.sample_rate,
+            codec.sample_rate,
         )
 
         return signal
@@ -150,7 +148,7 @@ class VampBase(at.ml.BaseModel):
 
     def paella_sample(
         self,
-        vqvae,
+        codec,
         time_steps: int = 400,
         sampling_steps: int = 12,
         start_tokens: Optional[torch.Tensor] = None,
@@ -219,7 +217,7 @@ class VampBase(at.ml.BaseModel):
             if renoise_mode == "prev":
                 z_prev = z.clone()
 
-            latents = self.embedding.from_codes(z, vqvae)
+            latents = self.embedding.from_codes(z, codec)
             logits = self.forward(latents, r[i])
 
             # for mask mode
@@ -258,13 +256,13 @@ class VampBase(at.ml.BaseModel):
                 z = start_tokens * (1 - mask) + z * mask
 
         if return_signal:
-            return self.to_signal(z, vqvae)
+            return self.to_signal(z, codec)
         else:
             return z
 
     def maskgit_sample(
         self,
-        vqvae,
+        codec,
         time_steps: int = 300,
         sampling_steps: int = 24,
         start_tokens: Optional[torch.Tensor] = None,
@@ -338,7 +336,7 @@ class VampBase(at.ml.BaseModel):
                 z_masked = z.masked_fill(~keep_mask_unflat.bool(), self.mask_token)
 
                 # get latents
-                latents = self.embedding.from_codes(z_masked, vqvae)
+                latents = self.embedding.from_codes(z_masked, codec)
 
                 # infer from latents
                 logits = self.forward(latents, r)
@@ -400,7 +398,7 @@ class VampBase(at.ml.BaseModel):
                 # z = torch.cat([z[:, :self.n_conditioning_codebooks, :], z_inferred], dim=1)
 
         if return_signal:
-            return self.to_signal(z, vqvae)
+            return self.to_signal(z, codec)
         else:
             return z
 

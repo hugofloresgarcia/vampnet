@@ -114,8 +114,8 @@ def load(
             "map_location": "cpu",
             "package": not load_weights,
         }
-        if (Path(kwargs["folder"]) / "model").exists():
-            model, v_extra = model.load_from_folder(**kwargs)
+        if (Path(kwargs["folder"]) / "vampnet").exists():
+            model, v_extra = VampNet.load_from_folder(**kwargs)
 
     codec = LAC.load(args["codec_ckpt"], map_location="cpu")
     codec.eval()
@@ -215,6 +215,29 @@ def accuracy(
 
     return accuracy
 
+def sample_prefix_suffix_amt(
+        n_batch, 
+        prefix_amt, 
+        suffix_amt, 
+        prefix_dropout, 
+        suffix_dropout, 
+        rng 
+    ):
+    """
+    Sample the number of prefix and suffix tokens to drop.
+    """
+    if prefix_amt > 0.0:
+        prefix_mask = flip_coin(n_batch, 1 - prefix_dropout, rng)
+        n_prefix = int(prefix_amt * z.shape[-1]) * prefix_mask
+    else:
+        n_prefix = None
+    if suffix_amt > 0.0:
+        suffix_mask = flip_coin(n_batch, 1 - suffix_dropout, rng)
+        n_suffix = int(suffix_amt * z.shape[-1]) * suffix_mask
+    else:
+        n_suffix = None
+    return n_prefix, n_suffix
+
 
 @argbind.bind(without_prefix=True)
 def train(
@@ -288,7 +311,7 @@ def train(
     class Trainer(at.ml.BaseTrainer):
         _last_grad_norm = 0.0
 
-        def metrics(self, vn, z_hat, r, target, flat_mask, output):
+        def _metrics(self, vn, z_hat, r, target, flat_mask, output):
             for r_range in [(0, 0.5), (0.5, 1.0)]:
                 unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
                 masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
@@ -324,7 +347,6 @@ def train(
                     )
 
         def train_loop(self, engine, batch):
-
             model.train()
             batch = at.util.prepare_batch(batch, accel.device)
             signal = apply_transform(train_data.transform, batch)
@@ -333,22 +355,18 @@ def train(
             vn = accel.unwrap(model)
             with accel.autocast():
                 with torch.inference_mode():
+                    codec.to(accel.device)
                     z = codec.encode(signal.samples, signal.sample_rate)["codes"]
                     z = z[:, : vn.n_codebooks, :]
 
                 n_batch = z.shape[0]
                 r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-                if prefix_amt > 0.0:
-                    prefix_mask = flip_coin(n_batch, 1 - prefix_dropout, rng)
-                    n_prefix = int(prefix_amt * z.shape[-1]) * prefix_mask
-                else:
-                    n_prefix = None
-                if suffix_amt > 0.0:
-                    suffix_mask = flip_coin(n_batch, 1 - suffix_dropout, rng)
-                    n_suffix = int(suffix_amt * z.shape[-1]) * suffix_mask
-                else:
-                    n_suffix = None
+                n_prefix, n_suffix = sample_prefix_suffix_amt(
+                    n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
+                    prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
+                    rng=rng
+                )
 
                 z_mask, mask = vn.add_noise(
                     z, r, n_prefix=n_prefix, n_suffix=n_suffix
@@ -378,7 +396,7 @@ def train(
                 else:
                     output["loss"] = criterion(z_hat, target)
 
-                self.metrics(
+                self._metrics(
                     vn=vn,
                     r=r,
                     z_hat=z_hat,
@@ -430,16 +448,11 @@ def train(
             n_batch = z.shape[0]
             r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-            if prefix_amt > 0.0:
-                prefix_mask = flip_coin(n_batch, 1 - prefix_dropout, rng)
-                n_prefix = int(prefix_amt * z.shape[-1]) * prefix_mask
-            else:
-                n_prefix = None
-            if suffix_amt > 0.0:
-                suffix_mask = flip_coin(n_batch, 1 - suffix_dropout, rng)
-                n_suffix = int(suffix_amt * z.shape[-1]) * suffix_mask
-            else:
-                n_suffix = None
+            n_prefix, n_suffix = sample_prefix_suffix_amt(
+                n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
+                prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
+                rng=rng
+            )
 
             z_mask, mask = vn.add_noise(z, r, n_prefix=n_prefix, n_suffix=n_suffix)
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
@@ -466,7 +479,7 @@ def train(
             else:
                 output["loss"] = criterion(z_hat, target)
 
-            self.metrics(
+            self._metrics(
                 vn=vn,
                 r=r,
                 z_hat=z_hat,
@@ -516,7 +529,7 @@ def train(
 
             for i in range(num_samples):
                 sampled = accel.unwrap(model).sample(
-                    codec,
+                    codec=codec,
                     time_steps=z.shape[-1],
                     start_tokens=z[i : i + 1],
                 )
@@ -547,7 +560,7 @@ def train(
             for i in range(len(z)):
                 imputed.append(
                     accel.unwrap(model).sample(
-                        codec,
+                        codec=codec,
                         time_steps=z.shape[-1],
                         start_tokens=z[i][None, ...],
                         mask=imp_mask[i][None, ...],
@@ -593,16 +606,11 @@ def train(
 
             n_batch = z.shape[0]
 
-            if prefix_amt > 0.0:
-                prefix_mask = flip_coin(n_batch, 1 - prefix_dropout, rng)
-                n_prefix = int(prefix_amt * z.shape[-1]) * prefix_mask
-            else:
-                n_prefix = None
-            if suffix_amt > 0.0:
-                suffix_mask = flip_coin(n_batch, 1 - suffix_dropout, rng)
-                n_suffix = int(suffix_amt * z.shape[-1]) * suffix_mask
-            else:
-                n_suffix = None
+            n_prefix, n_suffix = sample_prefix_suffix_amt(
+                n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
+                prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
+                rng=rng
+            )
 
             z_mask, mask = vn.add_noise(z, r, n_prefix=n_prefix, n_suffix=n_suffix)
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)

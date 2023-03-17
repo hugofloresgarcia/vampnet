@@ -113,13 +113,13 @@ class CodebookEmbedding(nn.Module):
 
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
 
-    def from_codes(self, codes: torch.Tensor, vqvae):
+    def from_codes(self, codes: torch.Tensor, codec):
         n_codebooks = codes.shape[1]
         latent = []
         for i in range(n_codebooks):
             c = codes[:, i, :]
 
-            lookup_table = vqvae.quantizer.quantizers[i].codebook.weight
+            lookup_table = codec.quantizer.quantizers[i].codebook.weight
             if hasattr(self, "special"):
                 special_lookup = torch.cat(
                     [self.special[tkn][i : i + 1] for tkn in self.special], dim=0

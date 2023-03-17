@@ -1,5 +1,5 @@
 
-wav2wav_ckpt: /u/home/src/runs/codec-ckpt/codec.pth
+codec_ckpt: /u/home/src/runs/codec-ckpt/codec.pth
 save_path: ckpt
 max_epochs: 1000000
 epoch_length: 1000
