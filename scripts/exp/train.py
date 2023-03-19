@@ -250,6 +250,7 @@ def train(
     max_epochs: int = int(100e3),
     epoch_length: int = 1000,
     save_audio_epochs: int = 10,
+    save_epochs: list = [10, 50, 100, 200, 300, 400,],
     batch_size: int = 48,
     grad_acc_steps: int = 1,
     val_idx: list = [0, 1, 2, 3, 4],
@@ -504,6 +505,9 @@ def train(
             tags = ["latest"]
             loss_key = "loss/val" if "loss/val" in metadata["logs"] else "loss/train"
             self.print(f"Saving to {str(Path('.').absolute())}")
+
+            if self.state.epoch in save_epochs:
+                tags.append(f"epoch={self.state.epoch}")
 
             if self.is_best(engine, loss_key):
                 self.print(f"Best model so far")
