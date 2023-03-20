@@ -153,7 +153,6 @@ class VampBase(at.ml.BaseModel):
         sampling_steps: int = 12,
         start_tokens: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
-        device: str = "cpu",
         temperature: Union[float, Tuple[float, float]] = 1.0,
         top_k: int = None,
         sample: str = "gumbel",
@@ -164,7 +163,8 @@ class VampBase(at.ml.BaseModel):
         typical_min_tokens=1,
         return_signal=True,
     ):
-        r = torch.linspace(0, 1, sampling_steps + 1)[:-1][:, None].to(device)
+        
+        r = torch.linspace(0, 1, sampling_steps + 1)[:-1][:, None].to(self.device)
         if renoise_steps == None:
             renoise_steps = sampling_steps - 1
 
@@ -186,7 +186,7 @@ class VampBase(at.ml.BaseModel):
             if self.noise_mode == "noise":
                 z = torch.randint(
                     0, self.vocab_size, size=(1, self.n_codebooks, time_steps)
-                ).to(device)
+                ).to(self.device)
             elif self.noise_mode == "mask":
                 z = torch.full((1, self.n_codebooks, time_steps), self.mask_token)
         else:
@@ -197,19 +197,14 @@ class VampBase(at.ml.BaseModel):
             assert z.shape[0] == 1, f"batch size must be 1"
 
         if mask is None:
-            mask = torch.ones(z.shape[0], z.shape[-1]).to(device).int()
+            mask = torch.ones(z.shape[0], z.shape[-1]).to(self.device).int()
+            mask = mask[:, None, :]
+            mask = mask.repeat(1, z.shape[1], 1)
 
-        # apply mask
-        assert mask.shape == (
-            z.shape[0],
-            z.shape[-1],
-        ), f"mask must be shape (batch, seq_len), got {mask.shape}"
-        mask = mask[:, None, :]
-        mask = mask.repeat(1, z.shape[1], 1)
         mask[:, : self.n_conditioning_codebooks, :] = 0.0
 
-        if self.noise_mode == "mask":
-            z_true = z.clone()
+
+        z_true = z.clone()
 
         z, mask = self.add_noise(z, r=r[0], random_x=None, mask=mask)
         z_init = z.clone()
@@ -228,8 +223,8 @@ class VampBase(at.ml.BaseModel):
 
             z = self.sample_from_logits(
                 logits,
-                tmpt,
-                top_k,
+                top_k=top_k,
+                temperature=tmpt,
                 sample=sample,
                 typical_filtering=typical_filtering,
                 typical_mass=typical_mass,
@@ -323,7 +318,7 @@ class VampBase(at.ml.BaseModel):
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
 
-        for i in tqdm(range(sampling_steps)):
+        for i in range(sampling_steps):
             # our current temperature
             tmpt = temperature[i]
 
@@ -450,7 +445,7 @@ class VampBase(at.ml.BaseModel):
             probs = torch.softmax(logits, dim=-1)
             inferred = torch.stack([pr.multinomial(1).squeeze(-1) for pr in probs])
         elif sample == "argmax":
-            inferred = torch.softmax(probs, dim=-1).argmax(dim=-1)
+            inferred = torch.softmax(logits, dim=-1).argmax(dim=-1)
         elif sample == "gumbel":
             inferred = gumbel_sample(logits, dim=-1)
         else:
