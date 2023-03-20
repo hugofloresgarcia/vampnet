@@ -264,6 +264,7 @@ def train(
 ):
     assert codec_ckpt is not None, "codec_ckpt is required"
 
+    seed = seed + accel.local_rank
     at.util.seed(seed)
     writer = None
 
@@ -282,7 +283,7 @@ def train(
     sample_rate = codec.sample_rate
 
     # a better rng for sampling from our schedule
-    rng = torch.quasirandom.SobolEngine(1, scramble=True)  
+    rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=seed)  
 
     # log a model summary w/ num params
     if accel.local_rank == 0:
