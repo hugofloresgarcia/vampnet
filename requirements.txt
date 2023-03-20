@@ -2,12 +2,12 @@ argbind>=0.3.1
 pytorch-ignite
 rich
 audiotools @ git+https://github.com/descriptinc/lyrebird-audiotools.git@0.6.3
+lac @ git+https://github.com/descriptinc/lyrebird-audio-codec.git@main
 tqdm
 tensorboard
 google-cloud-logging==2.2.0
 pytest
 pytest-cov
-papaya_client @ git+https://github.com/descriptinc/lyrebird-papaya.git@master
 pynvml
 psutil
 pandas
