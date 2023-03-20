@@ -38,5 +38,6 @@ setup(
         "torchmetrics>=0.7.3",
         "einops",
         "flash-attn",
+        "frechet_audio_distance"
     ],
 )

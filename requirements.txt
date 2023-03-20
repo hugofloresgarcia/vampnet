@@ -27,3 +27,4 @@ tensorboardX
 gradio
 einops
 flash-attn
+frechet_audio_distance
