@@ -80,14 +80,11 @@ def eval(
 
     metric_keys = [k for k in metrics[0].keys() if k not in ("condition", "file")]
 
-    stats = []
+
     for mk in metric_keys:
         stat = pandas.DataFrame(metrics)
         stat = stat.groupby(['condition'])[mk].agg(['mean', 'count', 'std'])
-        stats.append(stat)
-    
-    stats = pandas.concat(stats, axis=1)
-    stats.to_csv(exp_dir / "metrics-stats.csv")
+        stat.to_csv(exp_dir / f"stats-{mk}.csv")
 
     df = pandas.DataFrame(metrics)
     df.to_csv(exp_dir / "metrics-all.csv", index=False)
