@@ -445,7 +445,6 @@ class VampNet(VampBase):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",
-        seq_len: int = 313,
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -458,7 +457,6 @@ class VampNet(VampBase):
         self.latent_dim = latent_dim
         self.flash_attn = flash_attn
         self.noise_mode = noise_mode
-        self.seq_len = seq_len
 
         if noise_mode == "mask":
             special_tokens = ["MASK"]
