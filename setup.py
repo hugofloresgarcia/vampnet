@@ -20,7 +20,7 @@ setup(
     description="Generative Music Modeling.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Hugo Flores García",
+    author="Hugo Flores García, Prem Seetharaman",
     author_email="hfgacrcia@descript.com",
     url="https://github.com/descriptinc/lyrebird-vampnet",
     license="MIT",
@@ -37,7 +37,6 @@ setup(
         "google-cloud-logging==2.2.0",
         "torchmetrics>=0.7.3",
         "einops",
-        "flash-attn",
         "frechet_audio_distance"
     ],
 )

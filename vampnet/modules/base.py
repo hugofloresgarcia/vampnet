@@ -24,6 +24,9 @@ def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim=dim)
 
 
+def scalar_to_batch_tensor(x, batch_size):
+    return torch.tensor(x).repeat(batch_size)
+
 class VampBase(at.ml.BaseModel):
     def forward(self, x: torch.Tensor, r: torch.Tensor):
         raise NotImplementedError
@@ -36,20 +39,40 @@ class VampBase(at.ml.BaseModel):
         mask: Optional[torch.Tensor] = None,
         n_prefix: Optional[torch.Tensor] = None,
         n_suffix: Optional[torch.Tensor] = None,
+        downsample_factor: Optional[int] = None, 
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
 
         if mask is None:
+            if not isinstance(r, torch.Tensor):
+                r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
             r = self.gamma(r)[:, None, None]
             probs = torch.ones_like(x) * r
 
             # if we have a prefix or suffix, set their mask prob to 0
             if n_prefix is not None:
+                if not isinstance(n_prefix, torch.Tensor):
+                    n_prefix = scalar_to_batch_tensor(n_prefix, x.shape[0]).to(x.device) 
                 for i, n in enumerate(n_prefix):
-                    probs[i, :, :n] = 0.0
+                    if n > 0:
+                        probs[i, :, :n] = 0.0
             if n_suffix is not None:
+                if not isinstance(n_suffix, torch.Tensor):
+                    n_suffix = scalar_to_batch_tensor(n_suffix, x.shape[0]).to(x.device)
                 for i, n in enumerate(n_suffix):
-                    probs[i, :, -n:] = 0.0
+                    if n > 0:
+                        probs[i, :, -n:] = 0.0
+            
+            # if we have a downsample factor, set the mask prob to 0
+            if downsample_factor is not None:
+                if not isinstance(downsample_factor, torch.Tensor):
+                    downsample_factor = scalar_to_batch_tensor(downsample_factor, x.shape[0])
+                for i, factor in enumerate(downsample_factor):
+                    if factor == 0:
+                        continue
+                    for j in range(probs.shape[-1]):
+                        if j % factor == 0:
+                            probs[i, :, j] = 0.0
 
             mask = torch.bernoulli(probs)
             mask = mask.round().long()
@@ -347,7 +370,9 @@ class VampBase(at.ml.BaseModel):
                 if num_to_keep > 0:
                     probs = logits.softmax(dim=-1)
 
-                    keep_probs = F.one_hot(z, self.vocab_size)[:, :, :]
+                    # do mod self.vocab_size to make sure we don't sample from the mask token
+                    # in case the mask token was in the og z
+                    keep_probs = F.one_hot(z%self.vocab_size, self.vocab_size)[:, :, :]
 
                     probs = rearrange(
                         probs, "b (t c) p -> b c t p", c=n_infer_codebooks

@@ -1,6 +1,6 @@
 
 from . import modules
 from . import scheduler
-from . import enchilada
+from .interface import Interface
 
 __version__ = "0.0.1"

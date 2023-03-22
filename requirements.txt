@@ -26,5 +26,4 @@ jupyter-client==6.1.12
 tensorboardX
 gradio
 einops
-flash-attn
 frechet_audio_distance
