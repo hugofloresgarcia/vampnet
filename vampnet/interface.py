@@ -189,7 +189,6 @@ class Interface:
         c_vamp = torch.cat([prefix_codes, suffix_codes], dim=-1)
         return c_vamp
 
-
     def coarse_vamp_v2(
         self, 
         signal, 
@@ -295,6 +294,14 @@ class Interface:
                 cz_new_suffix = cz_sampled[:, :, suffix_start_idx:suffix_stop_idx].clone()
 
                 c_vamp['suffix'].insert(0, cz_generated)
+
+            else:
+                # we have no prefix or suffix, so we'll just use the generated
+                # codes as the new prefix and suffix
+                cz_new_prefix = cz_generated.clone()
+                cz_new_suffix = _cz[:, :, :0].clone()
+
+                c_vamp['prefix'].append(cz_generated)
 
             
             n_to_insert = c_seq_len - (cz_new_prefix.shape[-1] + cz_new_suffix.shape[-1])
