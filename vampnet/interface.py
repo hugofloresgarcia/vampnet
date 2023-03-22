@@ -53,7 +53,13 @@ class Interface:
     
     @torch.inference_mode()
     def encode(self, signal: AudioSignal):
-        signal = signal.clone().to(self.device).resample(self.codec.sample_rate).to_mono()
+        signal = (
+            signal.clone().to(self.device)
+            .resample(self.codec.sample_rate)
+            .to_mono()
+            .normalize(-24)
+            .ensure_max_of_audio(1.0)
+        )
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
 

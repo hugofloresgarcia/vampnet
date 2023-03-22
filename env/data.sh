@@ -1,7 +1,7 @@
 export PATH_TO_DATA=~/data
 
 if [[ $(hostname) == "oon17" ]]; then
-    export PATH_TO_DATA=/home/prem/shared/data/
+    export PATH_TO_DATA=/data/
 fi
 
 if [[ $(hostname) == "oon19" ]]; then

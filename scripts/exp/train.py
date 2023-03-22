@@ -547,30 +547,38 @@ def train(
 
         def save_imputation(self, z: torch.Tensor):
             # imputations
-            mask_begin = z.shape[-1] // 4
-            mask_end = (z.shape[-1] * 3) // 4
+            _prefix_amt = prefix_amt
+            _suffix_amt = suffix_amt
 
-            imp_mask = torch.zeros(z.shape[0], z.shape[-1]).to(accel.device).int()
-            imp_mask[:, mask_begin:mask_end] = 1
+            if _prefix_amt == 0:
+                _prefix_amt = 0.25
+            if _suffix_amt == 0:
+                _suffix_amt = 0.25
 
-            imp_noisy = (
-                z * (1 - imp_mask[:, None, :])
-                + torch.randint_like(z, 0, accel.unwrap(model).vocab_size)
-                * imp_mask[:, None, :]
+            n_prefix = int(z.shape[-1] * _prefix_amt)
+            n_suffix = int(z.shape[-1] * _suffix_amt)
+            downsample_factor = None
+
+            vn = accel.unwrap(model)
+
+            z_mask, mask = vn.add_noise(
+                z, r=0.0, n_prefix=n_prefix, n_suffix=n_suffix,
+                downsample_factor=downsample_factor
             )
-            imputed_noisy = accel.unwrap(model).to_signal(imp_noisy, codec)
-            imputed_true = accel.unwrap(model).to_signal(z, codec)
+
+            imputed_noisy = vn.to_signal(z_mask, codec)
+            imputed_true = vn.to_signal(z, codec)
 
             imputed = []
             for i in range(len(z)):
                 imputed.append(
-                    accel.unwrap(model).sample(
+                    vn.sample(
                         codec=codec,
                         time_steps=z.shape[-1],
                         start_tokens=z[i][None, ...],
-                        mask=imp_mask[i][None, ...],
-                    )
-                )
+                        mask=mask[i][None, ...],
+                    )   
+                )   
             imputed = AudioSignal.batch(imputed)
 
             for i in range(len(val_idx)):
