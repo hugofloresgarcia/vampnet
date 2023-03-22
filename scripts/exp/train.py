@@ -59,9 +59,7 @@ IGNORE_INDEX = -100
 @argbind.bind("train", "val", without_prefix=True)
 def build_transform():
     transform = transforms.Compose(
-        tfm.VolumeNorm(("uniform", -32, -20)),
-        tfm.VolumeChange(("uniform", -6, 3)),
-        tfm.RescaleAudio(),
+        tfm.VolumeNorm(("uniform", -24)),
     )
     return transform
 
