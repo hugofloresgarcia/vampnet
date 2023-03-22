@@ -11,3 +11,5 @@ VampNet.n_heads: 20
 train/AudioDataset.duration: 3
 val/AudioDataset.duration: 3
 test/AudioDataset.duration: 3
+
+AudioDataset.loudness_cutoff: -40.0

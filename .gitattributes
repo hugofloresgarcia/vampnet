@@ -1,4 +1,0 @@
-*.mp3 filter=lfs diff=lfs merge=lfs -text
-tests/assets/cpu_test_file.pt filter=lfs diff=lfs merge=lfs -text
-tests/assets/quick.pth filter=lfs diff=lfs merge=lfs -text
-tests/assets/slow.pth filter=lfs diff=lfs merge=lfs -text
