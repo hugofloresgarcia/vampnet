@@ -1,7 +1,7 @@
 
 codec_ckpt: /u/home/src/runs/codec-ckpt/codec.pth
 save_path: ckpt
-max_epochs: 1000000
+max_epochs: 1000
 epoch_length: 1000
 save_audio_epochs: 2
 val_idx: [0,1,2,3,4,5,6,7,8,9]
