@@ -42,6 +42,7 @@ class VampBase(at.ml.BaseModel):
         r: torch.Tensor,
         random_x: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
+        ext_mask: Optional[torch.Tensor] = None,
         n_prefix: Optional[torch.Tensor] = None,
         n_suffix: Optional[torch.Tensor] = None,
         downsample_factor: Optional[int] = None, 
@@ -98,6 +99,12 @@ class VampBase(at.ml.BaseModel):
                 random_x = torch.randint_like(x, 0, self.vocab_size)
         else:
             raise ValueError(f"invalid noise mode {self.noise_mode}")
+
+        # add the external mask if we were given one
+        if ext_mask is not None:
+            assert ext_mask.ndim == 3, "mask must be (batch, n_codebooks, seq)"
+            assert ext_mask.shape == x.shape, "mask must be same shape as x"
+            mask = (mask + ext_mask).bool().long()
 
         x = x * (1 - mask) + random_x * mask
         return x, mask

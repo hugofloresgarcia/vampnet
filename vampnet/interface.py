@@ -7,8 +7,8 @@ from audiotools import AudioSignal
 import tqdm
 
 from .modules.transformer import VampNet
+from .beats import WaveBeat
 from lac.model.lac import LAC
-
 
 
 def signal_concat(
@@ -83,12 +83,72 @@ class Interface:
             .ensure_max_of_audio(1.0)
         )
         return signal
+    
     @torch.inference_mode()
     def encode(self, signal: AudioSignal):
         signal = self.preprocess(signal).to(self.device)
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
 
+    def make_beat_mask(self, 
+            signal: AudioSignal, 
+            before_beat_s: float = 0.1,
+            after_beat_s: float = 0.1,
+            mask_downbeats: float = 0.1,
+            mask_upbeats: float = 0.1,
+            downbeat_downsample_factor: int = None,
+            beat_downsample_factor: int = None,
+            invert: bool = False,
+    ):
+        """make a beat synced mask. that is, make a mask that 
+        places 1s at and around the beat, and 0s everywhere else. 
+        """
+        assert hasattr(self, "beat_tracker"), "No beat tracker loaded"
+
+        # get the beat times
+        beats, downbeats = self.beat_tracker.extract_beats(signal)
+
+        # get the beat indices in z
+        beats_z, downbeats_z = self.s2t(beats), self.s2t(downbeats)
+
+        # remove downbeats from beats
+        beats_z = beats_z[~torch.isin(beats_z, downbeats_z)]
+
+        # make the mask 
+        seq_len = self.s2t(signal.duration)
+        mask = torch.zeros(seq_len, device=self.device)
+        
+        mask_b4 = self.s2t(before_beat_s)
+        mask_after = self.s2t(after_beat_s)
+
+        if beat_downsample_factor is not None:
+            if beat_downsample_factor < 1:
+                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
+        else:
+            beat_downsample_factor = 1
+
+        if downbeat_downsample_factor is not None:
+            if downbeat_downsample_factor < 1:
+                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
+        else:
+            downbeat_downsample_factor = 1
+
+        beats_z = beats_z[::beat_downsample_factor]
+        downbeats_z = downbeats_z[::downbeat_downsample_factor]
+    
+        if mask_upbeats:
+            for beat_idx in beats_z:
+                mask[beat_idx - mask_b4:beat_idx + mask_after] = 1
+
+        if mask_downbeats:
+            for downbeat_idx in downbeats_z:
+                mask[downbeat_idx - mask_b4:downbeat_idx + mask_after] = 1
+        
+        if invert:
+            mask = 1 - mask
+        
+        return mask
+        
     def coarse_to_fine(
         self, 
         coarse_z: torch.Tensor,
@@ -231,7 +291,8 @@ class Interface:
         downsample_factor: int = None,
         intensity: float = 1.0, 
         debug=False,
-        swap_prefix_suffix=False,
+        swap_prefix_suffix=False, 
+        ext_mask=None,
         **kwargs
     ):
         z = self.encode(signal)
@@ -265,7 +326,8 @@ class Interface:
                 n_prefix=n_prefix,
                 n_suffix=n_suffix, 
                 downsample_factor=downsample_factor,
-                mask=cz_mask
+                mask=cz_mask, 
+                ext_mask=ext_mask
             )
             if debug:
                 print("tokens to infer")
@@ -414,7 +476,6 @@ class Interface:
 
         output.truncate_samples(original_length)
         return output
-
 
     # create a loop of a single region with variations
     # TODO: this would work nicer if we could trim at the beat
