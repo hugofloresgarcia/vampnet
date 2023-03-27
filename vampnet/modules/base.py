@@ -103,8 +103,7 @@ class VampBase(at.ml.BaseModel):
         # add the external mask if we were given one
         if ext_mask is not None:
             assert ext_mask.ndim == 3, "mask must be (batch, n_codebooks, seq)"
-            assert ext_mask.shape == x.shape, "mask must be same shape as x"
-            mask = (mask + ext_mask).bool().long()
+            mask = (mask * ext_mask).bool().long()
 
         x = x * (1 - mask) + random_x * mask
         return x, mask

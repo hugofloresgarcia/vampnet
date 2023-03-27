@@ -2,7 +2,8 @@ argbind>=0.3.1
 pytorch-ignite
 rich
 audiotools @ git+https://github.com/descriptinc/lyrebird-audiotools.git@hf/backup-info
-lac @ git+https://github.com/descriptinc/lyrebird-audio-codec.git@main
+lac @ git+https://github.com/descriptinc/lyrebird-audio-codec.git@hf/vampnet-temp
+wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat.git
 tqdm
 tensorboard
 google-cloud-logging==2.2.0

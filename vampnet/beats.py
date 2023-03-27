@@ -200,13 +200,10 @@ class BeatTracker:
 
 
 class WaveBeat(BeatTracker):
-    def __init__(self, ckpt_dir: str = "checkpoints/wavebeat", device: str = "cpu"):
+    def __init__(self, ckpt_path: str = "checkpoints/wavebeat", device: str = "cpu"):
         from wavebeat.dstcn import dsTCNModel
 
-        ckpts = list((ckpt_dir).glob("*.ckpt"))
-        assert len(ckpts) > 0, f"no checkpoints found for wavebeat in  {ckpt_dir}"
-
-        model = dsTCNModel.load_from_checkpoint(ckpts[-1])
+        model = dsTCNModel.load_from_checkpoint(ckpt_path)
         model.eval()
 
         self.device = device
