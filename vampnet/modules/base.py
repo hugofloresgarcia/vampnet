@@ -31,11 +31,6 @@ class VampBase(at.ml.BaseModel):
     def forward(self, x: torch.Tensor, r: torch.Tensor):
         raise NotImplementedError
 
-    # TODO: add a beat tracking method
-    # that uses a beat tracking model to find beat positions
-    # and then unmask the codes in those poisitions (with some width)
-    # and drop them out with some randomness 
-    # and have the option to DONT drop out downbeats for 
     def add_noise(
         self,
         x: torch.Tensor,
