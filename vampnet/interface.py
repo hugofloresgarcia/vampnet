@@ -3,12 +3,13 @@ from pathlib import Path
 import math
 
 import torch
+import numpy as np
 from audiotools import AudioSignal
 import tqdm
 
 from .modules.transformer import VampNet
+from .beats import WaveBeat
 from lac.model.lac import LAC
-
 
 
 def signal_concat(
@@ -50,7 +51,10 @@ class Interface:
 
     def s2t(self, seconds: float):
         """seconds to tokens"""
-        return math.ceil(seconds * self.codec.sample_rate / self.codec.hop_length)
+        if isinstance(seconds, np.ndarray):
+            return np.ceil(seconds * self.codec.sample_rate / self.codec.hop_length)
+        else:
+            return math.ceil(seconds * self.codec.sample_rate / self.codec.hop_length)
 
     def s2t2s(self, seconds: float):
         """seconds to tokens to seconds"""
@@ -83,12 +87,85 @@ class Interface:
             .ensure_max_of_audio(1.0)
         )
         return signal
+    
     @torch.inference_mode()
     def encode(self, signal: AudioSignal):
         signal = self.preprocess(signal).to(self.device)
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
 
+    def make_beat_mask(self, 
+            signal: AudioSignal, 
+            before_beat_s: float = 0.1,
+            after_beat_s: float = 0.1,
+            mask_downbeats: bool = True,
+            mask_upbeats: bool = True,
+            downbeat_downsample_factor: int = None,
+            beat_downsample_factor: int = None,
+            dropout: float = 0.7,
+            invert: bool = True,
+    ):
+        """make a beat synced mask. that is, make a mask that 
+        places 1s at and around the beat, and 0s everywhere else. 
+        """
+        assert hasattr(self, "beat_tracker"), "No beat tracker loaded"
+
+        # get the beat times
+        beats, downbeats = self.beat_tracker.extract_beats(signal)
+
+        # get the beat indices in z
+        beats_z, downbeats_z = self.s2t(beats), self.s2t(downbeats)
+
+        # remove downbeats from beats
+        beats_z = torch.tensor(beats_z)[~torch.isin(torch.tensor(beats_z), torch.tensor(downbeats_z))]
+        beats_z = beats_z.tolist()
+        downbeats_z = downbeats_z.tolist()
+
+        # make the mask 
+        seq_len = self.s2t(signal.duration)
+        mask = torch.zeros(seq_len, device=self.device)
+        
+        mask_b4 = self.s2t(before_beat_s)
+        mask_after = self.s2t(after_beat_s)
+
+        if beat_downsample_factor is not None:
+            if beat_downsample_factor < 1:
+                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
+        else:
+            beat_downsample_factor = 1
+
+        if downbeat_downsample_factor is not None:
+            if downbeat_downsample_factor < 1:
+                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
+        else:
+            downbeat_downsample_factor = 1
+
+        beats_z = beats_z[::beat_downsample_factor]
+        downbeats_z = downbeats_z[::downbeat_downsample_factor]
+    
+        if mask_upbeats:
+            for beat_idx in beats_z:
+                _slice = int(beat_idx - mask_b4), int(beat_idx + mask_after)
+                num_steps = mask[_slice[0]:_slice[1]].shape[0]
+                _m = torch.ones(num_steps, device=self.device)
+                _m = torch.nn.functional.dropout(_m, p=dropout)
+                
+                mask[_slice[0]:_slice[1]] = _m
+
+        if mask_downbeats:
+            for downbeat_idx in downbeats_z:
+                _slice = int(downbeat_idx - mask_b4), int(downbeat_idx + mask_after)
+                num_steps = mask[_slice[0]:_slice[1]].shape[0]
+                _m = torch.ones(num_steps, device=self.device)
+                _m = torch.nn.functional.dropout(_m, p=dropout)
+                
+                mask[_slice[0]:_slice[1]] = _m
+        
+        if invert:
+            mask = 1 - mask
+        
+        return mask[None, None, :].bool().long()
+        
     def coarse_to_fine(
         self, 
         coarse_z: torch.Tensor,
@@ -231,7 +308,9 @@ class Interface:
         downsample_factor: int = None,
         intensity: float = 1.0, 
         debug=False,
-        swap_prefix_suffix=False,
+        swap_prefix_suffix=False, 
+        ext_mask=None,
+        verbose=False,
         **kwargs
     ):
         z = self.encode(signal)
@@ -258,14 +337,16 @@ class Interface:
 
         _cz = cz.clone()
         cz_mask = None
-        for _ in range(num_vamps):
+        range_fn = tqdm.trange if verbose else range
+        for _ in range_fn(num_vamps):
             # add noise
             cz_masked, cz_mask = self.coarse.add_noise(
                 _cz, r=1.0-intensity,
                 n_prefix=n_prefix,
                 n_suffix=n_suffix, 
                 downsample_factor=downsample_factor,
-                mask=cz_mask
+                mask=cz_mask, 
+                ext_mask=ext_mask
             )
             if debug:
                 print("tokens to infer")
@@ -366,8 +447,9 @@ class Interface:
     def variation(
         self, 
         signal: AudioSignal, 
-        overlap_hop_ratio: float = 1.0, # TODO: should this be fixed to 1.0?  or should we overlap and replace instead of overlap add
         verbose: bool = False,
+        beat_mask: bool = False,
+        beat_mask_kwargs: dict = {}, 
         **kwargs
     ):
         signal = signal.clone()
@@ -380,6 +462,9 @@ class Interface:
             math.ceil(signal.duration / self.coarse.chunk_size_s) 
             * self.coarse.chunk_size_s
         )
+        # eventually we DO want overlap, but we want overlap-replace not
+        # overlap-add
+        overlap_hop_ratio = 1.0
         hop_duration = self.coarse.chunk_size_s * overlap_hop_ratio
         original_length = signal.length
 
@@ -398,10 +483,18 @@ class Interface:
                 signal.samples[i,...], signal.sample_rate
             )
             sig.to(self.device)
+
+            if beat_mask:
+                ext_mask = self.make_beat_mask(sig, **beat_mask_kwargs)
+            else:
+                ext_mask = None
+            
             out_z = self.coarse_vamp_v2(
                 sig, 
                 num_vamps=1, 
                 swap_prefix_suffix=False, 
+                ext_mask=ext_mask,
+                verbose=verbose,
                 **kwargs
             )
             if self.c2f is not None:
@@ -414,7 +507,6 @@ class Interface:
 
         output.truncate_samples(original_length)
         return output
-
 
     # create a loop of a single region with variations
     # TODO: this would work nicer if we could trim at the beat
