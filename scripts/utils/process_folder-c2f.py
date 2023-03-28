@@ -6,6 +6,8 @@ import argbind
 from tqdm import tqdm
 import random
 
+from typing import List
+
 from collections import defaultdict
 
 def coarse2fine_infer(
@@ -15,14 +17,15 @@ def coarse2fine_infer(
         device,
         signal_window=3, 
         signal_hop=1.5,
-        max_excerpts=25, 
+        max_excerpts=20, 
     ):
     output = defaultdict(list)
 
     # split into 3 seconds
     windows = [s for s in signal.clone().windows(signal_window, signal_hop)]
+    windows = windows[1:] # skip first window since it's half zero padded
     random.shuffle(windows)
-    for w in windows[1:max_excerpts]: # skip the first window since it's mostly zero padded? 
+    for w in windows[:max_excerpts]: 
         # batch the signal into chunks of 3
         with torch.no_grad():
             # get codes
@@ -68,20 +71,21 @@ def coarse2fine_infer(
 @argbind.bind(without_prefix=True)
 def main(
         sources=[
-            "/home/hugo/data/spotdl/audio/val", "/home/hugo/data/spotdl/audio/test"
+            "/data/spotdl/audio/val", "/data/spotdl/audio/test"
         ], 
         audio_ext="mp3",
         exp_name="noise_mode",
         model_paths=[
-            "ckpt/mask/best/vampnet/weights.pth",
-            "ckpt/random/best/vampnet/weights.pth",
+            "runs/c2f-exp-03.22.23/ckpt/mask/best/vampnet/weights.pth",
+            "runs/c2f-exp-03.22.23/ckpt/random/best/vampnet/weights.pth",
         ],
         model_keys=[
-            "noise_mode=mask",
-            "noise_mode=random",
+            "mask",
+            "random",
         ],
-        vqvae_path="ckpt/wav2wav.pth",
-        device="cuda",
+        vqvae_path: str = "runs/codec-ckpt/codec.pth",
+        device: str = "cuda",
+        output_dir: str = ".",
     ):
     from vampnet.modules.transformer import VampNet
     from lac.model.lac import LAC
@@ -99,20 +103,28 @@ def main(
     vqvae.eval()
     print("Loaded VQVAE.")
 
-    audio_dict = defaultdict(list)
+    output_dir = Path(output_dir) / f"{exp_name}-samples"
+
     for source in sources:
         print(f"Processing {source}...")
-        for path in tqdm(list(Path(source).glob(f"**/*.{audio_ext}"))):
+        source_files = list(Path(source).glob(f"**/*.{audio_ext}"))
+        random.shuffle(source_files)
+        for path in tqdm(source_files):
             sig = AudioSignal(path)
             sig.resample(vqvae.sample_rate).normalize(-24).ensure_max_of_audio(1.0)
 
+            out_dir = output_dir / path.stem 
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if out_dir.exists():
+                print(f"Skipping {path.stem} since {out_dir} already exists.")
+                continue
+
             for model_key, model in models.items():
                 out = coarse2fine_infer(sig, model, vqvae, device)
-                for k in out:
-                    audio_dict[f"{model_key}-{k}"].extend(out[k])
-
-    audio_zip(audio_dict, f"{exp_name}-results.zip")
-    
+                for k, sig_list in out.items():
+                    for i, s in enumerate(sig_list):
+                        s.write(out_dir / f"{model_key}-{k}-{i}.wav")
+            
 
 if __name__ == "__main__":
     args = argbind.parse_args()

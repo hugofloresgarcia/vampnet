@@ -545,6 +545,30 @@ def train(
                     plot_fn=None,
                 )
 
+                # sample in 1 step (only for coarse2fine models)
+                if accel.unwrap(model).n_conditioning_codebooks > 0:
+                    sampled_argmax = accel.unwrap(model).sample(
+                        codec=codec,
+                        time_steps=z.shape[-1],
+                        start_tokens=z[i : i + 1],
+                        sample="argmax", 
+                        sampling_steps=1,
+                    )
+                    sampled_argmax.cpu().write_audio_to_tb(
+                        f"sampled_1step-argmax/{i}",
+                        self.writer,
+                        step=self.state.epoch,
+                        plot_fn=None,
+                    )
+                    conditioning = z[i:i+1, : accel.unwrap(model).n_conditioning_codebooks, :]
+                    conditioning = accel.unwrap(model).to_signal(conditioning, codec)
+                    conditioning.cpu().write_audio_to_tb(
+                        f"conditioning/{i}",
+                        self.writer,
+                        step=self.state.epoch,
+                        plot_fn=None,
+                    )
+
         def save_imputation(self, z: torch.Tensor):
             # imputations
             _prefix_amt = prefix_amt
