@@ -13,6 +13,7 @@ RUN pip install --upgrade -r requirements.txt
 RUN pip install --upgrade tensorflow
 RUN pip install --upgrade librosa
 RUN pip install --upgrade numba
+RUN pip install protobuf==3.20
 ENV PYTHONPATH "$PYTHONPATH:/u/home/src"
 ENV NUMBA_CACHE_DIR=/tmp/
 

@@ -1,5 +1,5 @@
 
-codec_ckpt: /u/home/src/runs/codec-ckpt/codec.pth
+codec_ckpt: /u/home/src/runs/codec-ckpt/lac-768x.pth
 save_path: ckpt
 max_epochs: 1000
 epoch_length: 1000
@@ -26,11 +26,12 @@ NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 10000
 
 VampNet.vocab_size: 1024
-VampNet.n_codebooks: 3
+VampNet.n_codebooks: 4
 VampNet.n_conditioning_codebooks: 0
-VampNet.r_cond_dim: 64
+VampNet.r_cond_dim: 0
+VampNet.noise_mode: mask
 VampNet.embedding_dim: 1280
-VampNet.n_layers: 16
+VampNet.n_layers: 20
 VampNet.n_heads: 20
 VampNet.flash_attn: false
 VampNet.dropout: 0.05
@@ -40,17 +41,16 @@ AudioDataset.loudness_cutoff: -30.0
 AudioDataset.without_replacement: true
 AudioLoader.shuffle: true
 
-train/AudioDataset.duration: 5.0
+AudioDataset.duration: 10.0
+
 train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:
   - /data/spotdl/audio/train
 
-val/AudioDataset.duration: 5.0
 val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
   - /data/spotdl/audio/val
 
-test/AudioDataset.duration: 5.0
 test/AudioDataset.n_examples: 1000
 test/AudioLoader.sources:
   - /data/spotdl/audio/test
