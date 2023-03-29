@@ -413,8 +413,6 @@ def train(
             output["other/learning_rate"] = optimizer.param_groups[0]["lr"]
             output["other/batch_size"] = z.shape[0]
 
-            output.update(get_gpu_memory_map())
-
             if (
                 (engine.state.iteration % grad_acc_steps == 0)
                 or (engine.state.iteration % epoch_length == 0)
