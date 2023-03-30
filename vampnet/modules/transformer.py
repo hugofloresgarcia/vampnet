@@ -445,6 +445,7 @@ class VampNet(VampBase):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",
+        dropout: float = 0.1
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -485,7 +486,7 @@ class VampNet(VampBase):
             bidirectional=True,
             flash_attn=flash_attn,
             is_decoder=False,
-            dropout=0.1,
+            dropout=dropout,
         )
 
         # Add final conv layer

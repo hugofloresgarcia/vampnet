@@ -34,7 +34,7 @@ VampNet.embedding_dim: 1280
 VampNet.n_layers: 20
 VampNet.n_heads: 20
 VampNet.flash_attn: false
-VampNet.dropout: 0.05
+VampNet.dropout: 0.1
 
 AudioLoader.relative_path: /data/
 AudioDataset.loudness_cutoff: -30.0

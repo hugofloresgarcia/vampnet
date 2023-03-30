@@ -1,0 +1,54 @@
+$include:
+  - conf/vampnet.yml
+
+VampNet.embedding_dim: 512
+VampNet.n_layers: 12
+VampNet.n_heads: 8
+
+AudioDataset.duration: 12.0
+
+train/AudioDataset.n_examples: 10000000
+train/AudioLoader.sources:
+  # drummer 1 sessions 1, 2, and 3
+  - /data/e-gmd-v1.0.0/drummer1/session1
+  - /data/e-gmd-v1.0.0/drummer1/session2
+  - /data/e-gmd-v1.0.0/drummer1/session3
+  # drummer 3 sessions 1 and 2
+  - /data/e-gmd-v1.0.0/drummer3/session1
+  - /data/e-gmd-v1.0.0/drummer3/session2
+  # drummer 4 session 1
+  - /data/e-gmd-v1.0.0/drummer4/session1
+  # drummer 5 sessions 1 and 2
+  - /data/e-gmd-v1.0.0/drummer5/session1
+  - /data/e-gmd-v1.0.0/drummer5/session2
+  # drummer 6 session 1, 2, and 3
+  - /data/e-gmd-v1.0.0/drummer6/session1
+  - /data/e-gmd-v1.0.0/drummer6/session2
+  - /data/e-gmd-v1.0.0/drummer6/session3
+  # drummer 7 session 1, 2 and 3
+  - /data/e-gmd-v1.0.0/drummer7/session1
+  - /data/e-gmd-v1.0.0/drummer7/session2
+  - /data/e-gmd-v1.0.0/drummer7/session3
+  # drummer 8 session 1
+  - /data/e-gmd-v1.0.0/drummer8/session1
+  # drummer 9 session 1
+  - /data/e-gmd-v1.0.0/drummer9/session1
+  # drummer 10 session 1
+  - /data/e-gmd-v1.0.0/drummer10/session1
+
+
+val/AudioDataset.n_examples: 500
+val/AudioLoader.sources:
+  # drummer 1 eval session
+  - /data/e-gmd-v1.0.0/drummer1/eval_session
+  # drummer 5 eval session
+  - /data/e-gmd-v1.0.0/drummer5/eval_session
+  # drummer 7 eval session
+  - /data/e-gmd-v1.0.0/drummer7/eval_session
+
+
+
+test/AudioDataset.n_examples: 1000
+test/AudioLoader.sources:
+    # drummer 8 eval session
+  - /data/e-gmd-v1.0.0/drummer8/eval_session
