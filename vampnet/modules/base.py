@@ -294,7 +294,7 @@ class VampBase(at.ml.BaseModel):
         temperature: Union[float, Tuple[float, float]] = 0.8,
         top_k: int = None,
         sample: str = "gumbel",
-        typical_filtering=False,
+        typical_filtering=True,
         typical_mass=0.2,
         typical_min_tokens=1,
         return_signal=True,
