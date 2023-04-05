@@ -196,6 +196,7 @@ class Interface:
                 time_steps=chunk_len,
                 start_tokens=chunk,
                 return_signal=False,
+                **kwargs
             )
             fine_z.append(chunk)
 
