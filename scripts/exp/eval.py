@@ -13,7 +13,7 @@ from audiotools import AudioSignal
 @argbind.bind(without_prefix=True)
 def eval(
     exp_dir: str = None,
-    baseline_key: str = "reconstructed", 
+    baseline_key: str = "baseline", 
     audio_ext: str = ".wav",
 ):
     assert exp_dir is not None
@@ -27,7 +27,7 @@ def eval(
     frechet = FrechetAudioDistance(
         use_pca=False, 
         use_activation=False,
-        verbose=False
+        verbose=True
     )
     visqol = partial(audiotools.metrics.quality.visqol, mode="audio")
 
@@ -48,7 +48,7 @@ def eval(
         cond_dir = exp_dir / condition
         cond_files = list(cond_dir.glob(f"*{audio_ext}"))
 
-        print(f"computing fad")
+        print(f"computing fad for {baseline_dir} and {cond_dir}")
         frechet_score = frechet.score(baseline_dir, cond_dir)
 
         # make sure we have the same number of files

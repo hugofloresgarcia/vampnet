@@ -1,0 +1,5 @@
+Interface.coarse_ckpt: /runs/c2f-exp-03.22.23/ckpt/mask/epoch=400/vampnet/weights.pth
+Interface.coarse2fine_ckpt: runs/c2f-exp-03.22.23/ckpt/mask/epoch=400/vampnet/weights.pth
+Interface.codec_ckpt: /runs/codec-ckpt/codec.pth
+Interface.coarse_chunk_size_s: 5
+Interface.coarse2fine_chunk_size_s: 3
