@@ -9,6 +9,8 @@ COPY env/entry_script.sh /entry_script.sh
 RUN cat /alias.sh >> ~/.zshrc
 
 # USER researcher
+RUN pip install Cython
+RUN pip install madmom
 RUN pip install --upgrade -r requirements.txt
 RUN pip install --upgrade tensorflow
 RUN pip install --upgrade librosa
