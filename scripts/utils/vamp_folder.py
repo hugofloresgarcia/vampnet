@@ -20,7 +20,7 @@ def condition(cond):
 
 @condition
 def baseline(sig, interface):
-    return sig
+    return interface.preprocess(sig)
 
 @condition
 def reconstructed(sig, interface):

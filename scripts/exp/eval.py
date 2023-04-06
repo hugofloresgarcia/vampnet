@@ -41,17 +41,20 @@ def eval(
     print(f"conditions: {conditions}")
 
     baseline_dir = exp_dir / baseline_key 
-    baseline_files = list(baseline_dir.glob(f"*{audio_ext}"))
+    baseline_files = sorted(list(baseline_dir.glob(f"*{audio_ext}")), key=lambda x: int(x.stem))
 
     metrics = []
     for condition in conditions:
         cond_dir = exp_dir / condition
-        cond_files = list(cond_dir.glob(f"*{audio_ext}"))
+        cond_files = sorted(list(cond_dir.glob(f"*{audio_ext}")), key=lambda x: int(x.stem))
 
         print(f"computing fad for {baseline_dir} and {cond_dir}")
         frechet_score = frechet.score(baseline_dir, cond_dir)
 
         # make sure we have the same number of files
+        num_files = min(len(baseline_files), len(cond_files))
+        baseline_files = baseline_files[:num_files]
+        cond_files = cond_files[:num_files]
         assert len(list(baseline_files)) == len(list(cond_files)), f"number of files in {baseline_dir} and {cond_dir} do not match. {len(list(baseline_files))} vs {len(list(cond_files))}"
 
         pbar = tqdm(zip(baseline_files, cond_files), total=len(baseline_files))
