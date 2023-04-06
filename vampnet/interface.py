@@ -48,6 +48,8 @@ class Interface:
             self.c2f.to(device)
             self.c2f.eval()
             self.c2f.chunk_size_s = self.s2t2s(coarse2fine_chunk_size_s)
+        else:
+            self.c2f = None
 
         self.device = device
 
