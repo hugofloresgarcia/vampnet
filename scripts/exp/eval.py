@@ -73,7 +73,7 @@ def eval(
             except:
                 vsq = 0.0
             metrics.append({
-                "sisdr": sisdr_loss(baseline_sig, cond_sig).item(),
+                "sisdr": -sisdr_loss(baseline_sig, cond_sig).item(),
                 "stft": stft_loss(baseline_sig, cond_sig).item(),
                 "mel": mel_loss(baseline_sig, cond_sig).item(),
                 "frechet": frechet_score,
