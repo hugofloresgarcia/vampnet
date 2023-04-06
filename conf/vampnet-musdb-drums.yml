@@ -1,0 +1,29 @@
+$include:
+  - conf/vampnet.yml
+
+VampNet.embedding_dim: 512
+VampNet.n_layers: 12
+VampNet.n_heads: 8
+
+AudioDataset.duration: 12.0
+
+train/AudioDataset.n_examples: 10000000
+train/AudioLoader.sources:
+  - /data/musdb18hq/train/**/drums.wav
+
+
+val/AudioDataset.n_examples: 500
+val/AudioLoader.sources:
+  # drummer 1 eval session
+  - /data/e-gmd-v1.0.0/drummer1/eval_session
+  # drummer 5 eval session
+  - /data/e-gmd-v1.0.0/drummer5/eval_session
+  # drummer 7 eval session
+  - /data/e-gmd-v1.0.0/drummer7/eval_session
+
+
+
+test/AudioDataset.n_examples: 1000
+test/AudioLoader.sources:
+    # drummer 8 eval session
+  - /data/e-gmd-v1.0.0/drummer8/eval_session
