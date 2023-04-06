@@ -1,4 +1,4 @@
-FROM us.gcr.io/lyrebird-research/research-image/audio:beta
+FROM us.gcr.io/lyrebird-research/research-image/audio
 
 COPY requirements.txt requirements.txt
 ARG GITHUB_TOKEN
