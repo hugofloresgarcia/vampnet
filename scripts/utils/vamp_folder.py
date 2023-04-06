@@ -6,7 +6,7 @@ import torch
 
 from vampnet.interface import Interface
 
-Interface = argbind.bind(Interface, positional=True)
+Interface = argbind.bind(Interface)
 
 def baseline(sig, interface):
     return sig
@@ -26,7 +26,9 @@ def coarse2fine(sig, interface):
 def one_codebook(sig, interface):
     z = interface.encode(sig)
 
-    mask = torch.zeros_like(z)
+    nb, _, nt = z.shape 
+    nc = interface.coarse.n_codebooks
+    mask = torch.zeros(nb, nc, nt).to(interface.device)
     mask[:, 1:, :] = 1
 
     zv = interface.coarse_vamp_v2(
@@ -46,7 +48,9 @@ def four_codebooks_downsampled_4x(sig, interface):
 def two_codebooks_downsampled_4x(sig, interface):
     z = interface.encode(sig)
 
-    mask = torch.zeros_like(z)
+    nb, _, nt = z.shape 
+    nc = interface.coarse.n_codebooks
+    mask = torch.zeros(nb, nc, nt).to(interface.device)
     mask[:, 2:, :] = 1
 
     zv = interface.coarse_vamp_v2(
@@ -62,9 +66,6 @@ def four_codebooks_downsampled_8x(sig, interface):
     )
     zv = interface.coarse_to_fine(zv)  
     return interface.to_signal(zv)
-
-
-
 
 
 SAMPLE_CONDS ={
@@ -105,15 +106,15 @@ def main(
         sig = dataset[i]["signal"]
         
         results = {
-            name: cond(sig, interface)
+            name: cond(sig, interface).cpu()
             for name, cond in SAMPLE_CONDS.items()
         }
 
         for name, sig in results.items():
-            output_dir = Path(output_dir) / name
-            output_dir.mkdir(exist_ok=True, parents=True)
+            o_dir = Path(output_dir) / name
+            o_dir.mkdir(exist_ok=True, parents=True)
 
-            sig.write(output_dir / f"{i}.wav")
+            sig.write(o_dir / f"{i}.wav")
 
 if __name__ == "__main__":
     args = argbind.parse_args()

@@ -23,17 +23,19 @@ def signal_concat(
 class Interface:
     def __init__(
         self,
-        coarse_ckpt: str,
-        coarse2fine_ckpt: str,
-        codec_ckpt: str,
+        coarse_ckpt: str = None,
+        coarse2fine_ckpt: str = None,
+        codec_ckpt: str = None,
         device: str = "cpu",
         coarse_chunk_size_s: int =  5, 
         coarse2fine_chunk_size_s: int =  3,
     ):
+        assert codec_ckpt is not None, "must provide a codec checkpoint"
         self.codec = LAC.load(Path(codec_ckpt))
         self.codec.eval()
         self.codec.to(device)
 
+        assert coarse_ckpt is not None, "must provide a coarse checkpoint"
         self.coarse = VampNet.load(location=Path(coarse_ckpt), map_location="cpu")
         self.coarse.to(device)
         self.coarse.eval()
