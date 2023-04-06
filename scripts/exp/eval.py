@@ -59,12 +59,13 @@ def eval(
 
         pbar = tqdm(zip(baseline_files, cond_files), total=len(baseline_files))
         for baseline_file, cond_file in pbar:
+            # make sure the files match (same name)
             assert baseline_file.stem == cond_file.stem, f"baseline file {baseline_file} and cond file {cond_file} do not match"
             pbar.set_description(baseline_file.stem)
 
             # load the files
-            baseline_sig = AudioSignal(baseline_file)
-            cond_sig = AudioSignal(cond_file)
+            baseline_sig = AudioSignal(str(baseline_file))
+            cond_sig = AudioSignal(str(cond_file))
 
             # compute the metrics
             try:
@@ -72,9 +73,9 @@ def eval(
             except:
                 vsq = 0.0
             metrics.append({
-                "sisdr": sisdr_loss(baseline_sig, cond_sig),
-                "stft": stft_loss(baseline_sig, cond_sig),
-                "mel": mel_loss(baseline_sig, cond_sig),
+                "sisdr": sisdr_loss(baseline_sig, cond_sig).item(),
+                "stft": stft_loss(baseline_sig, cond_sig).item(),
+                "mel": mel_loss(baseline_sig, cond_sig).item(),
                 "frechet": frechet_score,
                 "visqol": vsq,
                 "condition": condition,
