@@ -65,6 +65,9 @@ def eval(
             baseline_sig = AudioSignal(str(baseline_file))
             cond_sig = AudioSignal(str(cond_file))
 
+            cond_sig.resample(baseline_sig.sample_rate)
+            cond_sig.truncate_samples(baseline_sig.length)
+
             # compute the metrics
             # try:
             #     vsq = visqol(baseline_sig, cond_sig)

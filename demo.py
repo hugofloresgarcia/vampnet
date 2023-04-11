@@ -48,21 +48,64 @@ def load_random_audio():
     sr = sig.sample_rate
     return sr, audio.T
 
-def mask_audio(
-        prefix_s, suffix_s, rand_mask_intensity, 
-        mask_periodic_amt, beat_unmask_dur, 
-        mask_dwn_chk, dwn_factor, 
-        mask_up_chk, up_factor
-    ):
-    pass
 
 def vamp(
     input_audio, prefix_s, suffix_s, rand_mask_intensity,
     mask_periodic_amt, beat_unmask_dur,
     mask_dwn_chk, dwn_factor,
-    mask_up_chk, up_factor
+    mask_up_chk, up_factor, 
+    num_vamps, mode
 ):
-    print(input_audio)
+    try:
+        print(input_audio)
+
+        sig = at.AudioSignal(
+            input_audio[1], 
+            sample_rate=input_audio[0]
+        )
+        
+        if beat_unmask_dur > 0.0:
+            beat_mask = interface.make_beat_mask(
+                sig, 
+                before_beat_s=0.01,
+                after_beat_s=beat_unmask_dur,
+                mask_downbeats=mask_dwn_chk,
+                mask_upbeats=mask_up_chk,
+                downbeat_downsample_factor=dwn_factor, 
+                beat_downsample_factor=up_factor,
+                dropout=0.7, 
+                invert=True
+            )
+        else:
+            beat_mask = None
+
+        if mode == "standard": 
+            zv = interface.coarse_vamp_v2(
+                sig, 
+                prefix_dur_s=prefix_s,
+                suffix_dur_s=suffix_s,
+                num_vamps=num_vamps,
+                downsample_factor=mask_periodic_amt,
+                intensity=rand_mask_intensity,
+                ext_mask=beat_mask
+            )
+        elif mode == "loop":
+            zv = interface.loop(
+                zv, 
+                prefix_dur_s=prefix_s, 
+                suffix_dur_s=suffix_s, 
+                num_loops=num_vamps,
+                downsample_factor=mask_periodic_amt,
+                intensity=rand_mask_intensity,
+                ext_mask=beat_mask
+            )
+
+        zv = interface.coarse_to_fine(zv)
+        sig = interface.to_signal(zv)
+        return sig.sample_rate, sig.samples[0].T
+    except Exception as e:
+        raise gr.Error(f"failed with error: {e}")
+        
 
 
 with gr.Blocks() as demo:
@@ -180,6 +223,17 @@ with gr.Blocks() as demo:
     # process and output
     with gr.Row():
         with gr.Column():
+            gr.Markdown("**NOTE**: for loop mode, both prefix and suffix must be greater than 0.")
+            mode = gr.Radio(
+                label="mode",
+                choices=["standard", "loop"],
+                value="standard"
+            )
+            num_vamps = gr.Number(
+                label="number of vamps",
+                value=1,
+                precision=0
+            )
             vamp_button = gr.Button("vamp")
 
             output_audio = gr.Audio(
@@ -187,22 +241,6 @@ with gr.Blocks() as demo:
                 interactive=False,
                 visible=False
             )
-            output_audio_viz = gr.Video(
-                label="output audio",
-                interactive=False
-            )
-
-    # connect widgets
-    compute_mask_button.click(
-        fn=mask_audio,
-        inputs=[
-            prefix_s, suffix_s, rand_mask_intensity, 
-            mask_periodic_amt, beat_unmask_dur, 
-            mask_dwn_chk, dwn_factor, 
-            mask_up_chk, up_factor
-        ],
-        outputs=[mask_output, mask_output_viz]
-    )
 
     # connect widgets
     vamp_button.click(
@@ -211,10 +249,11 @@ with gr.Blocks() as demo:
             prefix_s, suffix_s, rand_mask_intensity, 
             mask_periodic_amt, beat_unmask_dur, 
             mask_dwn_chk, dwn_factor, 
-            mask_up_chk, up_factor
+            mask_up_chk, up_factor, 
+            num_vamps, mode
         ],
-        outputs=[output_audio, output_audio_viz]
+        outputs=[output_audio]
     )
 
 
-demo.launch(share=True)
+demo.launch(share=True, server_name="0.0.0.0")

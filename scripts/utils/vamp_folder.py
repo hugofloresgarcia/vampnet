@@ -1,6 +1,8 @@
 from pathlib import Path
 import random
 from typing import List
+import tempfile
+import subprocess
 
 import argbind
 from tqdm import tqdm
@@ -9,28 +11,26 @@ import argbind
 from vampnet.interface import Interface
 import audiotools as at
 
-Interface = argbind.bind(Interface)
+Interface: Interface = argbind.bind(Interface)
 
-# condition wrapper for printing
-def condition(cond):
-    def wrapper(sig, interface):
-        # print(f"Condition: {cond.__name__}")
-        sig = cond(sig, interface)
-        # print(f"Condition: {cond.__name__} (done)\n")
-        return sig
-    return wrapper
+def calculate_bitrate(
+        interface, num_codebooks, 
+        downsample_factor
+    ):
+    bit_width = 10
+    sr = interface.codec.sample_rate
+    hop = interface.codec.hop_size
+    rate = (sr / hop) * ((bit_width * num_codebooks) / downsample_factor)
+    return rate
 
-@condition
 def baseline(sig, interface):
     return interface.preprocess(sig)
 
-@condition
 def reconstructed(sig, interface):
     return interface.to_signal(
         interface.encode(sig)
     )
 
-@condition
 def coarse2fine(sig, interface):
     z = interface.encode(sig)
     z = z[:, :interface.c2f.n_conditioning_codebooks, :]
@@ -38,7 +38,6 @@ def coarse2fine(sig, interface):
     z = interface.coarse_to_fine(z)
     return interface.to_signal(z)
 
-@condition
 def coarse2fine_argmax(sig, interface):
     z = interface.encode(sig)
     z = z[:, :interface.c2f.n_conditioning_codebooks, :]
@@ -49,46 +48,85 @@ def coarse2fine_argmax(sig, interface):
     )
     return interface.to_signal(z)
 
-@condition
-def one_codebook(sig, interface):
-    zv = interface.coarse_vamp_v2(
-        sig, n_conditioning_codebooks=1
-    )
-    zv = interface.coarse_to_fine(zv)  
 
-    return interface.to_signal(zv)
+class CoarseCond:
 
-@condition
-def two_codebooks_downsampled_4x(sig, interface):
-    zv = interface.coarse_vamp_v2(
-        sig, n_conditioning_codebooks=2,
-        downsample_factor=4
-    )
-    zv = interface.coarse_to_fine(zv)
+    def __init__(self, num_codebooks, downsample_factor):
+        self.num_codebooks = num_codebooks
+        self.downsample_factor = downsample_factor
 
-    return interface.to_signal(zv)
+    def __call__(self, sig, interface):
+        n_conditioning_codebooks = interface.coarse.n_codebooks - self.num_codebooks
+        zv = interface.coarse_vamp_v2(sig, 
+            n_conditioning_codebooks=n_conditioning_codebooks,
+            downsample_factor=self.downsample_factor
+        )
+
+        zv = interface.coarse_to_fine(zv)
+        return interface.to_signal(zv)
 
 
-def four_codebooks_downsampled(sig, interface, x=12):
-    zv = interface.coarse_vamp_v2(
-        sig, downsample_factor=12
-    )
-    zv = interface.coarse_to_fine(zv)  
-    return interface.to_signal(zv)
+def opus(sig, interface, bitrate=128):
+    sig = interface.preprocess(sig)
+    
+    with tempfile.NamedTemporaryFile(suffix=".wav") as f:
+        sig.write(f.name)
+
+        opus_name = Path(f.name).with_suffix(".opus")
+        # convert to opus
+        cmd = [
+            "ffmpeg", "-y", "-i", f.name, 
+            "-c:a", "libopus", 
+            "-b:a", f"{bitrate}", 
+           opus_name
+        ]
+        subprocess.run(cmd, check=True)
+
+        # convert back to wav
+        output_name = Path(f"{f.name}-opus").with_suffix(".wav")
+        cmd = [
+            "ffmpeg", "-y", "-i", opus_name, 
+            output_name
+        ]
+
+        subprocess.run(cmd, check=True)
+
+        sig = at.AudioSignal(
+            output_name, 
+            sample_rate=sig.sample_rate
+        )
+    return sig
 
 
 COARSE_SAMPLE_CONDS ={
     "baseline": baseline,
     "reconstructed": reconstructed,
     "coarse2fine": coarse2fine,
-    "one_codebook": one_codebook,
-    "two_codebooks_downsampled_4x": two_codebooks_downsampled_4x,
-    # four codebooks at different downsample factors
     **{
-        f"four_codebooks_downsampled_{x}x": lambda sig, interface: four_codebooks_downsampled(sig, interface, x=x)
-        for x in [4, 8, 12, 16, 20, 24]
-    }
+        f"{n}_codebooks_downsampled_{x}x": CoarseCond(num_codebooks=n, downsample_factor=x)
+            for (n, x) in (
+                (4, 2), # 4 codebooks, downsampled 2x, 
+                (2, 2), # 2 codebooks, downsampled 2x
+                (1, None), # 1 codebook, no downsampling
+                (4, 4), # 4 codebooks, downsampled 4x
+                (1, 2), # 1 codebook, downsampled 2x, 
+                (4, 6), # 4 codebooks, downsampled 6x
+                (4, 8), # 4 codebooks, downsampled 8x
+                (4, 16), # 4 codebooks, downsampled 16x
+                (4, 32), # 4 codebooks, downsampled 16x
+            )
+    }, 
 
+}
+
+OPUS_JAZZPOP_SAMPLE_CONDS = {
+    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
+    for bitrate in [5620, 1875, 1250, 625]
+}
+
+OPUS_SPOTDL_SAMPLE_CONDS = {
+    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
+    for bitrate in [8036, 2296, 1148, 574]
 }
 
 C2F_SAMPLE_CONDS = {
@@ -124,7 +162,16 @@ def main(
         without_replacement=True,
     )
 
-    SAMPLE_CONDS = COARSE_SAMPLE_CONDS if exp_type == "coarse" else C2F_SAMPLE_CONDS
+    if exp_type == "opus-jazzpop":
+        SAMPLE_CONDS = OPUS_JAZZPOP_SAMPLE_CONDS
+    elif exp_type == "opus-spotdl":
+        SAMPLE_CONDS = OPUS_SPOTDL_SAMPLE_CONDS
+    elif exp_type == "coarse":
+        SAMPLE_CONDS = COARSE_SAMPLE_CONDS
+    elif exp_type == "c2f":
+        SAMPLE_CONDS = C2F_SAMPLE_CONDS
+    else:
+        raise ValueError(f"Unknown exp_type {exp_type}")
 
 
     indices = list(range(max_excerpts))
@@ -139,7 +186,6 @@ def main(
         #     continue
 
         sig = dataset[i]["signal"]
-        
         results = {
             name: cond(sig, interface).cpu()
             for name, cond in SAMPLE_CONDS.items()
