@@ -315,6 +315,7 @@ class Interface:
         debug=False,
         swap_prefix_suffix=False, 
         ext_mask=None,
+        n_conditioning_codebooks=None,
         verbose=False,
         **kwargs
     ):
@@ -351,7 +352,8 @@ class Interface:
                 n_suffix=n_suffix, 
                 downsample_factor=downsample_factor,
                 mask=cz_mask, 
-                ext_mask=ext_mask
+                ext_mask=ext_mask, 
+                n_conditioning_codebooks=n_conditioning_codebooks
             )
             if debug:
                 print("tokens to infer")

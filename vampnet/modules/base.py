@@ -41,6 +41,7 @@ class VampBase(at.ml.BaseModel):
         n_prefix: Optional[torch.Tensor] = None,
         n_suffix: Optional[torch.Tensor] = None,
         downsample_factor: Optional[int] = None, 
+        n_conditioning_codebooks: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
 
@@ -79,7 +80,8 @@ class VampBase(at.ml.BaseModel):
             mask = mask.round().long()
             
             # if we have any conditioning codebooks, set their mask  to 0
-            mask[:, : self.n_conditioning_codebooks, :] = 0
+            n_conditioning_codebooks = n_conditioning_codebooks or self.n_conditioning_codebooks
+            mask[:, :n_conditioning_codebooks, :] = 0
         else:
             assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq)"
             assert mask.shape == x.shape, "mask must be same shape as x"

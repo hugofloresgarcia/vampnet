@@ -3,3 +3,7 @@ Interface.coarse2fine_ckpt: /runs/jazzpop-c2f.pth
 Interface.codec_ckpt: /runs/codec-ckpt/codec.pth
 Interface.coarse_chunk_size_s: 5
 Interface.coarse2fine_chunk_size_s: 3
+
+AudioLoader.sources:
+  - /data/spotdl/audio/val
+  - /data/spotdl/audio/test

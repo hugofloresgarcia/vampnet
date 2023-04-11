@@ -1,8 +1,10 @@
 from pathlib import Path
+import random
+from typing import List
 
 import argbind
 from tqdm import tqdm
-import torch
+import argbind
 
 from vampnet.interface import Interface
 import audiotools as at
@@ -12,9 +14,9 @@ Interface = argbind.bind(Interface)
 # condition wrapper for printing
 def condition(cond):
     def wrapper(sig, interface):
-        print(f"Condition: {cond.__name__}")
+        # print(f"Condition: {cond.__name__}")
         sig = cond(sig, interface)
-        print(f"Condition: {cond.__name__} (done)\n")
+        # print(f"Condition: {cond.__name__} (done)\n")
         return sig
     return wrapper
 
@@ -49,48 +51,27 @@ def coarse2fine_argmax(sig, interface):
 
 @condition
 def one_codebook(sig, interface):
-    z = interface.encode(sig)
-
-    nb, _, nt = z.shape 
-    nc = interface.coarse.n_codebooks
-    mask = torch.zeros(nb, nc, nt).to(interface.device)
-    mask[:, 1:, :] = 1
-
     zv = interface.coarse_vamp_v2(
-        sig, ext_mask=mask,
+        sig, n_conditioning_codebooks=1
     )
     zv = interface.coarse_to_fine(zv)  
 
-    return interface.to_signal(zv)
-
-@condition
-def four_codebooks_downsampled_4x(sig, interface):
-    zv = interface.coarse_vamp_v2(
-        sig, downsample_factor=4
-    )
-    zv = interface.coarse_to_fine(zv)  
     return interface.to_signal(zv)
 
 @condition
 def two_codebooks_downsampled_4x(sig, interface):
-    z = interface.encode(sig)
-
-    nb, _, nt = z.shape 
-    nc = interface.coarse.n_codebooks
-    mask = torch.zeros(nb, nc, nt).to(interface.device)
-    mask[:, 2:, :] = 1
-
     zv = interface.coarse_vamp_v2(
-        sig, ext_mask=mask, downsample_factor=4
+        sig, n_conditioning_codebooks=2,
+        downsample_factor=4
     )
     zv = interface.coarse_to_fine(zv)
 
     return interface.to_signal(zv)
 
-@condition
-def four_codebooks_downsampled_8x(sig, interface):
+
+def four_codebooks_downsampled(sig, interface, x=12):
     zv = interface.coarse_vamp_v2(
-        sig, downsample_factor=8
+        sig, downsample_factor=12
     )
     zv = interface.coarse_to_fine(zv)  
     return interface.to_signal(zv)
@@ -101,9 +82,13 @@ COARSE_SAMPLE_CONDS ={
     "reconstructed": reconstructed,
     "coarse2fine": coarse2fine,
     "one_codebook": one_codebook,
-    "four_codebooks_downsampled_4x": four_codebooks_downsampled_4x,
     "two_codebooks_downsampled_4x": two_codebooks_downsampled_4x,
-    "four_codebooks_downsampled_8x": four_codebooks_downsampled_8x,
+    # four codebooks at different downsample factors
+    **{
+        f"four_codebooks_downsampled_{x}x": lambda sig, interface: four_codebooks_downsampled(sig, interface, x=x)
+        for x in [4, 8, 12, 16, 20, 24]
+    }
+
 }
 
 C2F_SAMPLE_CONDS = {
@@ -131,7 +116,7 @@ def main(
 
     from audiotools.data.datasets import AudioLoader, AudioDataset
 
-    loader = AudioLoader(sources=sources)
+    loader = AudioLoader(sources=sources, shuffle_state=seed)
     dataset = AudioDataset(loader, 
         sample_rate=interface.codec.sample_rate, 
         duration=interface.coarse.chunk_size_s, 
@@ -141,7 +126,18 @@ def main(
 
     SAMPLE_CONDS = COARSE_SAMPLE_CONDS if exp_type == "coarse" else C2F_SAMPLE_CONDS
 
-    for i in tqdm(range(max_excerpts)):
+
+    indices = list(range(max_excerpts))
+    random.shuffle(indices)
+    for i in tqdm(indices):
+        # if all our files are already there, skip
+        # done = []
+        # for name in SAMPLE_CONDS:
+        #     o_dir = Path(output_dir) / name
+        #     done.append((o_dir / f"{i}.wav").exists())
+        # if all(done):
+        #     continue
+
         sig = dataset[i]["signal"]
         
         results = {

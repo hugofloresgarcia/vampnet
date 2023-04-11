@@ -57,30 +57,31 @@ def eval(
         cond_files = cond_files[:num_files]
         assert len(list(baseline_files)) == len(list(cond_files)), f"number of files in {baseline_dir} and {cond_dir} do not match. {len(list(baseline_files))} vs {len(list(cond_files))}"
 
-        pbar = tqdm(zip(baseline_files, cond_files), total=len(baseline_files))
-        for baseline_file, cond_file in pbar:
+        def process(baseline_file, cond_file):
             # make sure the files match (same name)
             assert baseline_file.stem == cond_file.stem, f"baseline file {baseline_file} and cond file {cond_file} do not match"
-            pbar.set_description(baseline_file.stem)
 
             # load the files
             baseline_sig = AudioSignal(str(baseline_file))
             cond_sig = AudioSignal(str(cond_file))
 
             # compute the metrics
-            try:
-                vsq = visqol(baseline_sig, cond_sig)
-            except:
-                vsq = 0.0
-            metrics.append({
+            # try:
+            #     vsq = visqol(baseline_sig, cond_sig)
+            # except:
+            #     vsq = 0.0
+            return {
                 "sisdr": -sisdr_loss(baseline_sig, cond_sig).item(),
                 "stft": stft_loss(baseline_sig, cond_sig).item(),
                 "mel": mel_loss(baseline_sig, cond_sig).item(),
                 "frechet": frechet_score,
-                "visqol": vsq,
+                # "visqol": vsq,
                 "condition": condition,
                 "file": baseline_file.stem,
-            })
+            }
+
+        print(f"processing {len(baseline_files)} files in {baseline_dir} and {cond_dir}")
+        metrics.extend(tqdm(map(process, baseline_files, cond_files), total=len(baseline_files)))
 
     metric_keys = [k for k in metrics[0].keys() if k not in ("condition", "file")]
 
