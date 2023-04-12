@@ -1,0 +1,11 @@
+Interface.coarse_ckpt: ./models/spotdl/coarse.pth
+Interface.coarse2fine_ckpt: ./models/spotdl/c2f.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth
+Interface.coarse_chunk_size_s: 10
+Interface.coarse2fine_chunk_size_s: 3
+Interface.wavebeat_ckpt: ./models/wavebeat.pth
+
+
+AudioLoader.sources:
+  - /data/spotdl/audio/val
+  - /data/spotdl/audio/test

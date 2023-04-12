@@ -174,3 +174,6 @@ runs-archive
 lyrebird-audiotools
 lyrebird-audio-codec
 samples-*/**
+
+gradio-outputs/
+models/

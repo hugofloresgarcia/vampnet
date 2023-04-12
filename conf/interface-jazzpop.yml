@@ -1,0 +1,10 @@
+Interface.coarse_ckpt: ./models/jazzpop/coarse.pth
+Interface.coarse2fine_ckpt: ./models/jazzpop/c2f.pth
+Interface.codec_ckpt: ./models/jazzpop/codec.pth
+Interface.coarse_chunk_size_s: 5
+Interface.coarse2fine_chunk_size_s: 3
+Interface.wavebeat_ckpt: ./models/wavebeat.pth
+
+AudioLoader.sources:
+  - /data/spotdl-jazzpop/audio/val
+  - /data/spotdl-jazzpop/audio/test

@@ -26,6 +26,7 @@ class Interface:
         coarse_ckpt: str = None,
         coarse2fine_ckpt: str = None,
         codec_ckpt: str = None,
+        wavebeat_ckpt: str = None,
         device: str = "cpu",
         coarse_chunk_size_s: int =  5, 
         coarse2fine_chunk_size_s: int =  3,
@@ -51,6 +52,13 @@ class Interface:
         else:
             self.c2f = None
 
+        if wavebeat_ckpt is not None:
+            print(f"loading wavebeat from {wavebeat_ckpt}")
+            self.beat_tracker = WaveBeat(wavebeat_ckpt)
+            self.beat_tracker.model.to(device)
+        else:
+            self.beat_tracker = None
+
         self.device = device
 
     def s2t(self, seconds: float):
@@ -71,8 +79,13 @@ class Interface:
     def to(self, device):
         self.device = device
         self.coarse.to(device)
-        self.c2f.to(device)
         self.codec.to(device)
+
+        if self.c2f is not None:
+            self.c2f.to(device)
+
+        if self.beat_tracker is not None:
+            self.beat_tracker.model.to(device)
         return self
 
     def to_signal(self, z: torch.Tensor):
@@ -106,7 +119,7 @@ class Interface:
             mask_upbeats: bool = True,
             downbeat_downsample_factor: int = None,
             beat_downsample_factor: int = None,
-            dropout: float = 0.7,
+            dropout: float = 0.3,
             invert: bool = True,
     ):
         """make a beat synced mask. that is, make a mask that 
@@ -146,6 +159,8 @@ class Interface:
 
         beats_z = beats_z[::beat_downsample_factor]
         downbeats_z = downbeats_z[::downbeat_downsample_factor]
+        print(f"beats_z: {len(beats_z)}")
+        print(f"downbeats_z: {len(downbeats_z)}")
     
         if mask_upbeats:
             for beat_idx in beats_z:
@@ -153,8 +168,10 @@ class Interface:
                 num_steps = mask[_slice[0]:_slice[1]].shape[0]
                 _m = torch.ones(num_steps, device=self.device)
                 _m = torch.nn.functional.dropout(_m, p=dropout)
+                print(_m)
                 
                 mask[_slice[0]:_slice[1]] = _m
+                print(mask)
 
         if mask_downbeats:
             for downbeat_idx in downbeats_z:
@@ -165,6 +182,7 @@ class Interface:
                 
                 mask[_slice[0]:_slice[1]] = _m
         
+        mask = mask.clamp(0, 1)
         if invert:
             mask = 1 - mask
         
@@ -317,6 +335,7 @@ class Interface:
         ext_mask=None,
         n_conditioning_codebooks=None,
         verbose=False,
+        return_mask=False,
         **kwargs
     ):
         z = self.encode(signal)
@@ -448,6 +467,9 @@ class Interface:
         prefix_codes = torch.cat(c_vamp['prefix'], dim=-1)
         suffix_codes = torch.cat(c_vamp['suffix'], dim=-1)
         c_vamp = torch.cat([prefix_codes, suffix_codes], dim=-1)
+
+        if return_mask:
+            return c_vamp, cz_masked
         return c_vamp
 
     # create a variation of an audio signal
@@ -527,6 +549,7 @@ class Interface:
         num_loops: int = 4, 
         # overlap_hop_ratio: float = 1.0, # TODO: should this be fixed to 1.0?  or should we overlap and replace instead of overlap add
         verbose: bool = False,
+        return_mask: bool = False,
         **kwargs, 
     ):
         assert prefix_dur_s >= 0.0, "prefix duration must be >= 0"
@@ -549,8 +572,12 @@ class Interface:
                         prefix_dur_s=prefix_dur_s,
                         suffix_dur_s=suffix_dur_s,
                         swap_prefix_suffix=is_flipped,
+                        return_mask=return_mask,
                         **kwargs
                 )
+            if return_mask:
+                vamped, mask = vamped
+            
             # if we're flipped, we trim the prefix off of the end
             # otherwise we trim the suffix off of the end
             trim_len = prefix_len_tokens if is_flipped else suffix_len_tokens
@@ -568,6 +595,9 @@ class Interface:
             loops = [self.coarse_to_fine(l) for l in loops]
 
         loops = [self.to_signal(l) for l in loops]
-            
+
+        if return_mask:
+            return signal_concat(loops), self.to_signal(mask)
+        
         return signal_concat(loops)
 

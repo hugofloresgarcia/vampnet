@@ -215,7 +215,7 @@ class WaveBeat(BeatTracker):
         beats, downbeats = self.model.predict_beats_from_array(
             audio=signal.audio_data.squeeze(0),
             sr=signal.sample_rate,
-            use_gpu=self.device is not "cpu",
+            use_gpu=self.device != "cpu",
         )
 
         return beats, downbeats
