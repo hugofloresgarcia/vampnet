@@ -65,13 +65,21 @@ def vamp(
     mask_periodic_amt, beat_unmask_dur,
     mask_dwn_chk, dwn_factor,
     mask_up_chk, up_factor, 
-    num_vamps, mode, use_beats, num_steps
+    num_vamps, mode, use_beats, num_steps, snap_to_beats
 ):
     # try:
         print(input_audio)
 
-        sig = at.AudioSignal(input_audio.name)
-        
+        sig = at.AudioSignal(input_audio)
+
+        if snap_to_beats:
+            old_sig = sig.clone()
+            sig = interface.snap_to_beats(sig)
+            if sig.duration < (sig.duration / 4): # we cut off too much
+                sig = old_sig
+                print(f"new sig duration is {sig.duration} which is too short, reverting to old sig")
+            print(f"new sig duration is {sig.duration}")
+
         if beat_unmask_dur > 0.0 and use_beats:
             beat_mask = interface.make_beat_mask(
                 sig,
@@ -142,13 +150,13 @@ def save_vamp(
     mask_periodic_amt, beat_unmask_dur,
     mask_dwn_chk, dwn_factor,
     mask_up_chk, up_factor, 
-    num_vamps, mode, output_audio, notes, use_beats, num_steps
+    num_vamps, mode, output_audio, notes, use_beats, num_steps, snap_to_beats
 ):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sig_in = at.AudioSignal(input_audio.name)
-    sig_out = at.AudioSignal(output_audio.name)
+    sig_in = at.AudioSignal(input_audio)
+    sig_out = at.AudioSignal(output_audio)
 
     sig_in.write(out_dir / "input.wav")
     sig_out.write(out_dir / "output.wav")
@@ -168,6 +176,7 @@ def save_vamp(
         "up_factor": up_factor,
         "num_vamps": num_vamps,
         "num_steps": num_steps,
+        "snap_to_beats": snap_to_beats,
         "mode": mode,
         "notes": notes,
     }
@@ -212,12 +221,12 @@ with gr.Blocks() as demo:
         with gr.Column():
             gr.Markdown("""
             ### Tips
-            - use the beat sync button so the output audio has the same beat structure as the input audio
+            - use the beat hint button so the output audio has the same beat structure as the input audio
             - if you want the generated audio to sound like the original, but with a different beat structure:
-                - uncheck the beat sync button
+                - uncheck the beat hint button
                 - decrease the periodic unmasking to anywhere from 2 to 8
             - if you want a more "random" generation:
-                - uncheck the beat sync button (or reduce the beat unmask duration)
+                - uncheck the beat hint button (or reduce the beat unmask duration)
                 - increase the periodic unmasking to 16 or more
                 - increase the temperatures!
 
@@ -228,11 +237,11 @@ with gr.Blocks() as demo:
         with gr.Column():
             mode = gr.Radio(
                 label="**mode**. note that loop mode requires a prefix and suffix longer than 0",
-                choices=["standard", "loop"],
+                choices=["standard",],
                 value="standard"
             )
             num_vamps = gr.Number(
-                label="number of vamps (or loops). more vamps = longer generated audio",
+                label="number of vamps. more vamps = longer generated audio",
                 value=1,
                 precision=0
             )
@@ -246,13 +255,13 @@ with gr.Blocks() as demo:
             input_audio = gr.Audio(
                 label="input audio",
                 interactive=False, 
-                type="file",
+                type="filepath",
             )
 
             audio_mask = gr.Audio(
                 label="audio mask (listen to this to hear the mask hints)",
                 interactive=False, 
-                type="file",
+                type="filepath",
             )
 
             # connect widgets
@@ -273,7 +282,7 @@ with gr.Blocks() as demo:
         with gr.Column():
 
             mask_periodic_amt = gr.Slider(
-                label="periodic hint  (0.0 means no hint, 2 means one hint every 2 timesteps, etc, 4 means one hint every 4 timesteps, etc)",
+                label="periodic hint  (0.0 means no hint, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
                 minimum=0,
                 maximum=64, 
                 step=1,
@@ -321,6 +330,11 @@ with gr.Blocks() as demo:
                 value=True
             )
 
+            snap_to_beats = gr.Checkbox(
+                label="trim to beat markers (uncheck if the output audio is too short.)",
+                value=True
+            )
+
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
                 minimum=4,
@@ -334,7 +348,7 @@ with gr.Blocks() as demo:
             output_audio = gr.Audio(
                 label="output audio",
                 interactive=False,
-                type="file"
+                type="filepath"
             )
 
 
@@ -407,7 +421,7 @@ with gr.Blocks() as demo:
             mask_periodic_amt, beat_unmask_dur, 
             mask_dwn_chk, dwn_factor, 
             mask_up_chk, up_factor, 
-            num_vamps, mode, use_beats, num_steps
+            num_vamps, mode, use_beats, num_steps, snap_to_beats
         ],
         outputs=[output_audio, audio_mask]
     )
@@ -422,7 +436,7 @@ with gr.Blocks() as demo:
             mask_up_chk, up_factor,
             num_vamps, mode,
             output_audio,
-            notes_text, use_beats, num_steps
+            notes_text, use_beats, num_steps, snap_to_beats
         ],
         outputs=[thank_you, download_file]
     )
