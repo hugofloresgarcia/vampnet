@@ -67,6 +67,8 @@ services:
       - interactive
     stdin_open: true
     tty: true
+    ports:
+      - 7860:7860
   jupyter:
     extends: base
     ports:
