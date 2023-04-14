@@ -5,6 +5,7 @@ from functools import partial
 from frechet_audio_distance import FrechetAudioDistance
 import pandas
 import argbind
+import torch
 from tqdm import tqdm
 
 import audiotools
@@ -21,15 +22,16 @@ def eval(
     assert exp_dir.exists(), f"exp_dir {exp_dir} does not exist"
 
     # set up our metrics
-    sisdr_loss = audiotools.metrics.distance.SISDRLoss()
-    stft_loss = audiotools.metrics.spectral.MultiScaleSTFTLoss()
+    # sisdr_loss = audiotools.metrics.distance.SISDRLoss()
+    # stft_loss = audiotools.metrics.spectral.MultiScaleSTFTLoss()
     mel_loss = audiotools.metrics.spectral.MelSpectrogramLoss()
     frechet = FrechetAudioDistance(
         use_pca=False, 
         use_activation=False,
-        verbose=True
+        verbose=True, 
+        audio_load_worker=4,
     )
-    visqol = partial(audiotools.metrics.quality.visqol, mode="audio")
+    frechet.model.to("cuda" if torch.cuda.is_available() else "cpu")
 
     # figure out what conditions we have
     conditions = [d.name for d in exp_dir.iterdir() if d.is_dir()]
@@ -44,7 +46,7 @@ def eval(
     baseline_files = sorted(list(baseline_dir.glob(f"*{audio_ext}")), key=lambda x: int(x.stem))
 
     metrics = []
-    for condition in conditions:
+    for condition in tqdm(conditions):
         cond_dir = exp_dir / condition
         cond_files = sorted(list(cond_dir.glob(f"*{audio_ext}")), key=lambda x: int(x.stem))
 
@@ -68,14 +70,17 @@ def eval(
             cond_sig.resample(baseline_sig.sample_rate)
             cond_sig.truncate_samples(baseline_sig.length)
 
-            # compute the metrics
-            # try:
-            #     vsq = visqol(baseline_sig, cond_sig)
-            # except:
-            #     vsq = 0.0
+            # if our condition is inpainting, we need to trim the conditioning off
+            if "inpaint" in condition:
+                ctx_amt = float(condition.split("_")[-1])
+                ctx_samples = int(ctx_amt * baseline_sig.sample_rate)
+                print(f"found inpainting condition. trimming off {ctx_samples} samples from {cond_file} and {baseline_file}")
+                cond_sig.trim(ctx_samples, ctx_samples)
+                baseline_sig.trim(ctx_samples, ctx_samples)
+
             return {
-                "sisdr": -sisdr_loss(baseline_sig, cond_sig).item(),
-                "stft": stft_loss(baseline_sig, cond_sig).item(),
+                # "sisdr": -sisdr_loss(baseline_sig, cond_sig).item(),
+                # "stft": stft_loss(baseline_sig, cond_sig).item(),
                 "mel": mel_loss(baseline_sig, cond_sig).item(),
                 "frechet": frechet_score,
                 # "visqol": vsq,

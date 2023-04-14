@@ -42,6 +42,7 @@ class VampBase(at.ml.BaseModel):
         n_suffix: Optional[torch.Tensor] = None,
         downsample_factor: Optional[int] = None, 
         n_conditioning_codebooks: Optional[int] = None,
+        noise_mode: str = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
 
@@ -89,13 +90,14 @@ class VampBase(at.ml.BaseModel):
         if random_x is None:
             random_x = torch.randint_like(x, 0, self.vocab_size)
 
-        if self.noise_mode == "mask":
+        noise_mode = noise_mode if noise_mode is not None else self.noise_mode
+        if noise_mode == "mask":
             random_x = torch.full_like(x, self.mask_token)
-        elif self.noise_mode == "random":
+        elif noise_mode == "random":
             if random_x is None:
                 random_x = torch.randint_like(x, 0, self.vocab_size)
         else:
-            raise ValueError(f"invalid noise mode {self.noise_mode}")
+            raise ValueError(f"invalid noise mode {noise_mode}")
 
         # add the external mask if we were given one
         if ext_mask is not None:
@@ -131,6 +133,11 @@ class VampBase(at.ml.BaseModel):
 
     def gamma(self, r):
         return (r * torch.pi / 2).cos()
+
+    def invgamma(self, y):
+        if not torch.is_tensor(y):
+            y = torch.tensor(y)[None]
+        return 2 * y.acos() / torch.pi
 
     def r_embed(self, r, max_positions=10000):
         """ """

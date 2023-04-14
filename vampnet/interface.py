@@ -183,10 +183,8 @@ class Interface:
                 num_steps = mask[_slice[0]:_slice[1]].shape[0]
                 _m = torch.ones(num_steps, device=self.device)
                 _m = torch.nn.functional.dropout(_m, p=dropout)
-                print(_m)
                 
                 mask[_slice[0]:_slice[1]] = _m
-                print(mask)
 
         if mask_downbeats:
             for downbeat_idx in downbeats_z:

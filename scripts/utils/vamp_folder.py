@@ -6,7 +6,7 @@ import subprocess
 
 import argbind
 from tqdm import tqdm
-import argbind
+import torch
 
 from vampnet.interface import Interface
 import audiotools as at
@@ -48,7 +48,6 @@ def coarse2fine_argmax(sig, interface):
     )
     return interface.to_signal(z)
 
-
 class CoarseCond:
 
     def __init__(self, num_codebooks, downsample_factor):
@@ -59,12 +58,11 @@ class CoarseCond:
         n_conditioning_codebooks = interface.coarse.n_codebooks - self.num_codebooks
         zv = interface.coarse_vamp_v2(sig, 
             n_conditioning_codebooks=n_conditioning_codebooks,
-            downsample_factor=self.downsample_factor
+            downsample_factor=self.downsample_factor, 
         )
 
         zv = interface.coarse_to_fine(zv)
         return interface.to_signal(zv)
-
 
 def opus(sig, interface, bitrate=128):
     sig = interface.preprocess(sig)
@@ -97,8 +95,78 @@ def opus(sig, interface, bitrate=128):
         )
     return sig
 
+def token_noise(ratio=1.0):
+    def wrapper(sig, interface):
+        z = interface.encode(sig)
+        r = interface.coarse.invgamma(ratio).to(interface.device)
+        print(f'adding noise with ratio {ratio}')
+        z, mask = interface.coarse.add_noise(
+            z, 
+            r, 
+            noise_mode="random"
+        )
+        return interface.to_signal(z)
+    return wrapper
 
-COARSE_SAMPLE_CONDS ={
+def mask_ratio_1_step(ratio=1.0):
+    def wrapper(sig, interface):
+        r = interface.coarse.invgamma(ratio).to(interface.device)
+        intensity = 1-r
+
+        zv = interface.coarse_vamp_v2(
+            sig, 
+            sample='argmax',
+            sampling_steps=1, 
+            intensity=intensity
+        )
+
+        return interface.to_signal(zv)
+    return wrapper
+
+def num_sampling_steps(num_steps=1):
+    def wrapper(sig, interface):
+        zv = interface.coarse_vamp_v2(
+            sig, 
+            downsample_factor=16,
+            sampling_steps=num_steps, 
+        )
+
+        zv = interface.coarse_to_fine(zv)
+        return interface.to_signal(zv)
+    return wrapper
+
+def beat_mask(ctx_time):
+    def wrapper(sig, interface):
+        beat_mask = interface.make_beat_mask(
+            sig,
+            before_beat_s=0.0,
+            after_beat_s=ctx_time,
+            invert=True
+        )
+        zv = interface.coarse_vamp_v2(
+            sig, 
+            ext_mask=beat_mask, 
+        )
+
+        zv = interface.coarse_to_fine(zv)
+        return interface.to_signal(zv)
+    return wrapper
+
+def inpaint(ctx_time):
+    def wrapper(sig, interface):
+        zv = interface.coarse_vamp_v2(
+            sig, 
+            prefix_dur_s=ctx_time,
+            suffix_dur_s=ctx_time,
+        )
+
+        zv = interface.coarse_to_fine(zv)
+        return interface.to_signal(zv)
+    return wrapper
+
+EXP_REGISTRY = {}
+
+EXP_REGISTRY["gen-compression"] = {
     "baseline": baseline,
     "reconstructed": reconstructed,
     "coarse2fine": coarse2fine,
@@ -119,21 +187,53 @@ COARSE_SAMPLE_CONDS ={
 
 }
 
-OPUS_JAZZPOP_SAMPLE_CONDS = {
+EXP_REGISTRY["opus-jazzpop"] = {
     f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
     for bitrate in [5620, 1875, 1250, 625]
 }
 
-OPUS_SPOTDL_SAMPLE_CONDS = {
+EXP_REGISTRY["opus-spotdl"] = {
     f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
     for bitrate in [8036, 2296, 1148, 574]
 }
 
-C2F_SAMPLE_CONDS = {
+EXP_REGISTRY["opus-baseline"]  = {
+    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
+    for bitrate in [8000, 12000, 16000]
+}
+
+EXP_REGISTRY["c2f"]  = {
     "baseline": baseline,
     "reconstructed": reconstructed,
     "coarse2fine": coarse2fine,
     "coarse2fine_argmax": coarse2fine_argmax,
+}
+
+EXP_REGISTRY["token-noise"] = {
+    f"token_noise_{r}": token_noise(r)  for r in [0.25, 0.5, 0.75, 1.0]
+}
+
+EXP_REGISTRY["mask-ratio"] = {
+    "codec": reconstructed,
+    **{f"mask_ratio_{r}": mask_ratio_1_step(r)  for r in [0.25, 0.5, 0.75, 0.9]}
+}
+
+EXP_REGISTRY["sampling-steps"] = {
+    "codec": reconstructed,
+    **{f"steps_{n}": num_sampling_steps(n)  for n in [1, 4, 12, 24, 36, 64, 72, 128]},
+}
+
+EXP_REGISTRY["baseline"] = {
+    "baseline": baseline,
+    "codec": reconstructed,
+}
+
+EXP_REGISTRY["musical-sampling"] = {
+    "baseline": baseline,
+    "codec": reconstructed,
+    **{f"downsample_{x}x": CoarseCond(4, downsample_factor=x) for x in [16, 32]},
+    **{f"beat_mask_{t}": beat_mask(t) for t in [0.075]}, 
+    **{f"inpaint_{t}": inpaint(t) for t in [0.5, 1.0,]}, # multiply these by 2 (they go left and right)
 }
 
 @argbind.bind(without_prefix=True)
@@ -162,14 +262,8 @@ def main(
         without_replacement=True,
     )
 
-    if exp_type == "opus-jazzpop":
-        SAMPLE_CONDS = OPUS_JAZZPOP_SAMPLE_CONDS
-    elif exp_type == "opus-spotdl":
-        SAMPLE_CONDS = OPUS_SPOTDL_SAMPLE_CONDS
-    elif exp_type == "coarse":
-        SAMPLE_CONDS = COARSE_SAMPLE_CONDS
-    elif exp_type == "c2f":
-        SAMPLE_CONDS = C2F_SAMPLE_CONDS
+    if exp_type in EXP_REGISTRY:
+        SAMPLE_CONDS = EXP_REGISTRY[exp_type]
     else:
         raise ValueError(f"Unknown exp_type {exp_type}")
 
@@ -178,12 +272,12 @@ def main(
     random.shuffle(indices)
     for i in tqdm(indices):
         # if all our files are already there, skip
-        # done = []
-        # for name in SAMPLE_CONDS:
-        #     o_dir = Path(output_dir) / name
-        #     done.append((o_dir / f"{i}.wav").exists())
-        # if all(done):
-        #     continue
+        done = []
+        for name in SAMPLE_CONDS:
+            o_dir = Path(output_dir) / name
+            done.append((o_dir / f"{i}.wav").exists())
+        if all(done):
+            continue
 
         sig = dataset[i]["signal"]
         results = {
