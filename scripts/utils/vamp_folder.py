@@ -220,7 +220,7 @@ EXP_REGISTRY["mask-ratio"] = {
 
 EXP_REGISTRY["sampling-steps"] = {
     "codec": reconstructed,
-    **{f"steps_{n}": num_sampling_steps(n)  for n in [1, 4, 12, 24, 36, 64, 72, 128]},
+    **{f"steps_{n}": num_sampling_steps(n)  for n in [1, 4, 12, 24, 36, 64, 72]},
 }
 
 EXP_REGISTRY["baseline"] = {

@@ -65,7 +65,10 @@ def vamp(
     mask_periodic_amt, beat_unmask_dur,
     mask_dwn_chk, dwn_factor,
     mask_up_chk, up_factor, 
-    num_vamps, mode, use_beats, num_steps, snap_to_beats
+    num_vamps, mode, use_beats, num_steps, snap_to_beats, 
+    beat_unmask_drop,  mask_periodic_width, 
+    mask_periodic_dropout, mask_periodic_width_dropout, 
+    n_conditioning_codebooks
 ):
     # try:
         print(input_audio)
@@ -89,7 +92,7 @@ def vamp(
                 mask_upbeats=mask_up_chk,
                 downbeat_downsample_factor=dwn_factor if dwn_factor > 0 else None, 
                 beat_downsample_factor=up_factor if up_factor > 0 else None,
-                dropout=0.7, 
+                dropout=beat_unmask_drop, 
                 invert=True
             )
             print(beat_mask)
@@ -106,6 +109,10 @@ def vamp(
                 suffix_dur_s=suffix_s,
                 num_vamps=num_vamps,
                 downsample_factor=mask_periodic_amt,
+                periodic_width=mask_periodic_width,
+                periodic_dropout=mask_periodic_dropout,
+                periodic_width_dropout=mask_periodic_width_dropout,
+                n_conditioning_codebooks=n_conditioning_codebooks if n_conditioning_codebooks > 0 else None,
                 intensity=rand_mask_intensity,
                 ext_mask=beat_mask, 
                 verbose=True,
@@ -126,6 +133,7 @@ def vamp(
                 suffix_dur_s=prefix_s, # suffix should be same length as prefix 
                 num_loops=num_vamps,
                 downsample_factor=mask_periodic_amt,
+                periodic_width=mask_periodic_width,
                 intensity=rand_mask_intensity,
                 ext_mask=beat_mask, 
                 verbose=True,
@@ -150,7 +158,9 @@ def save_vamp(
     mask_periodic_amt, beat_unmask_dur,
     mask_dwn_chk, dwn_factor,
     mask_up_chk, up_factor, 
-    num_vamps, mode, output_audio, notes, use_beats, num_steps, snap_to_beats
+    num_vamps, mode, output_audio, notes, use_beats, num_steps, snap_to_beats,
+    beat_unmask_drop, mask_periodic_width, mask_periodic_dropout, mask_periodic_width_dropout, 
+    n_conditioning_codebooks
 ):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +189,11 @@ def save_vamp(
         "snap_to_beats": snap_to_beats,
         "mode": mode,
         "notes": notes,
+        "beat_unmask_drop": beat_unmask_drop,
+        "mask_periodic_width": mask_periodic_width, 
+        "mask_periodic_dropout": mask_periodic_dropout,
+        "mask_periodic_width_dropout": mask_periodic_width_dropout, 
+        "n_conditioning_codebooks": n_conditioning_codebooks
     }
 
     # save with yaml
@@ -287,6 +302,12 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
+            n_conditioning_codebooks = gr.Number(
+                label="number of conditioning codebooks. probably 0", 
+                value=0,
+                precision=0,
+            )
+
             mask_periodic_amt = gr.Slider(
                 label="periodic hint  (0.0 means no hint, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
                 minimum=0,
@@ -294,11 +315,29 @@ with gr.Blocks() as demo:
                 step=1,
                 value=9, 
             )
-
+            mask_periodic_width = gr.Slider(
+                label="periodic hint width (steps, 1 step ~= 10milliseconds",
+                minimum=1,
+                maximum=100,
+                step=1,
+                value=1,
+            )
+            mask_periodic_dropout = gr.Slider(
+                label="periodic hint dropout (0.0 means no dropout, 1.0 means all dropout)",
+                minimum=0.0,
+                maximum=1.0,
+                value=0.0,
+            )
+            mask_periodic_width_dropout = gr.Slider(    
+                label="periodic hint width dropout (0.0 means no dropout, 1.0 means all dropout)",
+                minimum=0.0,
+                maximum=1.0,
+                value=0.0,
+            )
 
             rand_mask_intensity = gr.Slider(
                 label="random mask intensity. (If this is less than 1, scatters tiny hints throughout the audio, should be between 0.9 and 1.0)",
-                minimum=0.0,
+                minimum=0.8,
                 maximum=1.0,
                 value=1.0
             )
@@ -343,7 +382,7 @@ with gr.Blocks() as demo:
 
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
-                minimum=4,
+                minimum=1,
                 maximum=128,
                 step=1,
                 value=36
@@ -379,6 +418,13 @@ with gr.Blocks() as demo:
                     maximum=3.0,
                     value=0.07
                 )
+                beat_unmask_drop = gr.Slider(
+                    label="dropout (within beat)", 
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.0
+                )
+
                 with gr.Accordion("downbeat settings", open=False):
                     mask_dwn_chk = gr.Checkbox(
                         label="hint downbeats",
@@ -427,7 +473,10 @@ with gr.Blocks() as demo:
             mask_periodic_amt, beat_unmask_dur, 
             mask_dwn_chk, dwn_factor, 
             mask_up_chk, up_factor, 
-            num_vamps, mode, use_beats, num_steps, snap_to_beats
+            num_vamps, mode, use_beats, num_steps, snap_to_beats, 
+            beat_unmask_drop, mask_periodic_width, 
+            mask_periodic_dropout, mask_periodic_width_dropout, 
+            n_conditioning_codebooks
         ],
         outputs=[output_audio, audio_mask]
     )
@@ -442,7 +491,10 @@ with gr.Blocks() as demo:
             mask_up_chk, up_factor,
             num_vamps, mode,
             output_audio,
-            notes_text, use_beats, num_steps, snap_to_beats
+            notes_text, use_beats, num_steps, snap_to_beats, 
+            beat_unmask_drop, mask_periodic_width, 
+            mask_periodic_dropout, mask_periodic_width_dropout, 
+            n_conditioning_codebooks
         ],
         outputs=[thank_you, download_file]
     )

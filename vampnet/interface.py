@@ -134,7 +134,7 @@ class Interface:
             mask_upbeats: bool = True,
             downbeat_downsample_factor: int = None,
             beat_downsample_factor: int = None,
-            dropout: float = 0.3,
+            dropout: float = 0.0,
             invert: bool = True,
     ):
         """make a beat synced mask. that is, make a mask that 
@@ -182,7 +182,8 @@ class Interface:
                 _slice = int(beat_idx - mask_b4), int(beat_idx + mask_after)
                 num_steps = mask[_slice[0]:_slice[1]].shape[0]
                 _m = torch.ones(num_steps, device=self.device)
-                _m = torch.nn.functional.dropout(_m, p=dropout)
+                _m_mask = torch.bernoulli(_m * (1 - dropout))
+                _m = _m * _m_mask.long()
                 
                 mask[_slice[0]:_slice[1]] = _m
 
@@ -191,7 +192,8 @@ class Interface:
                 _slice = int(downbeat_idx - mask_b4), int(downbeat_idx + mask_after)
                 num_steps = mask[_slice[0]:_slice[1]].shape[0]
                 _m = torch.ones(num_steps, device=self.device)
-                _m = torch.nn.functional.dropout(_m, p=dropout)
+                _m_mask = torch.bernoulli(_m * (1 - dropout))
+                _m = _m * _m_mask.long()
                 
                 mask[_slice[0]:_slice[1]] = _m
         
@@ -342,6 +344,9 @@ class Interface:
         suffix_dur_s: float = 0.0,
         num_vamps: int = 1,
         downsample_factor: int = None,
+        periodic_width: int = 1,
+        periodic_dropout=0.0,
+        periodic_width_dropout=0.0, 
         intensity: float = 1.0, 
         debug=False,
         swap_prefix_suffix=False, 
@@ -383,6 +388,9 @@ class Interface:
                 n_prefix=n_prefix,
                 n_suffix=n_suffix, 
                 downsample_factor=downsample_factor,
+                periodic_width=periodic_width,
+                periodic_dropout=periodic_dropout,
+                periodic_width_dropout=periodic_width_dropout,
                 mask=cz_mask, 
                 ext_mask=ext_mask, 
                 n_conditioning_codebooks=n_conditioning_codebooks
@@ -481,8 +489,11 @@ class Interface:
         suffix_codes = torch.cat(c_vamp['suffix'], dim=-1)
         c_vamp = torch.cat([prefix_codes, suffix_codes], dim=-1)
 
+        # replace the mask token in cz_masked with random tokens
+        # so that we can decode it
         if return_mask:
             return c_vamp, cz_masked
+        
         return c_vamp
 
     # create a variation of an audio signal

@@ -41,6 +41,9 @@ class VampBase(at.ml.BaseModel):
         n_prefix: Optional[torch.Tensor] = None,
         n_suffix: Optional[torch.Tensor] = None,
         downsample_factor: Optional[int] = None, 
+        periodic_width: int = 1,
+        periodic_width_dropout: float = 0.0,
+        periodic_dropout: float = 0.0,
         n_conditioning_codebooks: Optional[int] = None,
         noise_mode: str = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -75,7 +78,20 @@ class VampBase(at.ml.BaseModel):
                         continue
                     for j in range(probs.shape[-1]):
                         if j % factor == 0:
-                            probs[i, :, j] = 0.0
+                            # if we have periodic dropout
+                            if periodic_dropout > 0:
+                                # flip a coin
+                                if torch.bernoulli(torch.tensor(periodic_dropout)).item() == 1:
+                                    # if we win, skip
+                                    continue
+                            # figure out how wide the mask should be
+                            j_start = max(0, j - periodic_width // 2)
+                            j_end = min(probs.shape[-1] - 1, j + periodic_width // 2) + 1
+                            # flip a coin for each position in the mask
+                            j_mask = torch.bernoulli(torch.ones(j_end - j_start) * periodic_width_dropout)
+                            j_fill = torch.ones_like(j_mask) * (1 - j_mask)
+                            # fill
+                            probs[i, :, j_start:j_end] = 1 - j_fill
 
             mask = torch.bernoulli(probs)
             mask = mask.round().long()
@@ -174,6 +190,14 @@ class VampBase(at.ml.BaseModel):
             )["audio"],
             codec.sample_rate,
         )
+
+        # find where the mask token is and replace it with silence in the audio
+        for tstep in range(z.shape[-1]):
+            if torch.any(z[:, :, tstep] == self.mask_token):
+                print("mask token found at step", tstep)
+                sample_idx_0 = tstep * codec.hop_length
+                sample_idx_1 = sample_idx_0 + codec.hop_length
+                signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
 
         return signal
 
