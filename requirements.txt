@@ -3,7 +3,6 @@ pytorch-ignite
 rich
 audiotools @ git+https://github.com/descriptinc/lyrebird-audiotools.git@hf/backup-info
 lac @ git+https://github.com/descriptinc/lyrebird-audio-codec.git@hf/vampnet-temp
-wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat.git
 torch==1.13.1
 torchaudio==0.13.1
 tqdm
