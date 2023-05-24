@@ -14,7 +14,7 @@ from .layers import FiLM
 from .layers import SequentialWithFiLM
 from .layers import WNConv1d
 
-LORA_R = 4
+LORA_R = 8
 
 
 class RMSNorm(nn.Module):

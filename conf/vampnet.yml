@@ -1,5 +1,5 @@
 
-codec_ckpt: /u/home/src/runs/codec-ckpt/lac-768x.pth
+codec_ckpt: /home/hugo/descript/vampnet/models/spotdl/codec.pth
 save_path: ckpt
 max_epochs: 1000
 epoch_length: 1000
@@ -11,8 +11,8 @@ suffix_amt: 0.0
 prefix_dropout: 0.1
 suffix_dropout: 0.1
 
-batch_size: 120
-num_workers: 80
+batch_size: 8
+num_workers: 10
 
 # Optimization
 detect_anomaly: false

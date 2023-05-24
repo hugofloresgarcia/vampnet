@@ -1,0 +1,16 @@
+$include:
+  - conf/vampnet.yml
+
+fine_tune: True
+
+train/AudioDataset.n_examples: 10000000
+
+val/AudioDataset.n_examples: 10
+
+
+NoamScheduler.warmup: 250
+
+epoch_length: 100
+save_audio_epochs: 2
+
+AdamW.lr: 0.0001

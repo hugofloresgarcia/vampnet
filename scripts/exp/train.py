@@ -248,12 +248,12 @@ def train(
     save_path: str = "ckpt",
     max_epochs: int = int(100e3),
     epoch_length: int = 1000,
-    save_audio_epochs: int = 10,
+    save_audio_epochs: int = 2,
     save_epochs: list = [10, 50, 100, 200, 300, 400,],
     batch_size: int = 48,
     grad_acc_steps: int = 1,
-    val_idx: list = [0, 1, 2, 3, 4],
-    num_workers: int = 20,
+    val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    num_workers: int = 10,
     detect_anomaly: bool = False,
     grad_clip_val: float = 5.0,
     prefix_amt: float = 0.0,
@@ -530,7 +530,7 @@ def train(
 
                 accel.unwrap(model).metadata = metadata
                 accel.unwrap(model).save_to_folder(
-                    f"{save_path}/{tag}", model_extra
+                    f"{save_path}/{tag}", model_extra,
                 )
 
         def save_sampled(self, z):

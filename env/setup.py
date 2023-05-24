@@ -11,36 +11,7 @@ def run(cmd):
     return subprocess.check_output(shlex.split(cmd)).decode("utf-8")
 
 
-print("1. Setting up Google Cloud access")
-print("---------------------------------")
-gcloud_authorized = "gs://research-data-raw" in run("gsutil ls")
-if not gcloud_authorized:
-    run("gcloud auth login")
 
-run("gcloud config set project lyrebird-research")
-run("gcloud auth configure-docker")
-
-print()
-print("2. Setting up Github access")
-print("---------------------------")
-
-lines = textwrap.wrap(
-    "First, let's get your Github token, so all "
-    "packages can be installed. Create one by going to your "
-    "Github profile -> Developer settings -> Personal access tokens -> "
-    "Generate new token. Copy the token below."
-)
-[print(l) for l in lines]
-
-GITHUB_TOKEN = input("\nGithub token: ") or "undefined"
-
-print()
-print("3. Setting up Jupyter and Tensorboard")
-print("-------------------------------------")
-
-JUPYTER_TOKEN = input("Password for Jupyter server (default:password): ") or "password"
-JUPYTER_PORT = input("Jupyter port to run on (default:8888): ") or "8888"
-TENSORBOARD_PORT = input("Tensorboard port to run on (default:6006): ") or "6006"
 
 print()
 print("4. Setting up paths.")
