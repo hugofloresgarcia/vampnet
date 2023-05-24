@@ -59,6 +59,43 @@ def load_random_audio():
     return sig.path_to_file
 
 
+def ez_vamp(
+    input_audio, init_temp, final_temp,  
+    mask_periodic_amt, mask_periodic_width, num_steps,  
+):
+    print(input_audio)
+    sig = at.AudioSignal(input_audio)
+
+    print(f"running standard vampnet with {num_vamps} vamps")
+    zv = interface.coarse_vamp_v2(
+        sig, 
+        sampling_steps=num_steps,
+        temperature=(init_temp, final_temp),
+        prefix_dur_s=0.0,
+        suffix_dur_s=0.0,
+        num_vamps=1,
+        downsample_factor=mask_periodic_amt,
+        periodic_width=mask_periodic_width,
+        periodic_dropout=0.0,
+        periodic_width_dropout=0.0,
+        n_conditioning_codebooks=None,
+        intensity=1.0,
+        ext_mask=None, 
+    )
+
+    zv = interface.coarse_to_fine(zv)
+
+    sig = interface.to_signal(zv).cpu()
+    print("done")
+
+    out_dir = OUT_DIR / str(uuid.uuid4())
+    out_dir.mkdir()
+    sig.write(out_dir / "output.wav")
+    # mask.write(out_dir / "mask.wav")
+    # return sig.path_to_file, mask.path_to_file
+    return sig.path_to_file
+
+
 def vamp(
     input_audio, init_temp, final_temp, 
     prefix_s, suffix_s, rand_mask_intensity,
@@ -68,7 +105,7 @@ def vamp(
     num_vamps, mode, use_beats, num_steps, snap_to_beats, 
     beat_unmask_drop,  mask_periodic_width, 
     mask_periodic_dropout, mask_periodic_width_dropout, 
-    n_conditioning_codebooks
+    n_conditioning_codebooks, use_coarse2fine
 ):
     # try:
         print(input_audio)
@@ -119,36 +156,19 @@ def vamp(
                 return_mask=True
             )
     
-            zv = interface.coarse_to_fine(zv)
-            mask = interface.to_signal(mask_z).cpu()
+            if use_coarse2fine: 
+                zv = interface.coarse_to_fine(zv)
+            # mask = interface.to_signal(mask_z).cpu()
 
             sig = interface.to_signal(zv).cpu()
             print("done")
-        elif mode == "loop":
-            print(f"running loop vampnet with {num_vamps} vamps")
-            sig, mask = interface.loop(
-                sig, 
-                temperature=(init_temp, final_temp),
-                prefix_dur_s=prefix_s, 
-                suffix_dur_s=prefix_s, # suffix should be same length as prefix 
-                num_loops=num_vamps,
-                downsample_factor=mask_periodic_amt,
-                periodic_width=mask_periodic_width,
-                intensity=rand_mask_intensity,
-                ext_mask=beat_mask, 
-                verbose=True,
-                return_mask=True
-            )
-            sig = sig.cpu()
-            mask = mask.cpu()
-            print("done")
-
 
         out_dir = OUT_DIR / str(uuid.uuid4())
         out_dir.mkdir()
         sig.write(out_dir / "output.wav")
-        mask.write(out_dir / "mask.wav")
-        return sig.path_to_file, mask.path_to_file
+        # mask.write(out_dir / "mask.wav")
+        # return sig.path_to_file, mask.path_to_file
+        return sig.path_to_file, None
     # except Exception as e:
     #     raise gr.Error(f"failed with error: {e}")
         
@@ -160,7 +180,7 @@ def save_vamp(
     mask_up_chk, up_factor, 
     num_vamps, mode, output_audio, notes, use_beats, num_steps, snap_to_beats,
     beat_unmask_drop, mask_periodic_width, mask_periodic_dropout, mask_periodic_width_dropout, 
-    n_conditioning_codebooks
+    n_conditioning_codebooks, use_coarse2fine
 ):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +213,8 @@ def save_vamp(
         "mask_periodic_width": mask_periodic_width, 
         "mask_periodic_dropout": mask_periodic_dropout,
         "mask_periodic_width_dropout": mask_periodic_width_dropout, 
-        "n_conditioning_codebooks": n_conditioning_codebooks
+        "n_conditioning_codebooks": n_conditioning_codebooks, 
+        "use_coarse2fine": use_coarse2fine,
     }
 
     # save with yaml
@@ -259,6 +280,10 @@ with gr.Blocks() as demo:
                 label="**mode**. note that loop mode requires a prefix and suffix longer than 0",
                 choices=["standard",],
                 value="standard"
+            )
+            use_coarse2fine = gr.Checkbox(
+                label="use coarse2fine",
+                value=True
             )
             num_vamps = gr.Number(
                 label="number of vamps. more vamps = longer generated audio",
@@ -476,9 +501,10 @@ with gr.Blocks() as demo:
             num_vamps, mode, use_beats, num_steps, snap_to_beats, 
             beat_unmask_drop, mask_periodic_width, 
             mask_periodic_dropout, mask_periodic_width_dropout, 
-            n_conditioning_codebooks
+            n_conditioning_codebooks, use_coarse2fine
         ],
-        outputs=[output_audio, audio_mask]
+        outputs=[output_audio, audio_mask], 
+        api_name="vamp"
     )
 
     save_button.click(
@@ -494,9 +520,18 @@ with gr.Blocks() as demo:
             notes_text, use_beats, num_steps, snap_to_beats, 
             beat_unmask_drop, mask_periodic_width, 
             mask_periodic_dropout, mask_periodic_width_dropout, 
-            n_conditioning_codebooks
+            n_conditioning_codebooks, use_coarse2fine
         ],
         outputs=[thank_you, download_file]
     )
 
-demo.launch(share=True, enable_queue=True)
+    ez_vamp_button = gr.Button("ez vamp")
+    ez_vamp_button.click(
+        fn=ez_vamp,
+        inputs=[input_audio, init_temp, final_temp, mask_periodic_amt,
+                mask_periodic_width, num_steps ],
+        outputs=[output_audio],
+        api_name="ez_vamp"
+    )
+
+demo.launch(share=True, enable_queue=False, debug=True)

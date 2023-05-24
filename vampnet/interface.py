@@ -20,7 +20,7 @@ def signal_concat(
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
 
-class Interface:
+class Interface(torch.nn.Module):
     def __init__(
         self,
         coarse_ckpt: str = None,
@@ -31,6 +31,7 @@ class Interface:
         coarse_chunk_size_s: int =  5, 
         coarse2fine_chunk_size_s: int =  3,
     ):
+        super().__init__()
         assert codec_ckpt is not None, "must provide a codec checkpoint"
         self.codec = LAC.load(Path(codec_ckpt))
         self.codec.eval()
@@ -240,103 +241,7 @@ class Interface:
         fine_z = torch.cat(fine_z, dim=-1)
         return fine_z[:, :, :length].clone()
     
-    def coarse_vamp(
-        self, 
-        signal, 
-        prefix_dur_s: float = 1.25, 
-        suffix_dur_s: float = 1.25,
-        num_loops: int = 3,
-        mode="impute",
-        downsample_factor: int = None,
-        debug=False,
-        **kwargs
-    ):
-        z = self.encode(signal)
-
-        assert signal.duration == self.coarse.chunk_size_s, "signal duration must match coarse chunk size for now"
-
-        # coarse z
-        cz = z[:, : self.coarse.n_codebooks, :].clone()
-        c_seq_len = cz.shape[-1]
-        n_prefix = self.s2t(prefix_dur_s)
-        n_suffix = self.s2t(suffix_dur_s)
-        
-        # we'll keep the final codes sequence here
-        c_vamp = {
-            'prefix': [cz[:, :, :n_prefix].clone()],
-            'suffix': [cz[:, :, c_seq_len-n_suffix:].clone()]
-        }
-
-        _cz = cz.clone()
-        for _ in range(num_loops):
-            # add noise
-            cz_masked, cz_mask = self.coarse.add_noise(
-                _cz, r=0.0,
-                n_prefix=n_prefix,
-                n_suffix=n_suffix, 
-                downsample_factor=downsample_factor
-            )
-            if debug:
-                print("tokens to infer")
-                self.to_signal(cz_masked).cpu().widget()
-
-            # sample!
-            cz_sampled = self.coarse.sample(
-                codec=self.codec,
-                time_steps=self.s2t(self.coarse.chunk_size_s),
-                start_tokens=_cz,
-                mask=cz_mask, 
-                return_signal=False,
-                **kwargs
-            )
-
-            if debug:
-                print("tokens sampled")
-                self.to_signal(cz_sampled).cpu().widget()
-            
-            cz_imputed = cz_sampled[:, :, n_prefix:c_seq_len-n_suffix].clone()
-            
-            if mode == "impute":
-                 # split the imputed codes into two halves
-                cz_imputed_a = cz_imputed[:, :, : cz_imputed.shape[-1] // 2].clone()
-                cz_imputed_b = cz_imputed[:, :, cz_imputed.shape[-1] // 2 :].clone()
-            elif mode == "continue":
-                cz_imputed_a = cz_imputed[:, :, : cz_imputed.shape[-1]].clone()
-                cz_imputed_b = _cz[:, :, :0].clone() # empty 
-            elif mode == "reverse-continue":
-                cz_imputed_a = _cz[:, :, :0].clone() # empty
-                cz_imputed_b = cz_imputed[:, :, : cz_imputed.shape[-1]].clone()
-            else:
-                raise ValueError(f"mode {mode} not supported")
-
-            if debug:
-                # add to our c_vamp
-                if cz_imputed_a.shape[-1] > 0:
-                    print("new_prefix added")
-                    self.to_signal(cz_imputed_a).cpu().widget()
-                if cz_imputed_b.shape[-1] >  0:
-                    print("new_suffix added")   
-                    self.to_signal(cz_imputed_b).cpu().widget()
-
-            c_vamp['prefix'].append(cz_imputed_a.clone())
-            c_vamp['suffix'].insert(0, cz_imputed_b.clone())
-
-            n_to_insert = c_seq_len - (cz_imputed_a.shape[-1] + cz_imputed_b.shape[-1])
-            to_insert = torch.zeros(cz_imputed_a.shape[0], cz_imputed_a.shape[1], n_to_insert).long().to(self.device)
-            _cz = torch.cat([cz_imputed_a, to_insert, cz_imputed_b], dim=-1)
-
-            if debug:
-                print("tokens to infer next round (area to insert in the middle)")
-                self.to_signal(_cz).cpu().widget()
-
-
-
-
-        prefix_codes = torch.cat(c_vamp['prefix'], dim=-1)
-        suffix_codes = torch.cat(c_vamp['suffix'], dim=-1)
-        c_vamp = torch.cat([prefix_codes, suffix_codes], dim=-1)
-        return c_vamp
-
+ 
     def coarse_vamp_v2(
         self, 
         signal, 
@@ -390,6 +295,7 @@ class Interface:
                 downsample_factor=downsample_factor,
                 periodic_width=periodic_width,
                 periodic_dropout=periodic_dropout,
+                add_random_periodic_offset=True,
                 periodic_width_dropout=periodic_width_dropout,
                 mask=cz_mask, 
                 ext_mask=ext_mask, 

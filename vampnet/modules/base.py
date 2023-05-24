@@ -44,6 +44,7 @@ class VampBase(at.ml.BaseModel):
         periodic_width: int = 1,
         periodic_width_dropout: float = 0.0,
         periodic_dropout: float = 0.0,
+        add_random_periodic_offset: bool = False,  # TODO: should be always false lol this is hacky
         n_conditioning_codebooks: Optional[int] = None,
         noise_mode: str = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -84,6 +85,7 @@ class VampBase(at.ml.BaseModel):
                                 if torch.bernoulli(torch.tensor(periodic_dropout)).item() == 1:
                                     # if we win, skip
                                     continue
+
                             # figure out how wide the mask should be
                             j_start = max(0, j - periodic_width // 2)
                             j_end = min(probs.shape[-1] - 1, j + periodic_width // 2) + 1
@@ -92,6 +94,10 @@ class VampBase(at.ml.BaseModel):
                             j_fill = torch.ones_like(j_mask) * (1 - j_mask)
                             # fill
                             probs[i, :, j_start:j_end] = 1 - j_fill
+                if add_random_periodic_offset:
+                    # add a random offset to the mask
+                    offset = torch.randint(0, downsample_factor[0], (1,))
+                    probs = torch.roll(probs, offset.item(), dims=-1)
 
             mask = torch.bernoulli(probs)
             mask = mask.round().long()
