@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
+import loralib as lora
 
 from .base import VampBase
 from .activations import get_activation
@@ -12,6 +13,8 @@ from .layers import CodebookEmbedding
 from .layers import FiLM
 from .layers import SequentialWithFiLM
 from .layers import WNConv1d
+
+LORA_R = 4
 
 
 class RMSNorm(nn.Module):
@@ -86,9 +89,9 @@ class MultiHeadRelativeAttention(nn.Module):
         self.attention_max_distance = attention_max_distance
 
         # Create linear query, key, value projections
-        self.w_qs = nn.Linear(d_model, d_model, bias=False)
+        self.w_qs = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
         self.w_ks = nn.Linear(d_model, d_model, bias=False)
-        self.w_vs = nn.Linear(d_model, d_model, bias=False)
+        self.w_vs = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
 
         # Create linear final output projection
         self.fc = nn.Linear(d_model, d_model, bias=False)

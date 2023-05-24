@@ -260,6 +260,7 @@ def train(
     suffix_amt: float = 0.0,
     prefix_dropout: float = 0.1,
     suffix_dropout: float = 0.1,
+    fine_tune: bool = False, 
     quiet: bool = False,
 ):
     assert codec_ckpt is not None, "codec_ckpt is required"
@@ -309,6 +310,11 @@ def train(
     )
 
     criterion = CrossEntropyLoss()
+
+    if fine_tune:
+        import loralib as lora
+        lora.mark_only_lora_as_trainable(model)
+
 
     class Trainer(at.ml.BaseTrainer):
         _last_grad_norm = 0.0
