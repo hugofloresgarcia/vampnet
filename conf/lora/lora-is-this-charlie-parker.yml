@@ -1,5 +1,5 @@
 $include:
-  - conf/lora.yml
+  - conf/lora/lora.yml
 
 fine_tune: True
 

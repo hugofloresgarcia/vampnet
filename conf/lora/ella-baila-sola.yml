@@ -1,0 +1,10 @@
+$include:
+  - conf/lora/lora.yml
+
+fine_tune: True
+
+train/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/subsets/ella-baila-sola.mp3
+
+val/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/subsets/ella-baila-sola.mp3
