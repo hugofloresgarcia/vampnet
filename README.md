@@ -31,6 +31,10 @@ pip install -e ./vampnet2
 This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
 Config files are stored in the `conf/` folder. 
 
+# How the code is structured
+
+This code was written fast to meet a publication deadline, so it can be messy and redundant at times. Currently working on cleaning it up. 
+
 # Usage
 
 ## Staging a Run
