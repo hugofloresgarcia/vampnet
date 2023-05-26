@@ -2,27 +2,6 @@
 
 This repository contains recipes for training generative music models on top of the Lyrebird Audio Codec. 
 
-## Install hooks
-
-First install the pre-commit util:
-
-https://pre-commit.com/#install
-
-    pip install pre-commit  # with pip
-    brew install pre-commit  # on Mac
-
-Then install the git hooks
-
-    pre-commit install
-    # check .pre-commit-config.yaml for details of hooks
-
-Upon `git commit`, the pre-commit hooks will be run automatically on the stage files (i.e. added by `git add`)
-
-**N.B. By default, pre-commit checks only run on staged files**
-
-If you need to run it on all files:
-
-    pre-commit run --all-files
 
 ## Development
 ### Setting everything up

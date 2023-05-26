@@ -62,6 +62,7 @@ def load_random_audio():
 def ez_vamp(
     input_audio, init_temp, final_temp,  
     mask_periodic_amt, mask_periodic_width, num_steps,  
+    stretch_factor, 
 ):
     print(input_audio)
     sig = at.AudioSignal(input_audio)
@@ -74,7 +75,8 @@ def ez_vamp(
         prefix_dur_s=0.0,
         suffix_dur_s=0.0,
         num_vamps=1,
-        downsample_factor=mask_periodic_amt,
+        downsample_factor=mask_periodic_amt, 
+        stretch_factor=stretch_factor,
         periodic_width=mask_periodic_width,
         periodic_dropout=0.0,
         periodic_width_dropout=0.0,
@@ -105,7 +107,7 @@ def vamp(
     num_vamps, mode, use_beats, num_steps, snap_to_beats, 
     beat_unmask_drop,  mask_periodic_width, 
     mask_periodic_dropout, mask_periodic_width_dropout, 
-    n_conditioning_codebooks, use_coarse2fine
+    n_conditioning_codebooks, use_coarse2fine, stretch_factor, 
 ):
     # try:
         print(input_audio)
@@ -146,6 +148,7 @@ def vamp(
                 suffix_dur_s=suffix_s,
                 num_vamps=num_vamps,
                 downsample_factor=mask_periodic_amt,
+                stretch_factor=stretch_factor,
                 periodic_width=mask_periodic_width,
                 periodic_dropout=mask_periodic_dropout,
                 periodic_width_dropout=mask_periodic_width_dropout,
@@ -158,7 +161,7 @@ def vamp(
     
             if use_coarse2fine: 
                 zv = interface.coarse_to_fine(zv)
-            # mask = interface.to_signal(mask_z).cpu()
+            mask = interface.to_signal(mask_z).cpu()
 
             sig = interface.to_signal(zv).cpu()
             print("done")
@@ -166,9 +169,9 @@ def vamp(
         out_dir = OUT_DIR / str(uuid.uuid4())
         out_dir.mkdir()
         sig.write(out_dir / "output.wav")
-        # mask.write(out_dir / "mask.wav")
-        # return sig.path_to_file, mask.path_to_file
-        return sig.path_to_file, None
+        mask.write(out_dir / "mask.wav")
+        return sig.path_to_file, mask.path_to_file
+        # return sig.path_to_file, mask_z
     # except Exception as e:
     #     raise gr.Error(f"failed with error: {e}")
         
@@ -180,7 +183,7 @@ def save_vamp(
     mask_up_chk, up_factor, 
     num_vamps, mode, output_audio, notes, use_beats, num_steps, snap_to_beats,
     beat_unmask_drop, mask_periodic_width, mask_periodic_dropout, mask_periodic_width_dropout, 
-    n_conditioning_codebooks, use_coarse2fine
+    n_conditioning_codebooks, use_coarse2fine, stretch_factor
 ):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -215,6 +218,7 @@ def save_vamp(
         "mask_periodic_width_dropout": mask_periodic_width_dropout, 
         "n_conditioning_codebooks": n_conditioning_codebooks, 
         "use_coarse2fine": use_coarse2fine,
+        "stretch_factor": stretch_factor,
     }
 
     # save with yaml
@@ -331,6 +335,14 @@ with gr.Blocks() as demo:
                 label="number of conditioning codebooks. probably 0", 
                 value=0,
                 precision=0,
+            )
+
+            stretch_factor = gr.Slider(
+                label="time stretch factor",
+                minimum=0,
+                maximum=64, 
+                step=1,
+                value=1, 
             )
 
             mask_periodic_amt = gr.Slider(
@@ -501,7 +513,7 @@ with gr.Blocks() as demo:
             num_vamps, mode, use_beats, num_steps, snap_to_beats, 
             beat_unmask_drop, mask_periodic_width, 
             mask_periodic_dropout, mask_periodic_width_dropout, 
-            n_conditioning_codebooks, use_coarse2fine
+            n_conditioning_codebooks, use_coarse2fine, stretch_factor
         ],
         outputs=[output_audio, audio_mask], 
         api_name="vamp"
@@ -520,7 +532,7 @@ with gr.Blocks() as demo:
             notes_text, use_beats, num_steps, snap_to_beats, 
             beat_unmask_drop, mask_periodic_width, 
             mask_periodic_dropout, mask_periodic_width_dropout, 
-            n_conditioning_codebooks, use_coarse2fine
+            n_conditioning_codebooks, use_coarse2fine, stretch_factor
         ],
         outputs=[thank_you, download_file]
     )
@@ -529,7 +541,7 @@ with gr.Blocks() as demo:
     ez_vamp_button.click(
         fn=ez_vamp,
         inputs=[input_audio, init_temp, final_temp, mask_periodic_amt,
-                mask_periodic_width, num_steps ],
+                mask_periodic_width, num_steps, stretch_factor ],
         outputs=[output_audio],
         api_name="ez_vamp"
     )

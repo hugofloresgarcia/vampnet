@@ -249,6 +249,7 @@ class Interface(torch.nn.Module):
         suffix_dur_s: float = 0.0,
         num_vamps: int = 1,
         downsample_factor: int = None,
+        stretch_factor: int = None,
         periodic_width: int = 1,
         periodic_dropout=0.0,
         periodic_width_dropout=0.0, 
@@ -269,11 +270,33 @@ class Interface(torch.nn.Module):
         n_prefix = self.s2t(prefix_dur_s)
         n_suffix = self.s2t(suffix_dur_s)
 
+
+        # hmm, should be a better way to do this? think we just need a mask builder class
+        add_random_periodic_offset = True
+
+        if stretch_factor is not None and stretch_factor > 1:
+            print(f"stretching by {stretch_factor}")
+            assert stretch_factor >= 1, "stretch factor must be >= 1"
+            cz = cz.repeat_interleave(stretch_factor, dim=-1)
+
+            # the downsample factor is now relative to the stretched sequence
+            assert downsample_factor is None or downsample_factor <= 2, "downsample_factor must be None when stretch_factor is not None"
+
+            downsample_factor = stretch_factor
+            add_random_periodic_offset = False
+
+            assert n_prefix == 0 and n_suffix == 0, "prefix and suffix must be 0 when stretch_factor is not None"
+            assert ext_mask is None, "ext_mask must be None when stretch_factor is not None"
+
+            # trim cz to the original length
+            cz = cz[:, :, :c_seq_len]
+
+
         assert cz.shape[-1] <= self.s2t(self.coarse.chunk_size_s), f"the sequence of tokens provided must match the one specified in the coarse chunk size, but got {cz.shape[-1]} and {self.s2t(self.coarse.chunk_size_s)}"
         assert n_prefix + n_suffix < c_seq_len, "prefix and suffix must be smaller than the chunk size"
 
         if swap_prefix_suffix:
-            # swap the prefix and suffix regions in c_z
+            # swap the prefix and suffix 
             assert n_prefix == n_suffix, "prefix and suffix must be the same size for now"
             cz[:, :, :n_prefix], cz[:, :, c_seq_len-n_suffix:] = cz[:, :, c_seq_len-n_suffix:], cz[:, :, :n_prefix].clone()
         
@@ -295,7 +318,7 @@ class Interface(torch.nn.Module):
                 downsample_factor=downsample_factor,
                 periodic_width=periodic_width,
                 periodic_dropout=periodic_dropout,
-                add_random_periodic_offset=True,
+                add_random_periodic_offset=add_random_periodic_offset,
                 periodic_width_dropout=periodic_width_dropout,
                 mask=cz_mask, 
                 ext_mask=ext_mask, 

@@ -71,7 +71,7 @@ class VampBase(at.ml.BaseModel):
                         probs[i, :, -n:] = 0.0
             
             # if we have a downsample factor, set the mask prob to 0
-            if downsample_factor is not None:
+            if downsample_factor is not None and downsample_factor > 0:
                 if not isinstance(downsample_factor, torch.Tensor):
                     downsample_factor = scalar_to_batch_tensor(downsample_factor, x.shape[0])
                 for i, factor in enumerate(downsample_factor):
@@ -200,7 +200,6 @@ class VampBase(at.ml.BaseModel):
         # find where the mask token is and replace it with silence in the audio
         for tstep in range(z.shape[-1]):
             if torch.any(z[:, :, tstep] == self.mask_token):
-                print("mask token found at step", tstep)
                 sample_idx_0 = tstep * codec.hop_length
                 sample_idx_1 = sample_idx_0 + codec.hop_length
                 signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0

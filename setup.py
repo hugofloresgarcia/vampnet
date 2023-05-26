@@ -32,12 +32,13 @@ setup(
         "rich",
         "audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git",
         "lac @ git+https://github.com/hugofloresgarcia/lac.git",
-        "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat.git",
+        # "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat.git",
         "torch==2.0",
         "tqdm",
         "tensorboard",
         "google-cloud-logging==2.2.0",
         "einops",
-        "frechet_audio_distance"
+        # "frechet_audio_distance", 
+        "gradio"
     ],
 )

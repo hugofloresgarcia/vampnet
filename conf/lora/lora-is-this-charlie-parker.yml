@@ -4,7 +4,7 @@ $include:
 fine_tune: True
 
 train/AudioLoader.sources:
-  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/
+  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/Charlie Parker - Donna Lee.mp3
 
 val/AudioLoader.sources:
-  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/
+  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/Charlie Parker - Donna Lee.mp3

@@ -1,0 +1,12 @@
+$include:
+  - conf/lora/lora.yml
+
+fine_tune: True
+
+train/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/subsets/birds
+  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/
+
+val/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/subsets/birds
+  - /media/CHONK/hugo/spotdl/subsets/this-is-charlie-parker/
