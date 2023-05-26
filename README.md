@@ -1,80 +1,58 @@
-# Lyrebird VampNet
+# VampNet
 
-This repository contains recipes for training generative music models on top of the Lyrebird Audio Codec. 
+This repository contains recipes for training generative music models on top of the Lyrebird Audio Codec.
 
+# Setting up
 
-## Development
-### Setting everything up
+## Install LAC
 
-Run the setup script to set up your environment via:
+install AudioTools
 
 ```bash
-python env/setup.py
+git clone https://github.com/hugofloresgarcia/audiotools.git
+pip install -e ./audiotools
 ```
 
-The setup script does not require any dependencies beyond just Python.
-Once run, follow the instructions it prints out to create your
-environment file, which will be at `env/env.sh`.
-
-Note that if this is a new machine, and
-the data is not downloaded somewhere on it already, it will ask you
-for a directory to download the data to.
-
-For Github setup, if you don't have a .netrc token, create one by going to your Github profile -> Developer settings -> Personal access tokens -> Generate new token. Copy the token and [keep it secret, keep it safe](https://www.youtube.com/watch?v=iThtELZvfPs).
-
-When complete, run:
+install the LAC library. 
 
 ```bash
-source env/env.sh
+git clone https://github.com/hugofloresgarcia/lac.git
+pip install -e ./lac
 ```
 
-Now build and launch the Docker containers:
+install VampNet
 
 ```bash
-docker compose up -d
+git clone https://github.com/hugofloresgarcia/vampnet2.git
+pip install -e ./vampnet2
 ```
 
-This builds and runs a Jupyter notebook and Tensorboard
-in the background, which points to your `TENSORBOARD_PATH`
-env. variable.
+## A note on Argbind
+This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
+Config files are stored in the `conf/` folder. 
 
-Now, launch your development environment via:
+# Usage
+
+## Staging a Run
+
+Staging a run makes a copy of all the git-tracked files in the codebase and saves them to a folder for reproducibility. You can then run the training script from the staged folder. 
+
+coming soon
+
+## Training a model
 
 ```bash
-docker compose run dev
+python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints
 ```
 
-To tear down your development environment, just do
-
+## Fine-tuning
+To fine-tune a model, see the configuration files under `conf/lora/`. 
+You just need to provide a list of audio files // folders to fine-tune on, then launch the training job as usual.
 ```bash
-docker compose down
+python scripts/exp/train.py --args.load conf/lora/birds.yml --save_path /path/to/checkpoints
 ```
 
-
-### Launching an experiment
-
-Experiments are first _staged_ by running the `stage` command (which corresponds to the script `scripts/exp/stage.py`).
-
-`stage` creates a directory with a copy of all of the Git-tracked files in the root repository.`stage` launches a shell into said directory, so all commands are run on the
-copy of the original repository code. This is useful for rewinding to an old experiment
-and resuming it, for example. Even if the repository code changes, the snapshot in the experiment directory is unchanged from the original run, so it can be re-used.
-
-Then, the experiment can be run via:
-
+## Launching the Gradio Interface
 ```bash
-torchrun --nproc_per_node gpu \
-  scripts/exp/train.py \
-  --args.load=conf/args.yml \
-```
-
-The full settings are in [conf/daps/train.yml](conf/daps/train.yml).
-
-### Useful commands
-
-#### Cleaning up after a run
-
-Sometimes DDP runs fail to clear themselves out of the machine. To fix this, run
-
-```bash
-cleanup
+python demo.py --args.load conf/interface/spotdl.yml --Interface.device cuda
 ```

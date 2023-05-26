@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from einops import rearrange
 from tqdm import tqdm
 
+from ..util import scalar_to_batch_tensor
+
 
 def log(t, eps=1e-20):
     return torch.log(t + eps)
@@ -23,9 +25,6 @@ def gumbel_noise(t):
 def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim=dim)
 
-
-def scalar_to_batch_tensor(x, batch_size):
-    return torch.tensor(x).repeat(batch_size)
 
 class VampBase(at.ml.BaseModel):
     def forward(self, x: torch.Tensor, r: torch.Tensor):
@@ -150,6 +149,8 @@ class VampBase(at.ml.BaseModel):
             z_hat = z_hat * mask + truth * (1 - mask)
 
             z_hat = rearrange(z_hat, "b c t p -> b p (t c)")
+        else:
+            raise ValueError(f"invalid noise mode for adding truth to logits {self.noise_mode}")
 
         return z_hat
 
@@ -186,6 +187,9 @@ class VampBase(at.ml.BaseModel):
 
     @torch.no_grad()
     def to_signal(self, z, codec):
+        """
+        convert a sequence of latents to a signal. 
+        """
         if z.ndim == 2:
             z = self.embedding.unflatten(z)
         assert z.ndim == 3
@@ -207,122 +211,7 @@ class VampBase(at.ml.BaseModel):
         return signal
 
     @torch.no_grad()
-    def sample(self, **kwargs):
-        if self.noise_mode == "mask":
-            return self.maskgit_sample(**kwargs)
-        else:
-            return self.paella_sample(**kwargs)
-
-    def paella_sample(
-        self,
-        codec,
-        time_steps: int = 400,
-        sampling_steps: int = 36,
-        start_tokens: Optional[torch.Tensor] = None,
-        mask: Optional[torch.Tensor] = None,
-        temperature: Union[float, Tuple[float, float]] = 0.8,
-        top_k: int = None,
-        sample: str = "gumbel",
-        renoise_mode: str = "start",
-        renoise_steps=None,
-        typical_filtering=True,
-        typical_mass=0.2,
-        typical_min_tokens=1,
-        return_signal=True,
-    ):
-        
-        r = torch.linspace(0, 1, sampling_steps + 1)[:-1][:, None].to(self.device)
-        if renoise_steps == None:
-            renoise_steps = sampling_steps - 1
-
-        if isinstance(temperature, float):
-            temperature = torch.tensor(temperature).repeat(sampling_steps)
-        elif isinstance(temperature, tuple):
-            assert len(temperature) == 2
-            l, h = temperature
-            temperature = torch.linspace(l, h, sampling_steps)
-        else:
-            raise TypeError(f"invalid type for temperature")
-
-        if self.n_conditioning_codebooks > 0:
-            assert (
-                start_tokens is not None
-            ), "must provide start_tokens if n_conditioning_codebooks > 0"
-
-        if start_tokens is None:
-            if self.noise_mode == "noise":
-                z = torch.randint(
-                    0, self.vocab_size, size=(1, self.n_codebooks, time_steps)
-                ).to(self.device)
-            elif self.noise_mode == "mask":
-                z = torch.full((1, self.n_codebooks, time_steps), self.mask_token)
-        else:
-            z = start_tokens
-            assert (
-                z.ndim == 3
-            ), f"start_tokens must be shape (batch, n_codebooks, seq_len), got {z.shape}"
-            assert z.shape[0] == 1, f"batch size must be 1"
-
-        if mask is None:
-            mask = torch.ones(z.shape[0], z.shape[-1]).to(self.device).int()
-            mask = mask[:, None, :]
-            mask = mask.repeat(1, z.shape[1], 1)
-
-        mask[:, : self.n_conditioning_codebooks, :] = 0.0
-
-
-        z_true = z.clone()
-
-        z, mask = self.add_noise(z, r=r[0], random_x=None, mask=mask)
-        z_init = z.clone()
-        for i, tmpt in enumerate(temperature):
-            if renoise_mode == "prev":
-                z_prev = z.clone()
-
-            latents = self.embedding.from_codes(z, codec)
-            logits = self.forward(latents, r[i])
-
-            # for mask mode
-            logits = self.add_truth_to_logits(z_true, logits, mask)
-
-            # Apply topk sampling
-            logits = logits.permute(0, 2, 1)
-
-            z = self.sample_from_logits(
-                logits,
-                top_k=top_k,
-                temperature=tmpt,
-                sample=sample,
-                typical_filtering=typical_filtering,
-                typical_mass=typical_mass,
-                typical_min_tokens=typical_min_tokens,
-            )
-
-            # add back in conditioning codebooks
-            z = self.embedding.unflatten(z, n_codebooks=self.n_predict_codebooks)
-            z = torch.cat(
-                [z_init[:, : self.n_conditioning_codebooks, :], z], dim=1
-            ).int()
-
-            if i < renoise_steps:
-                if renoise_mode == "prev":
-                    z, _ = self.add_noise(z, r[i + 1], random_x=z_prev)
-                elif renoise_mode == "start":
-                    z, _ = self.add_noise(z, r[i + 1], random_x=z_init)
-                elif renoise_mode == "rand":
-                    z, _ = self.add_noise(z, r[i + 1])
-                else:
-                    raise ValueError(f"Invalid renoise_mode: {renoise_mode}")
-
-            if mask is not None:
-                z = start_tokens * (1 - mask) + z * mask
-
-        if return_signal:
-            return self.to_signal(z, codec)
-        else:
-            return z
-
-    def maskgit_sample(
+    def sample(
         self,
         codec,
         time_steps: int = 300,

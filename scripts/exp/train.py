@@ -115,6 +115,10 @@ def load(
         }
         if (Path(kwargs["folder"]) / "vampnet").exists():
             model, v_extra = VampNet.load_from_folder(**kwargs)
+        else:
+            raise ValueError(
+                f"Could not find a VampNet checkpoint in {kwargs['folder']}"
+            )
 
     codec = LAC.load(args["codec_ckpt"], map_location="cpu")
     codec.eval()
@@ -149,25 +153,6 @@ def load(
     }
 
 
-def get_gpu_memory_map():
-    """Get the current gpu usage.
-
-    Returns
-    -------
-    usage: dict
-        Keys are device ids as integers.
-        Values are memory usage as integers in MB.
-    """
-    result = subprocess.check_output(
-        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"],
-        encoding="utf-8",
-    )
-    # Convert lines into a dictionary
-    gpu_memory = [int(x) for x in result.strip().split("\n")]
-    gpu_memory_map = dict(zip(range(len(gpu_memory)), gpu_memory))
-    gpu_memory_map = {f"gpu/{k}": v / 1024 for k, v in gpu_memory_map.items()}
-    return gpu_memory_map
-
 
 def num_params_hook(o, p):
     return o + f" {p/1e6:<.3f}M params."
@@ -189,7 +174,6 @@ def accuracy(
     target: torch.Tensor,
     top_k: int = 1,
     ignore_index: Optional[int] = None,
-    **kwargs,
 ) -> torch.Tensor:
     # Flatten the predictions and targets to be of shape (batch_size * sequence_length, n_class)
     preds = rearrange(preds, "b p s -> (b s) p")
@@ -214,30 +198,6 @@ def accuracy(
 
     return accuracy
 
-def sample_prefix_suffix_amt(
-        z,
-        n_batch, 
-        prefix_amt, 
-        suffix_amt, 
-        prefix_dropout, 
-        suffix_dropout, 
-        rng 
-    ):
-    """
-    Sample the number of prefix and suffix tokens to drop.
-    """
-    if prefix_amt > 0.0:
-        prefix_mask = flip_coin(n_batch, 1 - prefix_dropout, rng)
-        n_prefix = int(prefix_amt * z.shape[-1]) * prefix_mask
-    else:
-        n_prefix = None
-    if suffix_amt > 0.0:
-        suffix_mask = flip_coin(n_batch, 1 - suffix_dropout, rng)
-        n_suffix = int(suffix_amt * z.shape[-1]) * suffix_mask
-    else:
-        n_suffix = None
-    return n_prefix, n_suffix
-
 
 @argbind.bind(without_prefix=True)
 def train(
@@ -256,10 +216,6 @@ def train(
     num_workers: int = 10,
     detect_anomaly: bool = False,
     grad_clip_val: float = 5.0,
-    prefix_amt: float = 0.0,
-    suffix_amt: float = 0.0,
-    prefix_dropout: float = 0.1,
-    suffix_dropout: float = 0.1,
     fine_tune: bool = False, 
     quiet: bool = False,
 ):
@@ -342,16 +298,12 @@ def train(
                         target=r_unmasked_target,
                         ignore_index=IGNORE_INDEX,
                         top_k=topk,
-                        task="multiclass",
-                        num_classes=vn.vocab_size,
                     )
                     output[f"{tag}/masked"] = accuracy(
                         preds=r_z_hat,
                         target=r_masked_target,
                         ignore_index=IGNORE_INDEX,
                         top_k=topk,
-                        task="multiclass",
-                        num_classes=vn.vocab_size,
                     )
 
         def train_loop(self, engine, batch):
@@ -370,15 +322,7 @@ def train(
                 n_batch = z.shape[0]
                 r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-                n_prefix, n_suffix = sample_prefix_suffix_amt(z=z, 
-                    n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
-                    prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
-                    rng=rng
-                )
-
-                z_mask, mask = vn.add_noise(
-                    z, r, n_prefix=n_prefix, n_suffix=n_suffix
-                )
+                z_mask, mask = vn.add_noise(z, r)
                 z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
                 dtype = torch.bfloat16 if accel.amp else None
@@ -454,13 +398,7 @@ def train(
             n_batch = z.shape[0]
             r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-            n_prefix, n_suffix = sample_prefix_suffix_amt(z=z,
-                n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
-                prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
-                rng=rng
-            )
-
-            z_mask, mask = vn.add_noise(z, r, n_prefix=n_prefix, n_suffix=n_suffix)
+            z_mask, mask = vn.add_noise(z, r)
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
@@ -574,17 +512,8 @@ def train(
                     )
 
         def save_imputation(self, z: torch.Tensor):
-            # imputations
-            _prefix_amt = prefix_amt
-            _suffix_amt = suffix_amt
-
-            if _prefix_amt == 0:
-                _prefix_amt = 0.25
-            if _suffix_amt == 0:
-                _suffix_amt = 0.25
-
-            n_prefix = int(z.shape[-1] * _prefix_amt)
-            n_suffix = int(z.shape[-1] * _suffix_amt)
+            n_prefix = int(z.shape[-1] * 0.25)
+            n_suffix = int(z.shape[-1] *  0.25)
             downsample_factor = None
 
             vn = accel.unwrap(model)
@@ -647,13 +576,7 @@ def train(
 
             n_batch = z.shape[0]
 
-            n_prefix, n_suffix = sample_prefix_suffix_amt(z=z,
-                n_batch=n_batch, prefix_amt=prefix_amt, suffix_amt=suffix_amt,
-                prefix_dropout=prefix_dropout, suffix_dropout=suffix_dropout,
-                rng=rng
-            )
-
-            z_mask, mask = vn.add_noise(z, r, n_prefix=n_prefix, n_suffix=n_suffix)
+            z_mask, mask = vn.add_noise(z, r)
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
@@ -664,7 +587,6 @@ def train(
             z_pred = vn.embedding.unflatten(z_pred, n_codebooks=vn.n_predict_codebooks)
             z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
 
-            print("z_mask", z_mask.shape)
             generated = vn.to_signal(z_pred, codec)
             reconstructed = vn.to_signal(z, codec)
             masked = vn.to_signal(z_mask.squeeze(1), codec)

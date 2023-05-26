@@ -56,7 +56,7 @@ class CoarseCond:
 
     def __call__(self, sig, interface):
         n_conditioning_codebooks = interface.coarse.n_codebooks - self.num_codebooks
-        zv = interface.coarse_vamp_v2(sig, 
+        zv = interface.coarse_vamp(sig, 
             n_conditioning_codebooks=n_conditioning_codebooks,
             downsample_factor=self.downsample_factor, 
         )
@@ -113,7 +113,7 @@ def mask_ratio_1_step(ratio=1.0):
         r = interface.coarse.invgamma(ratio).to(interface.device)
         intensity = 1-r
 
-        zv = interface.coarse_vamp_v2(
+        zv = interface.coarse_vamp(
             sig, 
             sample='argmax',
             sampling_steps=1, 
@@ -125,7 +125,7 @@ def mask_ratio_1_step(ratio=1.0):
 
 def num_sampling_steps(num_steps=1):
     def wrapper(sig, interface):
-        zv = interface.coarse_vamp_v2(
+        zv = interface.coarse_vamp(
             sig, 
             downsample_factor=16,
             sampling_steps=num_steps, 
@@ -143,7 +143,7 @@ def beat_mask(ctx_time):
             after_beat_s=ctx_time,
             invert=True
         )
-        zv = interface.coarse_vamp_v2(
+        zv = interface.coarse_vamp(
             sig, 
             ext_mask=beat_mask, 
         )
@@ -154,7 +154,7 @@ def beat_mask(ctx_time):
 
 def inpaint(ctx_time):
     def wrapper(sig, interface):
-        zv = interface.coarse_vamp_v2(
+        zv = interface.coarse_vamp(
             sig, 
             prefix_dur_s=ctx_time,
             suffix_dur_s=ctx_time,

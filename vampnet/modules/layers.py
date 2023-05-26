@@ -132,6 +132,11 @@ class CodebookEmbedding(nn.Module):
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
 
     def from_codes(self, codes: torch.Tensor, codec):
+        """ 
+        get a sequence of continuous embeddings from a sequence of discrete codes. 
+        unlike it's counterpart in the original VQ-VAE, this function adds for any special tokens
+        necessary for the language model, like <MASK>. 
+        """
         n_codebooks = codes.shape[1]
         latent = []
         for i in range(n_codebooks):
@@ -151,14 +156,23 @@ class CodebookEmbedding(nn.Module):
         return latent
 
     def forward(self, latents: torch.Tensor):
+        """
+        project a sequence of latents to a sequence of embeddings
+        """
         x = self.out_proj(latents)
         return x
 
     def flatten(self, tokens: torch.Tensor, n_codebooks: int = None):
+        """ 
+        flatten a sequence of tokens from (batch, codebook, time) to (batch, codebook * time)
+        """
         n_c = n_codebooks if n_codebooks is not None else self.n_codebooks
         return rearrange(tokens, "b c t -> b (t c)", c=n_c)
 
     def unflatten(self, flat_tokens: torch.Tensor, n_codebooks: int = None):
+        """
+        unflatten a sequence of tokens from (batch, codebook * time) to (batch, codebook, time)
+        """
         nb, nt = flat_tokens.shape
 
         n_c = n_codebooks if n_codebooks is not None else self.n_codebooks

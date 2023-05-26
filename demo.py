@@ -48,6 +48,7 @@ def load_audio(file):
     sig.write(out_dir / "input.wav")
     return sig.path_to_file
 
+
 def load_random_audio():
     index = np.random.randint(0, len(dataset))
     sig = dataset[index]["signal"]
@@ -68,7 +69,7 @@ def ez_vamp(
     sig = at.AudioSignal(input_audio)
 
     print(f"running standard vampnet with {num_vamps} vamps")
-    zv = interface.coarse_vamp_v2(
+    zv = interface.coarse_vamp(
         sig, 
         sampling_steps=num_steps,
         temperature=(init_temp, final_temp),
@@ -140,7 +141,7 @@ def vamp(
 
         if mode == "standard": 
             print(f"running standard vampnet with {num_vamps} vamps")
-            zv, mask_z = interface.coarse_vamp_v2(
+            zv, mask_z = interface.coarse_vamp(
                 sig, 
                 sampling_steps=num_steps,
                 temperature=(init_temp, final_temp),

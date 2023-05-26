@@ -20,6 +20,14 @@ def signal_concat(
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
 
+class SignalPrompt:
+
+    def __init__(self, signal: AudioSignal):
+        self.sig = signal
+
+
+
+
 class Interface(torch.nn.Module):
     def __init__(
         self,
@@ -28,7 +36,7 @@ class Interface(torch.nn.Module):
         codec_ckpt: str = None,
         wavebeat_ckpt: str = None,
         device: str = "cpu",
-        coarse_chunk_size_s: int =  5, 
+        coarse_chunk_size_s: int =  10, 
         coarse2fine_chunk_size_s: int =  3,
     ):
         super().__init__()
@@ -141,7 +149,7 @@ class Interface(torch.nn.Module):
         """make a beat synced mask. that is, make a mask that 
         places 1s at and around the beat, and 0s everywhere else. 
         """
-        assert hasattr(self, "beat_tracker"), "No beat tracker loaded"
+        assert self.beat_tracker is not None, "No beat tracker loaded"
 
         # get the beat times
         beats, downbeats = self.beat_tracker.extract_beats(signal)
@@ -242,7 +250,7 @@ class Interface(torch.nn.Module):
         return fine_z[:, :, :length].clone()
     
  
-    def coarse_vamp_v2(
+    def coarse_vamp(
         self, 
         signal, 
         prefix_dur_s: float = 0.0, 
@@ -471,7 +479,7 @@ class Interface(torch.nn.Module):
             else:
                 ext_mask = None
             
-            out_z = self.coarse_vamp_v2(
+            out_z = self.coarse_vamp(
                 sig, 
                 num_vamps=1, 
                 swap_prefix_suffix=False, 
@@ -520,7 +528,7 @@ class Interface(torch.nn.Module):
         range_fn = range if not verbose else tqdm.trange
         for i in range_fn(num_loops):
             is_flipped = i % 2 == 0
-            vamped = self.coarse_vamp_v2(
+            vamped = self.coarse_vamp(
                         signal, 
                         prefix_dur_s=prefix_dur_s,
                         suffix_dur_s=suffix_dur_s,
