@@ -95,19 +95,6 @@ def opus(sig, interface, bitrate=128):
         )
     return sig
 
-def token_noise(ratio=1.0):
-    def wrapper(sig, interface):
-        z = interface.encode(sig)
-        r = interface.coarse.invgamma(ratio).to(interface.device)
-        print(f'adding noise with ratio {ratio}')
-        z, mask = interface.coarse.add_noise(
-            z, 
-            r, 
-            noise_mode="random"
-        )
-        return interface.to_signal(z)
-    return wrapper
-
 def mask_ratio_1_step(ratio=1.0):
     def wrapper(sig, interface):
         r = interface.coarse.invgamma(ratio).to(interface.device)

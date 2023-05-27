@@ -18,6 +18,8 @@ from tensorboardX import SummaryWriter
 
 import vampnet
 from vampnet.modules.transformer import VampNet
+from vampnet.util import codebook_unflatten, codebook_flatten
+from vampnet import mask as pmask
 from lac.model.lac import LAC
 
 
@@ -322,7 +324,10 @@ def train(
                 n_batch = z.shape[0]
                 r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-                z_mask, mask = vn.add_noise(z, r)
+                mask = pmask.random(z, r)
+                mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+                z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+                
                 z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
                 dtype = torch.bfloat16 if accel.amp else None
@@ -331,14 +336,12 @@ def train(
                     # for mask mode
                     z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
-                target = vn.embedding.flatten(
+                target = codebook_flatten(
                     z[:, vn.n_conditioning_codebooks :, :],
-                    n_codebooks=vn.n_predict_codebooks,
                 )
 
-                flat_mask = vn.embedding.flatten(
+                flat_mask = codebook_flatten(
                     mask[:, vn.n_conditioning_codebooks :, :],
-                    n_codebooks=vn.n_predict_codebooks,
                 )
 
                 if vn.noise_mode == "mask":
@@ -398,21 +401,22 @@ def train(
             n_batch = z.shape[0]
             r = rng.draw(n_batch)[:, 0].to(accel.device)
 
-            z_mask, mask = vn.add_noise(z, r)
+            mask = pmask.random(z, r)
+            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
             # for mask mode
             z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
-            target = vn.embedding.flatten(
+            target = codebook_flatten(
                 z[:, vn.n_conditioning_codebooks :, :],
-                n_codebooks=vn.n_predict_codebooks,
             )
 
-            flat_mask = vn.embedding.flatten(
-                mask[:, vn.n_conditioning_codebooks :, :],
-                n_codebooks=vn.n_predict_codebooks,
+            flat_mask = codebook_flatten(
+                mask[:, vn.n_conditioning_codebooks :, :]
             )
 
             output = {}
@@ -514,14 +518,12 @@ def train(
         def save_imputation(self, z: torch.Tensor):
             n_prefix = int(z.shape[-1] * 0.25)
             n_suffix = int(z.shape[-1] *  0.25)
-            downsample_factor = None
 
             vn = accel.unwrap(model)
 
-            z_mask, mask = vn.add_noise(
-                z, r=0.0, n_prefix=n_prefix, n_suffix=n_suffix,
-                downsample_factor=downsample_factor
-            )
+            mask = pmask.inpaint(z, n_prefix, n_suffix)
+            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
             imputed_noisy = vn.to_signal(z_mask, codec)
             imputed_true = vn.to_signal(z, codec)
@@ -574,9 +576,11 @@ def train(
 
             r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
-            n_batch = z.shape[0]
 
-            z_mask, mask = vn.add_noise(z, r)
+            mask = pmask.random(z, r)
+            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
@@ -584,7 +588,7 @@ def train(
             z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
             z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
-            z_pred = vn.embedding.unflatten(z_pred, n_codebooks=vn.n_predict_codebooks)
+            z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
             z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
 
             generated = vn.to_signal(z_pred, codec)

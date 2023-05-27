@@ -9,6 +9,8 @@ import tqdm
 
 from .modules.transformer import VampNet
 from .beats import WaveBeat
+from .mask import *
+
 from lac.model.lac import LAC
 
 
@@ -18,14 +20,6 @@ def signal_concat(
     audio_data = torch.cat([x.audio_data for x in audio_signals], dim=-1)
 
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
-
-
-class SignalPrompt:
-
-    def __init__(self, signal: AudioSignal):
-        self.sig = signal
-
-
 
 
 class Interface(torch.nn.Module):
@@ -99,10 +93,6 @@ class Interface(torch.nn.Module):
 
     def to_signal(self, z: torch.Tensor):
         return self.coarse.to_signal(z, self.codec)
-    
-    def autoencode(self, signal: AudioSignal):
-        z = self.encode(signal)
-        return self.to_signal(z)
     
     def preprocess(self, signal: AudioSignal):
         signal = (
@@ -249,182 +239,30 @@ class Interface(torch.nn.Module):
         fine_z = torch.cat(fine_z, dim=-1)
         return fine_z[:, :, :length].clone()
     
- 
     def coarse_vamp(
         self, 
-        signal, 
-        prefix_dur_s: float = 0.0, 
-        suffix_dur_s: float = 0.0,
-        num_vamps: int = 1,
-        downsample_factor: int = None,
-        stretch_factor: int = None,
-        periodic_width: int = 1,
-        periodic_dropout=0.0,
-        periodic_width_dropout=0.0, 
-        intensity: float = 1.0, 
-        debug=False,
-        swap_prefix_suffix=False, 
-        ext_mask=None,
-        n_conditioning_codebooks=None,
-        verbose=False,
+        z, 
+        mask,
         return_mask=False,
         **kwargs
     ):
-        z = self.encode(signal)
-
         # coarse z
         cz = z[:, : self.coarse.n_codebooks, :].clone()
-        c_seq_len = cz.shape[-1]
-        n_prefix = self.s2t(prefix_dur_s)
-        n_suffix = self.s2t(suffix_dur_s)
-
-
-        # hmm, should be a better way to do this? think we just need a mask builder class
-        add_random_periodic_offset = True
-
-        if stretch_factor is not None and stretch_factor > 1:
-            print(f"stretching by {stretch_factor}")
-            assert stretch_factor >= 1, "stretch factor must be >= 1"
-            cz = cz.repeat_interleave(stretch_factor, dim=-1)
-
-            # the downsample factor is now relative to the stretched sequence
-            assert downsample_factor is None or downsample_factor <= 2, "downsample_factor must be None when stretch_factor is not None"
-
-            downsample_factor = stretch_factor
-            add_random_periodic_offset = False
-
-            assert n_prefix == 0 and n_suffix == 0, "prefix and suffix must be 0 when stretch_factor is not None"
-            assert ext_mask is None, "ext_mask must be None when stretch_factor is not None"
-
-            # trim cz to the original length
-            cz = cz[:, :, :c_seq_len]
-
-
         assert cz.shape[-1] <= self.s2t(self.coarse.chunk_size_s), f"the sequence of tokens provided must match the one specified in the coarse chunk size, but got {cz.shape[-1]} and {self.s2t(self.coarse.chunk_size_s)}"
-        assert n_prefix + n_suffix < c_seq_len, "prefix and suffix must be smaller than the chunk size"
 
-        if swap_prefix_suffix:
-            # swap the prefix and suffix 
-            assert n_prefix == n_suffix, "prefix and suffix must be the same size for now"
-            cz[:, :, :n_prefix], cz[:, :, c_seq_len-n_suffix:] = cz[:, :, c_seq_len-n_suffix:], cz[:, :, :n_prefix].clone()
-        
-        # we'll keep the final codes sequence here
-        c_vamp = {
-            'prefix': [cz[:, :, :n_prefix].clone()],
-            'suffix': [cz[:, :, c_seq_len-n_suffix:].clone()]
-        }
+        mask = mask[:, : self.coarse.n_codebooks, :]
 
-        _cz = cz.clone()
-        cz_mask = None
-        range_fn = tqdm.trange if verbose else range
-        for _ in range_fn(num_vamps):
-            # add noise
-            cz_masked, cz_mask = self.coarse.add_noise(
-                _cz, r=1.0-intensity,
-                n_prefix=n_prefix,
-                n_suffix=n_suffix, 
-                downsample_factor=downsample_factor,
-                periodic_width=periodic_width,
-                periodic_dropout=periodic_dropout,
-                add_random_periodic_offset=add_random_periodic_offset,
-                periodic_width_dropout=periodic_width_dropout,
-                mask=cz_mask, 
-                ext_mask=ext_mask, 
-                n_conditioning_codebooks=n_conditioning_codebooks
-            )
-            if debug:
-                print("tokens to infer")
-                self.to_signal(cz_masked).cpu().widget()
+        cz_masked, mask = apply_mask(cz, mask, self.coarse.mask_token)
+        cz_masked = cz_masked[:, : self.coarse.n_codebooks, :]
 
-            # sample!
-            if debug:
-                print(f"mask: {cz_mask[:,0,:]}")
-                print(f"z: {_cz[:,0,:]}")
-            cz_sampled = self.coarse.sample(
-                codec=self.codec,
-                time_steps=_cz.shape[-1],
-                start_tokens=_cz,
-                mask=cz_mask, 
-                return_signal=False,
-                **kwargs
-            )
-
-            if debug:
-                print("tokens sampled")
-                self.to_signal(cz_sampled).cpu().widget()
-            
-            # the z that was generated
-            cz_generated = cz_sampled[:, :, n_prefix:c_seq_len-n_suffix].clone()
-            n_generated = cz_generated.shape[-1]
-
-            # create the new prefix and suffix
-            # we'll make sure that the number of prefix and suffix
-            # tokens is the same as the original
-            # but we do want to advance the sequence as much as we can
-            if n_prefix > 0 and n_suffix > 0:
-                # we have both prefix and suffix, so we'll split the generated
-                # codes in two halves
-                prefix_start_idx = n_generated // 2
-                prefix_stop_idx = prefix_start_idx + n_prefix
-                assert prefix_start_idx >= 0, "internal error"
-
-                suffix_start_idx = n_prefix + n_generated // 2
-                suffix_stop_idx = suffix_start_idx + n_suffix
-                assert suffix_stop_idx <= cz_sampled.shape[-1], "internal error"
-
-                cz_new_prefix = cz_sampled[:, :, prefix_start_idx:prefix_stop_idx].clone()
-                cz_new_suffix = cz_sampled[:, :, suffix_start_idx:suffix_stop_idx].clone()
-
-                c_vamp['prefix'].append(cz_generated[:,:,:n_generated//2])
-                c_vamp['suffix'].insert(0, cz_generated[:,:,n_generated//2:])
-
-            elif n_prefix > 0:
-                # we only have a prefix
-                prefix_start_idx = n_generated
-                prefix_stop_idx = prefix_start_idx + n_prefix
-
-                cz_new_prefix = cz_sampled[:, :, prefix_start_idx:prefix_stop_idx].clone()
-                cz_new_suffix = _cz[:, :, :0].clone()
-                
-
-                c_vamp['prefix'].append(cz_generated)
-
-            elif n_suffix > 0:
-                # we only have a suffix, so everything starting at 0 is generated
-                suffix_stop_idx = max(n_generated, n_suffix)
-                suffix_start_idx = suffix_stop_idx - n_suffix
-
-                cz_new_prefix = _cz[:, :, :0].clone()
-                cz_new_suffix = cz_sampled[:, :, suffix_start_idx:suffix_stop_idx].clone()
-
-                c_vamp['suffix'].insert(0, cz_generated)
-
-            else:
-                # we have no prefix or suffix, so we'll just use the generated
-                # codes as the new prefix and suffix
-                cz_new_prefix = cz_generated.clone()
-                cz_new_suffix = _cz[:, :, :0].clone()
-
-                c_vamp['prefix'].append(cz_generated)
-
-            
-            n_to_insert = c_seq_len - (cz_new_prefix.shape[-1] + cz_new_suffix.shape[-1])
-            to_insert = torch.zeros(cz_new_prefix.shape[0], cz_new_prefix.shape[1], n_to_insert).long().to(self.device)
-            _cz = torch.cat([cz_new_prefix, to_insert, cz_new_suffix], dim=-1)
-
-            to_insert_mask = torch.zeros_like(_cz).long().to(self.device)
-            to_insert_mask[:, :, cz_new_prefix.shape[-1]:cz_new_prefix.shape[-1]+n_to_insert] = 1
-            cz_mask = (cz_mask + to_insert_mask).bool().long()
-
-
-            if debug:
-                print("tokens to infer next round (area to insert in the middle)")
-                self.to_signal(_cz).cpu().widget()
-
-
-        prefix_codes = torch.cat(c_vamp['prefix'], dim=-1)
-        suffix_codes = torch.cat(c_vamp['suffix'], dim=-1)
-        c_vamp = torch.cat([prefix_codes, suffix_codes], dim=-1)
+        c_vamp = self.coarse.sample(
+            codec=self.codec,
+            time_steps=cz.shape[-1],
+            start_tokens=cz,
+            mask=mask, 
+            return_signal=False,
+            **kwargs
+        )
 
         # replace the mask token in cz_masked with random tokens
         # so that we can decode it
@@ -433,132 +271,61 @@ class Interface(torch.nn.Module):
         
         return c_vamp
 
-    # create a variation of an audio signal
-    def variation(
-        self, 
-        signal: AudioSignal, 
-        verbose: bool = False,
-        beat_mask: bool = False,
-        beat_mask_kwargs: dict = {}, 
-        **kwargs
-    ):
-        signal = signal.clone()
 
-        # autoencode first, so the samples get rounded up to the nearest tokens
-        signal = self.autoencode(signal).cpu()
+if __name__ == "__main__":
+    import audiotools as at
 
-        # pad the signal to the nearest chunk size
-        req_len = (
-            math.ceil(signal.duration / self.coarse.chunk_size_s) 
-            * self.coarse.chunk_size_s
+    interface = Interface(
+        coarse_ckpt="./models/spotdl/coarse.pth", 
+        coarse2fine_ckpt="./models/spotdl/c2f.pth", 
+        codec_ckpt="./models/spotdl/codec.pth",
+        device="cpu"
+    )
+
+    sig = at.AudioSignal('cali.mp3', duration=10)
+
+    z = interface.encode(sig)
+
+    mask = linear_random(z, 0.8)
+    print(mask)
+    mask = mask_and(
+        mask, inpaint(
+            z,
+            interface.s2t(3),
+            interface.s2t(3)
         )
-        # eventually we DO want overlap, but we want overlap-replace not
-        # overlap-add
-        overlap_hop_ratio = 1.0
-        hop_duration = self.coarse.chunk_size_s * overlap_hop_ratio
-        original_length = signal.length
-
-        signal.zero_pad_to(req_len)
-
-        # window the signal
-        signal = signal.collect_windows(
-            window_duration=self.coarse.chunk_size_s,
-            hop_duration=hop_duration,
+    )
+    print(mask)
+    mask = mask_and(
+        mask, periodic_mask(
+            z,
+            7,
+            1,
+            random_roll=True
         )
+    )
+    mask = dropout(mask, 0.0)
+    mask = codebook_unmask(mask, 0)
+    
 
-        # output = []
-        range_fn = range if not verbose else tqdm.trange
-        for i in range_fn(signal.batch_size):
-            sig = AudioSignal(
-                signal.samples[i,...], signal.sample_rate
-            )
-            sig.to(self.device)
+    zv, mask_z = interface.coarse_vamp(
+        z, 
+        mask=mask,
+        sampling_steps=1,
+        temperature=(0.8,1),
+        return_mask=True
+    )
 
-            if beat_mask:
-                ext_mask = self.make_beat_mask(sig, **beat_mask_kwargs)
-            else:
-                ext_mask = None
-            
-            out_z = self.coarse_vamp(
-                sig, 
-                num_vamps=1, 
-                swap_prefix_suffix=False, 
-                ext_mask=ext_mask,
-                verbose=verbose,
-                **kwargs
-            )
-            if self.c2f is not None:
-                out_z = self.coarse_to_fine(out_z)
-            out_sig = self.to_signal(out_z).cpu()
+    use_coarse2fine = False
+    if use_coarse2fine: 
+        zv = interface.coarse_to_fine(zv)
 
-            signal.samples[i] = out_sig.samples
+    print(mask_z)
+    mask = interface.to_signal(mask_z).cpu()
 
-        output = signal.overlap_and_add(hop_duration)
+    sig = interface.to_signal(zv).cpu()
+    print("done")
 
-        output.truncate_samples(original_length)
-        return output
-
-    # create a loop of a single region with variations
-    # TODO: this would work nicer if we could trim at the beat
-    # otherwise the model has to awkwardly fill up space that won't match
-    # the beat unless the signal is exactly the right length
-    def loop(
-        self, 
-        signal: AudioSignal, 
-        prefix_dur_s: float = 0.0,
-        suffix_dur_s: float = 0.0,
-        num_loops: int = 4, 
-        # overlap_hop_ratio: float = 1.0, # TODO: should this be fixed to 1.0?  or should we overlap and replace instead of overlap add
-        verbose: bool = False,
-        return_mask: bool = False,
-        **kwargs, 
-    ):
-        assert prefix_dur_s >= 0.0, "prefix duration must be >= 0"
-        assert suffix_dur_s >= 0.0, "suffix duration must be >= 0"
-        signal = self.preprocess(signal)
-
-        suffix_len_samples = int(suffix_dur_s * signal.sample_rate)
-        prefix_len_tokens = self.s2t(prefix_dur_s)
-        suffix_len_tokens = self.s2t(suffix_dur_s)
-
-        loops = [
-            # add everything but the suffix a the beggining
-            self.encode(signal.clone().trim(before=0, after=suffix_len_samples))
-        ]
-        range_fn = range if not verbose else tqdm.trange
-        for i in range_fn(num_loops):
-            is_flipped = i % 2 == 0
-            vamped = self.coarse_vamp(
-                        signal, 
-                        prefix_dur_s=prefix_dur_s,
-                        suffix_dur_s=suffix_dur_s,
-                        swap_prefix_suffix=is_flipped,
-                        return_mask=return_mask,
-                        **kwargs
-                )
-            if return_mask:
-                vamped, mask = vamped
-            
-            # if we're flipped, we trim the prefix off of the end
-            # otherwise we trim the suffix off of the end
-            trim_len = prefix_len_tokens if is_flipped else suffix_len_tokens
-            vamped = vamped[:, :, :vamped.shape[-1]-trim_len]
-
-            loops.append(vamped)
-
-        if is_flipped:
-            loops.append(
-                # add everything but the prefix at the end
-                self.encode(signal.clone())
-            )
-
-        if self.c2f is not None:
-            loops = [self.coarse_to_fine(l) for l in loops]
-
-        loops = [self.to_signal(l) for l in loops]
-
-        if return_mask:
-            return signal_concat(loops), self.to_signal(mask)
+    sig.write("output.wav")
+    mask.write("mask.wav")
         
-        return signal_concat(loops)
-

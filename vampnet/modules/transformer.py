@@ -1,4 +1,5 @@
 import math
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -6,15 +7,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 import loralib as lora
+import audiotools as at
 
-from .base import VampBase
 from .activations import get_activation
 from .layers import CodebookEmbedding
 from .layers import FiLM
 from .layers import SequentialWithFiLM
 from .layers import WNConv1d
+from ..util import scalar_to_batch_tensor, codebook_flatten, codebook_unflatten
+from ..mask import _gamma
 
 LORA_R = 8
+
+def log(t, eps=1e-20):
+    return torch.log(t + eps)
+
+
+def gumbel_noise(t):
+    noise = torch.zeros_like(t).uniform_(0, 1)
+    return -log(-log(noise))
+
+
+def gumbel_sample(t, temperature=1.0, dim=-1):
+    return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim=dim)
 
 
 class RMSNorm(nn.Module):
@@ -435,7 +450,7 @@ class TransformerStack(nn.Module):
         return self.norm(x) if self.norm is not None else x
 
 
-class VampNet(VampBase):
+class VampNet(at.ml.BaseModel):
     def __init__(
         self,
         n_heads: int = 20,
@@ -519,6 +534,270 @@ class VampNet(VampBase):
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
 
         return out
+    
+    def r_embed(self, r, max_positions=10000):
+        if self.r_cond_dim > 0:
+            dtype = r.dtype
+
+            r = _gamma(r) * max_positions
+            half_dim = self.r_cond_dim // 2
+
+            emb = math.log(max_positions) / (half_dim - 1)
+            emb = torch.arange(half_dim, device=r.device).float().mul(-emb).exp()
+
+            emb = r[:, None] * emb[None, :]
+            emb = torch.cat([emb.sin(), emb.cos()], dim=1)
+
+            if self.r_cond_dim % 2 == 1:  # zero pad
+                emb = nn.functional.pad(emb, (0, 1), mode="constant")
+
+            return emb.to(dtype)
+        else:
+            return r
+    
+    @torch.no_grad()
+    def to_signal(self, z, codec):
+        """
+        convert a sequence of latents to a signal. 
+        """
+        assert z.ndim == 3
+
+        signal = at.AudioSignal(
+            codec.decode(
+                codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
+            )["audio"],
+            codec.sample_rate,
+        )
+
+        # find where the mask token is and replace it with silence in the audio
+        for tstep in range(z.shape[-1]):
+            if torch.any(z[:, :, tstep] == self.mask_token):
+                sample_idx_0 = tstep * codec.hop_length
+                sample_idx_1 = sample_idx_0 + codec.hop_length
+                signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
+
+        return signal
+
+    def add_truth_to_logits(
+        self,
+        z_true,
+        z_hat,
+        mask,
+    ):
+        if self.noise_mode == "mask":
+            z_true = z_true[:, self.n_conditioning_codebooks :, :]
+            mask = mask[:, self.n_conditioning_codebooks :, :]
+
+            truth = F.one_hot(z_true, self.vocab_size)
+            mask = mask[:, :, :, None].expand(-1, -1, -1, self.vocab_size)
+            z_hat = rearrange(
+                z_hat,
+                "b p (t c) -> b c t p",
+                c=self.n_codebooks - self.n_conditioning_codebooks,
+            )
+
+            z_hat = z_hat * mask + truth * (1 - mask)
+
+            z_hat = rearrange(z_hat, "b c t p -> b p (t c)")
+        else:
+            raise ValueError(f"invalid noise mode for adding truth to logits {self.noise_mode}")
+
+        return z_hat
+    
+
+    @torch.no_grad()
+    def sample(
+        self,
+        codec,
+        time_steps: int = 300,
+        sampling_steps: int = 36,
+        start_tokens: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        temperature: Union[float, Tuple[float, float]] = 0.8,
+        top_k: int = None,
+        sample: str = "gumbel",
+        typical_filtering=True,
+        typical_mass=0.2,
+        typical_min_tokens=1,
+        return_signal=True,
+    ):
+        if isinstance(temperature, float):
+            temperature = torch.tensor(temperature).repeat(sampling_steps)
+        elif isinstance(temperature, tuple):
+            assert len(temperature) == 2
+            l, h = temperature
+            temperature = torch.linspace(l, h, sampling_steps)
+        else:
+            raise TypeError(f"invalid type for temperature")
+
+        z = start_tokens
+
+        if z is None:
+            z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
+                self.device
+            )
+
+        if mask is None:
+            mask = torch.ones_like(z).to(self.device).int()
+            mask[:, : self.n_conditioning_codebooks, :] = 0.0
+        if mask.ndim == 2:
+            mask = mask[:, None, :].repeat(1, z.shape[1], 1)
+
+        # figure out which timesteps we're keeping
+        keep_mask = 1 - mask
+
+        # any conditioning codebook levels need to be in the keep mask
+        # if self.n_conditioning_codebooks > 0:
+        #     cond_mask = torch.ones(z.shape[0], self.n_conditioning_codebooks, z.shape[-1]).to(z.device)
+        #     keep_mask = torch.cat([cond_mask, keep_mask], dim=1)
+
+        # flatten
+        keep_mask = codebook_flatten(keep_mask)
+
+        # our r steps
+        r_steps = torch.linspace(0, 1, sampling_steps + 1)[1:].to(self.device)
+
+        # how many tokens did we keep on init?
+        num_kept_on_init = keep_mask.sum()
+
+        # how many codebooks are we inferring vs conditioning on?
+        n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
+
+        for i in range(sampling_steps):
+            # our current temperature
+            tmpt = temperature[i]
+
+            # our current schedule step
+            r = r_steps[i : i + 1]
+
+            with torch.inference_mode():
+                # mask our z
+                keep_mask_unflat = codebook_unflatten(keep_mask, n_c=self.n_codebooks)
+                z_masked = z.masked_fill(~keep_mask_unflat.bool(), self.mask_token)
+
+                # get latents
+                latents = self.embedding.from_codes(z_masked, codec)
+
+                # infer from latents
+                logits = self.forward(latents, r)
+                logits = logits.permute(0, 2, 1)  # b, seq, prob
+
+                # the schedule determines how many samples to keep
+                num_tokens_to_infer = (z.shape[-1] * z.shape[-2]) - num_kept_on_init
+                num_to_keep = num_kept_on_init + int(
+                    num_tokens_to_infer * (_gamma(1 - r))
+                )
+
+                # figure out which logits we wanna keep
+                if num_to_keep > 0:
+                    probs = logits.softmax(dim=-1)
+
+                    # do mod self.vocab_size to make sure we don't sample from the mask token
+                    # in case the mask token was in the og z
+                    keep_probs = F.one_hot(z%self.vocab_size, self.vocab_size)[:, :, :]
+
+                    probs = rearrange(
+                        probs, "b (t c) p -> b c t p", c=n_infer_codebooks
+                    )
+                    probs = torch.cat(
+                        [keep_probs[:, : self.n_conditioning_codebooks, ...], probs],
+                        dim=1,
+                    )
+
+                    keep_probs = rearrange(
+                        keep_probs, "b c t p -> b (t c) p", c=self.n_codebooks
+                    )
+                    probs = rearrange(probs, "b c t p -> b (t c) p", c=self.n_codebooks)
+
+                    keep_prob_mask = keep_mask.unsqueeze(-1).repeat(
+                        1, 1, self.vocab_size
+                    )
+                    probs = (keep_prob_mask.long() * keep_probs) + (
+                        1 - keep_prob_mask.long()
+                    ) * probs
+
+                    highest_probs = probs.max(dim=-1, keepdim=False)[0]
+                    v, _ = highest_probs.topk(num_to_keep, dim=-1)
+
+                    keep_mask = torch.ones_like(keep_mask).bool().clone()
+                    keep_mask[highest_probs < v[..., [-1]]] = 0
+
+                logits = torch.log(probs)
+
+                z_inferred = self.sample_from_logits(
+                    logits=logits,
+                    top_k=top_k,
+                    temperature=tmpt,
+                    sample=sample,
+                    typical_filtering=typical_filtering,
+                    typical_mass=typical_mass,
+                    typical_min_tokens=typical_min_tokens,
+                )
+
+                z = codebook_unflatten(z_inferred, n_c=self.n_codebooks)
+
+
+        if return_signal:
+            return self.to_signal(z, codec)
+        else:
+            return z
+
+    def sample_from_logits(
+        self,
+        logits,
+        top_k: int = None,
+        temperature: float = 1.0,
+        sample: str = "multinomial",
+        typical_filtering=False,
+        typical_mass=0.2,
+        typical_min_tokens=1,
+    ):
+        # add temperature
+        logits = logits / temperature
+
+        # add topk
+        if top_k is not None:
+            v, topk_idx = logits.topk(top_k)
+            logits[logits < v[..., [-1]]] = -float("inf")
+
+        if typical_filtering:
+            assert top_k is None
+            nb, nt, _ = logits.shape
+            x_flat = rearrange(logits, "b t l -> (b t ) l")
+            x_flat_norm = torch.nn.functional.log_softmax(x_flat, dim=-1)
+            x_flat_norm_p = torch.exp(x_flat_norm)
+            entropy = -(x_flat_norm * x_flat_norm_p).nansum(-1, keepdim=True)
+
+            c_flat_shifted = torch.abs((-x_flat_norm) - entropy)
+            c_flat_sorted, x_flat_indices = torch.sort(c_flat_shifted, descending=False)
+            x_flat_cumsum = (
+                x_flat.gather(-1, x_flat_indices).softmax(dim=-1).cumsum(dim=-1)
+            )
+
+            last_ind = (x_flat_cumsum < typical_mass).sum(dim=-1)
+            sorted_indices_to_remove = c_flat_sorted > c_flat_sorted.gather(
+                1, last_ind.view(-1, 1)
+            )
+            if typical_min_tokens > 1:
+                sorted_indices_to_remove[..., :typical_min_tokens] = 0
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, x_flat_indices, sorted_indices_to_remove
+            )
+            x_flat = x_flat.masked_fill(indices_to_remove, -float("Inf"))
+            logits = rearrange(x_flat, "(b t) l -> b t l", t=nt)
+
+        if sample == "multinomial":
+            probs = torch.softmax(logits, dim=-1)
+            inferred = torch.stack([pr.multinomial(1).squeeze(-1) for pr in probs])
+        elif sample == "argmax":
+            inferred = torch.softmax(logits, dim=-1).argmax(dim=-1)
+        elif sample == "gumbel":
+            inferred = gumbel_sample(logits, dim=-1)
+        else:
+            raise ValueError(f"invalid sampling method: {sample}")
+
+        return inferred
+
 
 
 if __name__ == "__main__":
@@ -538,8 +817,7 @@ if __name__ == "__main__":
         ).to(device)
 
         r = torch.zeros(batch_size).to(device)
-        z_mask, mask = model.add_noise(z, r)
-
+        
         z_mask_latent = torch.rand(
             batch_size, model.latent_dim * model.n_codebooks, seq_len
         ).to(device)

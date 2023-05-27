@@ -27,7 +27,7 @@ git clone https://github.com/hugofloresgarcia/vampnet2.git
 pip install -e ./vampnet2
 ```
 
-## A note on Argbind
+## A note on argbind
 This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
 Config files are stored in the `conf/` folder. 
 
@@ -55,6 +55,10 @@ You just need to provide a list of audio files // folders to fine-tune on, then 
 ```bash
 python scripts/exp/train.py --args.load conf/lora/birds.yml --save_path /path/to/checkpoints
 ```
+
+## Getting the Pretrained Models
+
+
 
 ## Launching the Gradio Interface
 ```bash

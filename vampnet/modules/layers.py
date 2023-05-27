@@ -162,20 +162,3 @@ class CodebookEmbedding(nn.Module):
         x = self.out_proj(latents)
         return x
 
-    def flatten(self, tokens: torch.Tensor, n_codebooks: int = None):
-        """ 
-        flatten a sequence of tokens from (batch, codebook, time) to (batch, codebook * time)
-        """
-        n_c = n_codebooks if n_codebooks is not None else self.n_codebooks
-        return rearrange(tokens, "b c t -> b (t c)", c=n_c)
-
-    def unflatten(self, flat_tokens: torch.Tensor, n_codebooks: int = None):
-        """
-        unflatten a sequence of tokens from (batch, codebook * time) to (batch, codebook, time)
-        """
-        nb, nt = flat_tokens.shape
-
-        n_c = n_codebooks if n_codebooks is not None else self.n_codebooks
-        tokens = rearrange(flat_tokens, "b (t c) -> b c t", c=n_c)
-
-        return tokens
