@@ -4,8 +4,6 @@ This repository contains recipes for training generative music models on top of 
 
 # Setting up
 
-## Install LAC
-
 install AudioTools
 
 ```bash
