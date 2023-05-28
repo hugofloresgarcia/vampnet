@@ -1,6 +1,7 @@
 from typing import Optional
 
 import torch
+from audiotools import AudioSignal
 
 from .util import scalar_to_batch_tensor
 
@@ -150,7 +151,9 @@ def dropout(
     mask: torch.Tensor,
     p: float,
 ):
-    return torch.bernoulli((torch.ones_like(mask) * (1-p)).float()).long() * mask
+    # negate the mask (we want the 0s to be 1s, since we want to drop the prompt, not the mask)
+    mask = (~(mask.bool())).long()
+    return torch.nn.functional.dropout(mask.float(), p=p, training=True).long().bool().long()
 
 def mask_or(
     mask1: torch.Tensor, 
@@ -166,7 +169,6 @@ def mask_or(
 def time_stretch_mask(
     x: torch.Tensor, 
     stretch_factor: int,
-    mask_token: int
 ):
     assert stretch_factor >= 1, "stretch factor must be >= 1"
     c_seq_len = x.shape[-1]
@@ -176,7 +178,35 @@ def time_stretch_mask(
     x = x[:, :, :c_seq_len]
 
     mask = periodic_mask(x, stretch_factor, width=1)
-    return apply_mask(x, mask, mask_token)
+    return mask
+
+def onset_mask(
+    sig: AudioSignal, 
+    z: torch.Tensor,
+    interface,
+    width: int = 1
+):
+    import librosa
+
+    onset_indices = librosa.onset.onset_detect(
+        y=sig.clone().to_mono().samples.cpu().numpy()[0, 0], 
+        sr=sig.sample_rate,
+        hop_length=interface.codec.hop_length
+    )
+
+    # create a mask, set onset 
+    mask = torch.ones_like(z)
+    n_timesteps = z.shape[-1]
+
+    for onset_index in onset_indices:
+        onset_index = min(onset_index, n_timesteps - 1)
+        onset_index = max(onset_index, 0)
+        mask[:, :, onset_index - width:onset_index + width] = 0.0
+
+    print(mask)
+    
+    return mask
+
 
 
 if __name__ == "__main__":

@@ -8,9 +8,11 @@ train/AudioDataset.n_examples: 10000000
 val/AudioDataset.n_examples: 10
 
 
-NoamScheduler.warmup: 400
+NoamScheduler.warmup: 500
 
+batch_size: 7
+num_workers: 7
 epoch_length: 100
-save_audio_epochs: 2
+save_audio_epochs: 4
 
 AdamW.lr: 0.0001

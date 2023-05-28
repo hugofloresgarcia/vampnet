@@ -62,9 +62,12 @@ def load_random_audio():
     return sig.path_to_file
 
 
-def vamp(data):
+def _vamp(data, return_mask=False):
+    print(data)
     print(data[input_audio])
     sig = at.AudioSignal(data[input_audio])
+
+    # TODO: random pitch shift of segments in the signal to prompt! window size should be a parameter, pitch shift width should be a parameter
 
     z = interface.encode(sig)
 
@@ -87,6 +90,11 @@ def vamp(data):
             random_roll=True
         )
     )
+    if data[onset_mask_width] > 0:
+        mask = pmask.mask_or(
+            mask, pmask.onset_mask(sig, z, interface, width=data[onset_mask_width])
+        )
+    # these should be the last two mask ops
     mask = pmask.dropout(mask, data[dropout])
     mask = pmask.codebook_unmask(mask, ncc)
 
@@ -103,9 +111,6 @@ def vamp(data):
     if use_coarse2fine: 
         zv = interface.coarse_to_fine(zv)
 
-
-    mask = interface.to_signal(mask_z).cpu()
-
     sig = interface.to_signal(zv).cpu()
     print("done")
 
@@ -113,8 +118,19 @@ def vamp(data):
     out_dir.mkdir()
 
     sig.write(out_dir / "output.wav")
-    mask.write(out_dir / "mask.wav")
-    return sig.path_to_file, mask.path_to_file
+
+    if return_mask:
+        mask = interface.to_signal(mask_z).cpu()
+        mask.write(out_dir / "mask.wav")
+        return sig.path_to_file, mask.path_to_file
+    else:
+        return sig.path_to_file
+
+def vamp(data):
+    return _vamp(data, return_mask=True)
+
+def api_vamp(data):
+    return _vamp(data, return_mask=False)
         
 def save_vamp(data):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
@@ -198,6 +214,14 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
+            input_pitch_shift = gr.Slider(
+                label="input pitch shift (semitones)",
+                minimum=-12,
+                maximum=12,
+                step=1,
+                value=0,
+            )
+
             rand_mask_intensity = gr.Slider(
                 label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
                 minimum=0.0,
@@ -218,6 +242,14 @@ with gr.Blocks() as demo:
                 maximum=20,
                 step=1,
                 value=1,
+            )
+
+            onset_mask_width = gr.Slider(
+                label="onset mask width (steps, 1 step ~= 10milliseconds)",
+                minimum=0,
+                maximum=20,
+                step=1,
+                value=0,
             )
 
             with gr.Accordion("extras ", open=False):
@@ -322,11 +354,9 @@ with gr.Blocks() as demo:
             )
             
             thank_you = gr.Markdown("")
-  
-    # connect widgets
-    vamp_button.click(
-        fn=vamp,
-        inputs={
+
+
+    _inputs = {
             input_audio, 
             num_steps,
             init_temp, final_temp,
@@ -336,27 +366,29 @@ with gr.Blocks() as demo:
             n_conditioning_codebooks, 
             dropout,
             use_coarse2fine, 
-            stretch_factor
-        },
+            stretch_factor, 
+            onset_mask_width, 
+            input_pitch_shift
+        }
+  
+    # connect widgets
+    vamp_button.click(
+        fn=vamp,
+        inputs=_inputs,
         outputs=[output_audio, audio_mask], 
+    )
+
+    api_vamp_button = gr.Button("api vamp")
+    api_vamp_button.click(
+        fn=api_vamp,
+        inputs=_inputs, 
+        outputs=[output_audio], 
         api_name="vamp"
     )
 
     save_button.click(
         fn=save_vamp,
-        inputs={
-            input_audio, 
-            num_steps,
-            init_temp, final_temp,
-            prefix_s, suffix_s, 
-            rand_mask_intensity, 
-            periodic_p, periodic_w,
-            n_conditioning_codebooks,
-            dropout,
-            use_coarse2fine, 
-            stretch_factor, 
-            notes_text
-        },
+        inputs=_inputs | {notes_text},
         outputs=[thank_you, download_file]
     )
 

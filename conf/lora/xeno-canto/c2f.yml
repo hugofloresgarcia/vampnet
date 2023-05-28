@@ -1,0 +1,21 @@
+$include:
+  - conf/lora/lora.yml
+
+fine_tune: True
+
+train/AudioLoader.sources:
+  - /media/CHONK/hugo/xeno-canto-2
+
+val/AudioLoader.sources:
+  - /media/CHONK/hugo/xeno-canto-2
+
+
+VampNet.n_codebooks: 14
+VampNet.n_conditioning_codebooks: 4
+
+VampNet.embedding_dim: 1280
+VampNet.n_layers: 16
+VampNet.n_heads: 20
+
+AudioDataset.duration: 3.0
+AudioDataset.loudness_cutoff: -40.0

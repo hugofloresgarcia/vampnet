@@ -1,0 +1,11 @@
+Interface.coarse_ckpt: ./runs/xeno-canto-2/coarse/best/vampnet/weights.pth
+Interface.coarse2fine_ckpt: ./runs/xeno-canto-2/c2f/best/vampnet/weights.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth
+Interface.coarse_chunk_size_s: 10
+Interface.coarse2fine_chunk_size_s: 3
+# Interface.wavebeat_ckpt: ./models/wavebeat.pth
+
+
+AudioLoader.sources:
+  - /media/CHONK/hugo/xeno-canto-2
+  - /media/CHONK/hugo/xeno-canto-2

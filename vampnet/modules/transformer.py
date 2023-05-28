@@ -62,8 +62,8 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
         factor = 2 if activation == "geglu" else 1
-        self.w_1 = nn.Linear(d_model, d_model * 4, bias=False)
-        self.w_2 = nn.Linear(d_model * 4 // factor, d_model, bias=False)
+        self.w_1 = lora.Linear(d_model, d_model * 4, bias=False, r=LORA_R)
+        self.w_2 = lora.Linear(d_model * 4 // factor, d_model, bias=False, r=LORA_R)
         self.drop = nn.Dropout(dropout)
         self.act = get_activation(activation)()
 
@@ -109,7 +109,7 @@ class MultiHeadRelativeAttention(nn.Module):
         self.w_vs = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
 
         # Create linear final output projection
-        self.fc = nn.Linear(d_model, d_model, bias=False)
+        self.fc = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
 
         # Dropout for attention output weights
         self.dropout = nn.Dropout(dropout)

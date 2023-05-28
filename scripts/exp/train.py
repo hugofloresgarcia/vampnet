@@ -62,6 +62,7 @@ IGNORE_INDEX = -100
 def build_transform():
     transform = transforms.Compose(
         tfm.VolumeNorm(("const", -24)),
+        # tfm.PitchShift(),
         tfm.RescaleAudio(),
     )
     return transform

@@ -1,0 +1,10 @@
+$include:
+  - conf/lora/lora.yml
+
+fine_tune: True
+
+train/AudioLoader.sources:
+  - /media/CHONK/hugo/xeno-canto-2
+
+val/AudioLoader.sources:
+  - /media/CHONK/hugo/xeno-canto-2

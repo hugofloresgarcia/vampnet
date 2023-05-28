@@ -25,6 +25,9 @@ AdamW.lr: 0.001
 NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 10000
 
+PitchShift.shift_amount: [const, 0]
+PitchShift.prob: 0.0
+
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 4
 VampNet.n_conditioning_codebooks: 0
