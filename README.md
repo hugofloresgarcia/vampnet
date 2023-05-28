@@ -31,7 +31,7 @@ Config files are stored in the `conf/` folder.
 
 ## Getting the Pretrained Models
 
-Download the pretrained models from [this link](). Then, extract the models to the `models/` folder.
+Download the pretrained models from [this link](https://drive.google.com/file/d/1ZIBMJMt8QRE8MYYGjg4lH7v7BLbZneq2/view?usp=sharing). Then, extract the models to the `models/` folder.
 
 # How the code is structured
 
