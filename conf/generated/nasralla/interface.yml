@@ -1,0 +1,5 @@
+AudioLoader.sources:
+- /media/CHONK/hugo/nasralla
+Interface.coarse2fine_ckpt: ./runs/nasralla/c2f/best/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/nasralla/coarse/best/vampnet/weights.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth

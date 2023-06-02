@@ -151,9 +151,13 @@ def dropout(
     mask: torch.Tensor,
     p: float,
 ):
-    # negate the mask (we want the 0s to be 1s, since we want to drop the prompt, not the mask)
-    mask = (~(mask.bool())).long()
-    return torch.nn.functional.dropout(mask.float(), p=p, training=True).long().bool().long()
+    assert 0 <= p <= 1, "p must be between 0 and 1"
+    assert mask.max() <= 1, "mask must be binary"
+    assert mask.min() >= 0, "mask must be binary"
+    mask = (~mask.bool()).float()
+    mask = torch.bernoulli(mask * (1 - p))
+    mask = ~mask.round().bool()
+    return mask.long()
 
 def mask_or(
     mask1: torch.Tensor, 
@@ -191,7 +195,8 @@ def onset_mask(
     onset_indices = librosa.onset.onset_detect(
         y=sig.clone().to_mono().samples.cpu().numpy()[0, 0], 
         sr=sig.sample_rate,
-        hop_length=interface.codec.hop_length
+        hop_length=interface.codec.hop_length, 
+        backtrack=True,
     )
 
     # create a mask, set onset 

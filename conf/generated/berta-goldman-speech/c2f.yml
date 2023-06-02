@@ -1,0 +1,15 @@
+$include:
+- conf/lora/lora.yml
+AudioDataset.duration: 3.0
+AudioDataset.loudness_cutoff: -40.0
+VampNet.embedding_dim: 1280
+VampNet.n_codebooks: 14
+VampNet.n_conditioning_codebooks: 4
+VampNet.n_heads: 20
+VampNet.n_layers: 16
+fine_tune: true
+save_path: ./runs/berta-goldman-speech/c2f
+train/AudioLoader.sources:
+- /media/CHONK/hugo/Berta-Caceres-2015-Goldman-Speech.mp3
+val/AudioLoader.sources:
+- /media/CHONK/hugo/Berta-Caceres-2015-Goldman-Speech.mp3

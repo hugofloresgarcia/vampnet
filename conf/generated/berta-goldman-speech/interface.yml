@@ -1,0 +1,5 @@
+AudioLoader.sources:
+- /media/CHONK/hugo/Berta-Caceres-2015-Goldman-Speech.mp3
+Interface.coarse2fine_ckpt: ./runs/berta-goldman-speech/c2f/best/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/berta-goldman-speech/coarse/best/vampnet/weights.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth

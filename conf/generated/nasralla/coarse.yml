@@ -1,0 +1,8 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+save_path: ./runs/nasralla/coarse
+train/AudioLoader.sources:
+- /media/CHONK/hugo/nasralla
+val/AudioLoader.sources:
+- /media/CHONK/hugo/nasralla

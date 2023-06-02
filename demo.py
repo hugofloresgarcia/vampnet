@@ -63,9 +63,11 @@ def load_random_audio():
 
 
 def _vamp(data, return_mask=False):
-    print(data)
-    print(data[input_audio])
+    out_dir = OUT_DIR / str(uuid.uuid4())
+    out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
+    #pitch shift input
+    sig = sig.shift_pitch(data[input_pitch_shift])
 
     # TODO: random pitch shift of segments in the signal to prompt! window size should be a parameter, pitch shift width should be a parameter
 
@@ -98,7 +100,9 @@ def _vamp(data, return_mask=False):
     mask = pmask.dropout(mask, data[dropout])
     mask = pmask.codebook_unmask(mask, ncc)
 
-    print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}")
+    print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}, codebook unmask {ncc}, onset mask {data[onset_mask_width]}, num steps {data[num_steps]}, init temp {data[init_temp]}, final temp {data[final_temp]}, use coarse2fine {data[use_coarse2fine]}")
+    # save the mask as a txt file
+    np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
     zv, mask_z = interface.coarse_vamp(
         z, 
@@ -114,8 +118,7 @@ def _vamp(data, return_mask=False):
     sig = interface.to_signal(zv).cpu()
     print("done")
 
-    out_dir = OUT_DIR / str(uuid.uuid4())
-    out_dir.mkdir()
+    
 
     sig.write(out_dir / "output.wav")
 
@@ -136,13 +139,13 @@ def save_vamp(data):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sig_in = at.AudioSignal(input_audio)
-    sig_out = at.AudioSignal(output_audio)
+    sig_in = at.AudioSignal(data[input_audio])
+    sig_out = at.AudioSignal(data[output_audio])
 
     sig_in.write(out_dir / "input.wav")
     sig_out.write(out_dir / "output.wav")
     
-    data = {
+    _data = {
         "init_temp": data[init_temp],
         "final_temp": data[final_temp],
         "prefix_s": data[prefix_s],
@@ -159,7 +162,7 @@ def save_vamp(data):
 
     # save with yaml
     with open(out_dir / "data.yaml", "w") as f:
-        yaml.dump(data, f)
+        yaml.dump(_data, f)
 
     import zipfile
     zip_path = out_dir.with_suffix(".zip")
@@ -321,6 +324,8 @@ with gr.Blocks() as demo:
                 type="filepath"
             )
 
+            use_as_input_button = gr.Button("use as input")
+
         
         # with gr.Column():
         #     with gr.Accordion(label="beat unmask (how much time around the beat should be hinted?)"):
@@ -386,9 +391,15 @@ with gr.Blocks() as demo:
         api_name="vamp"
     )
 
+    use_as_input_button.click(
+        fn=lambda x: x,
+        inputs=[output_audio],
+        outputs=[input_audio]
+    )
+
     save_button.click(
         fn=save_vamp,
-        inputs=_inputs | {notes_text},
+        inputs=_inputs | {notes_text, output_audio},
         outputs=[thank_you, download_file]
     )
 

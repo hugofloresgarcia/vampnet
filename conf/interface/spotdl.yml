@@ -7,5 +7,6 @@ Interface.coarse2fine_chunk_size_s: 3
 
 
 AudioLoader.sources:
-  - /data/spotdl/audio/val
-  - /data/spotdl/audio/test
+  # - /media/CHONK/hugo/spotdl/subsets/jazz-blues
+  - /media/CHONK/null
+

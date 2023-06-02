@@ -1,0 +1,8 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+save_path: ./runs/berta-goldman-speech/coarse
+train/AudioLoader.sources:
+- /media/CHONK/hugo/Berta-Caceres-2015-Goldman-Speech.mp3
+val/AudioLoader.sources:
+- /media/CHONK/hugo/Berta-Caceres-2015-Goldman-Speech.mp3
