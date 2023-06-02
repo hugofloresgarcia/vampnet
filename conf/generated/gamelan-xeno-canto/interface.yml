@@ -1,0 +1,5 @@
+AudioLoader.sources:
+- /media/CHONK/hugo/loras/gamelan-xeno-canto
+Interface.coarse2fine_ckpt: ./runs/gamelan-xeno-canto/c2f/best/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/gamelan-xeno-canto/coarse/best/vampnet/weights.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth
