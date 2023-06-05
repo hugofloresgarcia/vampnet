@@ -3,6 +3,8 @@ $include:
 fine_tune: true
 save_path: ./runs/gamelan-xeno-canto/coarse
 train/AudioLoader.sources:
-- /media/CHONK/hugo/loras/gamelan-xeno-canto
+- /media/CHONK/hugo/loras/Sound Tracker - Gamelan (Indonesia) [UEWCCSuHsuQ].mp3
+- /media/CHONK/hugo/loras/xeno-canto-2
 val/AudioLoader.sources:
-- /media/CHONK/hugo/loras/gamelan-xeno-canto
+- /media/CHONK/hugo/loras/Sound Tracker - Gamelan (Indonesia) [UEWCCSuHsuQ].mp3
+- /media/CHONK/hugo/loras/xeno-canto-2

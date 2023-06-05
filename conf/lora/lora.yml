@@ -16,3 +16,7 @@ epoch_length: 100
 save_audio_epochs: 4
 
 AdamW.lr: 0.0001
+
+# let's us organize sound classes into folders and choose from those sound classes uniformly
+AudioDataset.without_replacement: False
+max_epochs: 1000
