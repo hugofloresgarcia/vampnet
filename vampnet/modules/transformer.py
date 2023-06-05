@@ -724,7 +724,7 @@ class VampNet(at.ml.BaseModel):
 
                 logits = torch.log(probs)
 
-                z_inferred = self.sample_from_logits(
+                z_inferred = sample_from_logits(
                     logits=logits,
                     top_k=top_k,
                     temperature=tmpt,
@@ -742,61 +742,60 @@ class VampNet(at.ml.BaseModel):
         else:
             return z
 
-    def sample_from_logits(
-        self,
-        logits,
-        top_k: int = None,
-        temperature: float = 1.0,
-        sample: str = "multinomial",
-        typical_filtering=False,
-        typical_mass=0.2,
-        typical_min_tokens=1,
-    ):
-        # add temperature
-        logits = logits / temperature
+def sample_from_logits(
+    logits,
+    top_k: int = None,
+    temperature: float = 1.0,
+    sample: str = "multinomial",
+    typical_filtering=False,
+    typical_mass=0.2,
+    typical_min_tokens=1,
+):
+    # add temperature
+    logits = logits / temperature
 
-        # add topk
-        if top_k is not None:
-            v, topk_idx = logits.topk(top_k)
-            logits[logits < v[..., [-1]]] = -float("inf")
+    # add topk
+    if top_k is not None and typical_filtering == False:
+        v, topk_idx = logits.topk(top_k)
+        logits[logits < v[..., [-1]]] = -float("inf")
 
-        if typical_filtering:
-            assert top_k is None
-            nb, nt, _ = logits.shape
-            x_flat = rearrange(logits, "b t l -> (b t ) l")
-            x_flat_norm = torch.nn.functional.log_softmax(x_flat, dim=-1)
-            x_flat_norm_p = torch.exp(x_flat_norm)
-            entropy = -(x_flat_norm * x_flat_norm_p).nansum(-1, keepdim=True)
+    if typical_filtering:
+        assert top_k is None
+        nb, nt, _ = logits.shape
+        x_flat = rearrange(logits, "b t l -> (b t ) l")
+        x_flat_norm = torch.nn.functional.log_softmax(x_flat, dim=-1)
+        x_flat_norm_p = torch.exp(x_flat_norm)
+        entropy = -(x_flat_norm * x_flat_norm_p).nansum(-1, keepdim=True)
 
-            c_flat_shifted = torch.abs((-x_flat_norm) - entropy)
-            c_flat_sorted, x_flat_indices = torch.sort(c_flat_shifted, descending=False)
-            x_flat_cumsum = (
-                x_flat.gather(-1, x_flat_indices).softmax(dim=-1).cumsum(dim=-1)
-            )
+        c_flat_shifted = torch.abs((-x_flat_norm) - entropy)
+        c_flat_sorted, x_flat_indices = torch.sort(c_flat_shifted, descending=False)
+        x_flat_cumsum = (
+            x_flat.gather(-1, x_flat_indices).softmax(dim=-1).cumsum(dim=-1)
+        )
 
-            last_ind = (x_flat_cumsum < typical_mass).sum(dim=-1)
-            sorted_indices_to_remove = c_flat_sorted > c_flat_sorted.gather(
-                1, last_ind.view(-1, 1)
-            )
-            if typical_min_tokens > 1:
-                sorted_indices_to_remove[..., :typical_min_tokens] = 0
-            indices_to_remove = sorted_indices_to_remove.scatter(
-                1, x_flat_indices, sorted_indices_to_remove
-            )
-            x_flat = x_flat.masked_fill(indices_to_remove, -float("Inf"))
-            logits = rearrange(x_flat, "(b t) l -> b t l", t=nt)
+        last_ind = (x_flat_cumsum < typical_mass).sum(dim=-1)
+        sorted_indices_to_remove = c_flat_sorted > c_flat_sorted.gather(
+            1, last_ind.view(-1, 1)
+        )
+        if typical_min_tokens > 1:
+            sorted_indices_to_remove[..., :typical_min_tokens] = 0
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            1, x_flat_indices, sorted_indices_to_remove
+        )
+        x_flat = x_flat.masked_fill(indices_to_remove, -float("Inf"))
+        logits = rearrange(x_flat, "(b t) l -> b t l", t=nt)
 
-        if sample == "multinomial":
-            probs = torch.softmax(logits, dim=-1)
-            inferred = torch.stack([pr.multinomial(1).squeeze(-1) for pr in probs])
-        elif sample == "argmax":
-            inferred = torch.softmax(logits, dim=-1).argmax(dim=-1)
-        elif sample == "gumbel":
-            inferred = gumbel_sample(logits, dim=-1)
-        else:
-            raise ValueError(f"invalid sampling method: {sample}")
+    if sample == "multinomial":
+        probs = torch.softmax(logits, dim=-1)
+        inferred = torch.stack([pr.multinomial(1).squeeze(-1) for pr in probs])
+    elif sample == "argmax":
+        inferred = torch.softmax(logits, dim=-1).argmax(dim=-1)
+    elif sample == "gumbel":
+        inferred = gumbel_sample(logits, dim=-1)
+    else:
+        raise ValueError(f"invalid sampling method: {sample}")
 
-        return inferred
+    return inferred
 
 
 
@@ -833,3 +832,5 @@ if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
         try_model()
+
+
