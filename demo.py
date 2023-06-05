@@ -104,12 +104,18 @@ def _vamp(data, return_mask=False):
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
+    top_k = data[topk] if data[topk] > 0 else None
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
         sampling_steps=data[num_steps],
         temperature=(data[init_temp], data[final_temp]),
-        return_mask=True
+        return_mask=True, 
+        sample=data[sampling_strategy], 
+        typical_filtering=data[typical_filtering], 
+        typical_mass=data[typical_mass], 
+        typical_min_tokens=data[typical_min_tokens], 
+        top_k=top_k,
     )
 
     if use_coarse2fine: 
@@ -299,6 +305,38 @@ with gr.Blocks() as demo:
                     value=1.0
                 )
 
+            with gr.Accordion("sampling settings", open=False):
+                sampling_strategy = gr.Radio(
+                    label="sampling strategy",
+                    choices=["gumbel", "multinomial"],
+                    value="gumbel"
+                )
+                typical_filtering = gr.Checkbox(
+                    label="typical filtering (cannot be used with topk)",
+                    value=True
+                )
+                typical_mass = gr.Slider(
+                    label="typical mass (should probably stay between 0.1 and 0.5)",
+                    minimum=0.01,
+                    maximum=0.99,
+                    value=0.2
+                )
+                typical_min_tokens = gr.Slider(
+                    label="typical min tokens (should probably stay between 1 and 256)",
+                    minimum=1,
+                    maximum=256,
+                    step=1,
+                    value=1
+                )
+                topk = gr.Slider(
+                    label="topk (cannot be used with typical filtering). 0 = None",
+                    minimum=0,
+                    maximum=256,
+                    step=1,
+                    value=0
+                )
+
+
 
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
@@ -318,6 +356,8 @@ with gr.Blocks() as demo:
 
             vamp_button = gr.Button("vamp!!!")
 
+        # mask settings
+        with gr.Column():
             output_audio = gr.Audio(
                 label="output audio",
                 interactive=False,
@@ -373,7 +413,12 @@ with gr.Blocks() as demo:
             use_coarse2fine, 
             stretch_factor, 
             onset_mask_width, 
-            input_pitch_shift
+            input_pitch_shift, 
+            sampling_strategy, 
+            typical_filtering,
+            typical_mass,
+            typical_min_tokens,
+            topk,
         }
   
     # connect widgets
