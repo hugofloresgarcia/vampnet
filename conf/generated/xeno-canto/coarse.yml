@@ -1,0 +1,8 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+fine_tune_checkpoint: ./models/spotdl/coarse.pth
+save_path: ./runs/xeno-canto/coarse
+train/AudioLoader.sources: &id001
+- /media/CHONK/hugo/loras/xeno-canto-2/
+val/AudioLoader.sources: *id001

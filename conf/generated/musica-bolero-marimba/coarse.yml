@@ -1,0 +1,11 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+fine_tune_checkpoint: ./models/spotdl/coarse.pth
+save_path: ./runs/musica-bolero-marimba/coarse
+train/AudioLoader.sources:
+- /media/CHONK/hugo/loras/boleros
+- /media/CHONK/hugo/loras/marimba-honduras
+val/AudioLoader.sources:
+- /media/CHONK/hugo/loras/boleros
+- /media/CHONK/hugo/loras/marimba-honduras

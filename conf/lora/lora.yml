@@ -13,10 +13,10 @@ NoamScheduler.warmup: 500
 batch_size: 7
 num_workers: 7
 epoch_length: 100
-save_audio_epochs: 4
+save_audio_epochs: 10
 
 AdamW.lr: 0.0001
 
 # let's us organize sound classes into folders and choose from those sound classes uniformly
 AudioDataset.without_replacement: False
-max_epochs: 1000
+max_epochs: 500

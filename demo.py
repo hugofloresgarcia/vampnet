@@ -104,7 +104,11 @@ def _vamp(data, return_mask=False):
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
-    top_k = data[topk] if data[topk] > 0 else None
+    if data[topk] is not None:
+        top_k = data[topk] if data[topk] > 0 else None
+    else:
+        top_k = None
+
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
@@ -354,17 +358,16 @@ with gr.Blocks() as demo:
                 value=0.0
             )
 
-            vamp_button = gr.Button("vamp!!!")
 
         # mask settings
         with gr.Column():
+            vamp_button = gr.Button("vamp!!!")
             output_audio = gr.Audio(
                 label="output audio",
                 interactive=False,
                 type="filepath"
             )
 
-            use_as_input_button = gr.Button("use as input")
 
         
         # with gr.Column():
@@ -397,6 +400,7 @@ with gr.Blocks() as demo:
                 label="vamp to download will appear here",
                 interactive=False
             )
+            use_as_input_button = gr.Button("use output as input")
             
             thank_you = gr.Markdown("")
 

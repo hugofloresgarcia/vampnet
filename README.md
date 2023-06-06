@@ -33,41 +33,6 @@ Config files are stored in the `conf/` folder.
 
 Download the pretrained models from [this link](https://drive.google.com/file/d/1ZIBMJMt8QRE8MYYGjg4lH7v7BLbZneq2/view?usp=sharing). Then, extract the models to the `models/` folder.
 
-# How the code is structured
-
-This code was written fast to meet a publication deadline, so it can be messy and redundant at times. Currently working on cleaning it up. 
-
-```
-├── conf         <- (conf files for training, finetuning, etc)
-├── demo.py      <- (gradio UI for playing with vampnet)
-├── env          <- (environment variables)
-│   └── env.sh
-├── models       <- (extract pretrained models)
-│   ├── spotdl
-│   │   ├── c2f.pth     <- (coarse2fine checkpoint)
-│   │   ├── coarse.pth  <- (coarse checkpoint)
-│   │   └── codec.pth    <- (codec checkpoint)
-│   └── wavebeat.pth
-├── README.md
-├── scripts
-│   ├── exp
-│   │   ├── eval.py       <- (eval script)
-│   │   └── train.py       <- (training/finetuning script)
-│   └── utils
-├── vampnet
-│   ├── beats.py         <- (beat tracking logic)
-│   ├── __init__.py
-│   ├── interface.py     <- (high-level programmatic interface)
-│   ├── mask.py
-│   ├── modules
-│   │   ├── activations.py 
-│   │   ├── __init__.py
-│   │   ├── layers.py
-│   │   └── transformer.py  <- (architecture + sampling code)
-│   ├── scheduler.py      
-│   └── util.py
-```
-
 # Usage
 
 First, you'll want to set up your environment
@@ -90,12 +55,33 @@ python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/ch
 ```
 
 ## Fine-tuning
-To fine-tune a model, see the configuration files under `conf/lora/`. 
-You just need to provide a list of audio files // folders to fine-tune on, then launch the training job as usual.
+To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
+The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to fine-tune the interface.
+
 ```bash
-python scripts/exp/train.py --args.load conf/lora/birds.yml --save_path /path/to/checkpoints
+python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/audio3.wav" <fine_tune_name>
 ```
 
+This will create a folder under `conf/<fine_tune_name>/` with the 3 configuration files.
+
+The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`. 
+
+launch the coarse job: 
+```bash
+python scripts/exp/train.py --args.load conf/<fine_tune_name>/coarse.yml 
+```
+
+this will save the coarse model to `runs/<fine_tune_name>/coarse/ckpt/best/`.
+
+launch the c2f job: 
+```bash
+python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml 
+```
+
+launch the interface: 
+```bash
+python  demo.py --args.load conf/generated/<fine_tune_name>/interface.yml 
+```
 
 
 ## Launching the Gradio Interface

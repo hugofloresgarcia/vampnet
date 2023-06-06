@@ -1,0 +1,7 @@
+AudioLoader.sources:
+- - /media/CHONK/hugo/loras/xeno-canto-2/
+Interface.coarse2fine_ckpt: ./mod els/spotdl/c2f.pth
+Interface.coarse2fine_lora_ckpt: ./runs/xeno-canto/c2f/latest/lora.pth
+Interface.coarse_ckpt: ./models/spotdl/coarse.pth
+Interface.coarse_lora_ckpt: ./runs/xeno-canto/coarse/latest/lora.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth

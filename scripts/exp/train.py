@@ -107,7 +107,11 @@ def load(
     resume: bool = False,
     tag: str = "latest",
     load_weights: bool = False,
+    fine_tune_checkpoint: Optional[str] = None,
 ):
+    codec = LAC.load(args["codec_ckpt"], map_location="cpu")
+    codec.eval()
+
     model, v_extra = None, {}
 
     if resume:
@@ -123,8 +127,12 @@ def load(
                 f"Could not find a VampNet checkpoint in {kwargs['folder']}"
             )
 
-    codec = LAC.load(args["codec_ckpt"], map_location="cpu")
-    codec.eval()
+
+    if args["fine_tune"]:
+        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
+        model = VampNet.load(location=Path(fine_tune_checkpoint), map_location="cpu")
+
+
     model = VampNet() if model is None else model
 
     model = accel.prepare_model(model)
@@ -459,6 +467,15 @@ def train(
             if self.is_best(engine, loss_key):
                 self.print(f"Best model so far")
                 tags.append("best")
+
+            if fine_tune:
+                for tag in tags: 
+                    # save the lora model 
+                    (Path(save_path) / tag).mkdir(parents=True, exist_ok=True)
+                    torch.save(
+                        lora.lora_state_dict(accel.unwrap(model)), 
+                        f"{save_path}/{tag}/lora.pth"
+                    )
 
             for tag in tags:
                 model_extra = {

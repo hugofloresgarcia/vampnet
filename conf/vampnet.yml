@@ -1,5 +1,5 @@
 
-codec_ckpt: /home/hugo/descript/vampnet/models/spotdl/codec.pth
+codec_ckpt: ./models/spotdl/codec.pth
 save_path: ckpt
 max_epochs: 1000
 epoch_length: 1000

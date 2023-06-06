@@ -21,12 +21,40 @@ def signal_concat(
 
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
+def _load_model(
+    ckpt: str, 
+    lora_ckpt: str = None,
+    device: str = "cpu",
+    chunk_size_s: int = 10,
+):
+    # we need to set strict to False if the model has lora weights to add later
+    model = VampNet.load(location=Path(ckpt), map_location="cpu", strict=False)
+
+    # load lora weights if needed
+    if lora_ckpt is not None:
+        if not Path(lora_ckpt).exists():
+            should_cont = input(
+                f"lora checkpoint {lora_ckpt} does not exist. continue? (y/n) "
+            )
+            if should_cont != "y":
+                raise Exception("aborting")
+        else:
+            model.load_state_dict(torch.load(lora_ckpt, map_location="cpu"), strict=False)
+
+    model.to(device)
+    model.eval()
+    model.chunk_size_s = chunk_size_s
+    return model
+
+
 
 class Interface(torch.nn.Module):
     def __init__(
         self,
         coarse_ckpt: str = None,
+        coarse_lora_ckpt: str = None,
         coarse2fine_ckpt: str = None,
+        coarse2fine_lora_ckpt: str = None,
         codec_ckpt: str = None,
         wavebeat_ckpt: str = None,
         device: str = "cpu",
@@ -40,18 +68,21 @@ class Interface(torch.nn.Module):
         self.codec.to(device)
 
         assert coarse_ckpt is not None, "must provide a coarse checkpoint"
-        self.coarse = VampNet.load(location=Path(coarse_ckpt), map_location="cpu")
-        self.coarse.to(device)
-        self.coarse.eval()
-        self.coarse.chunk_size_s = self.s2t2s(coarse_chunk_size_s)
+        self.coarse = _load_model(
+            ckpt=coarse_ckpt,
+            lora_ckpt=coarse_lora_ckpt,
+            device=device,
+            chunk_size_s=coarse_chunk_size_s,
+        )
 
+        # check if we have a coarse2fine ckpt
         if coarse2fine_ckpt is not None:
-            self.c2f = VampNet.load(
-                location=Path(coarse2fine_ckpt), map_location="cpu"
+            self.c2f = _load_model(
+                ckpt=coarse2fine_ckpt,
+                lora_ckpt=coarse2fine_lora_ckpt,
+                device=device,
+                chunk_size_s=coarse2fine_chunk_size_s,
             )
-            self.c2f.to(device)
-            self.c2f.eval()
-            self.c2f.chunk_size_s = self.s2t2s(coarse2fine_chunk_size_s)
         else:
             self.c2f = None
 
@@ -63,6 +94,21 @@ class Interface(torch.nn.Module):
             self.beat_tracker = None
 
         self.device = device
+
+    def lora_load(
+        self, 
+        coarse_lora_ckpt: str = None,
+        coarse2fine_lora_ckpt: str = None,
+    ):
+        if coarse_lora_ckpt is not None:
+            self.coarse.to("cpu")
+            self.coarse.load_state_dict(torch.load(coarse_lora_ckpt, map_location="cpu"))
+            self.coarse.to(self.device)
+        if coarse2fine_lora_ckpt is not None:
+            self.c2f.to("cpu")
+            self.c2f.load_state_dict(torch.load(coarse2fine_lora_ckpt, map_location="cpu"))
+            self.c2f.to(self.device)
+        
 
     def s2t(self, seconds: float):
         """seconds to tokens"""
