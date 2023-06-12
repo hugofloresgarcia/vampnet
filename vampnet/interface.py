@@ -97,17 +97,36 @@ class Interface(torch.nn.Module):
 
     def lora_load(
         self, 
-        coarse_lora_ckpt: str = None,
-        coarse2fine_lora_ckpt: str = None,
+        coarse_ckpt: str = None,
+        c2f_ckpt: str = None,
+        full_ckpts: bool = False,
     ):
-        if coarse_lora_ckpt is not None:
-            self.coarse.to("cpu")
-            self.coarse.load_state_dict(torch.load(coarse_lora_ckpt, map_location="cpu"))
-            self.coarse.to(self.device)
-        if coarse2fine_lora_ckpt is not None:
-            self.c2f.to("cpu")
-            self.c2f.load_state_dict(torch.load(coarse2fine_lora_ckpt, map_location="cpu"))
-            self.c2f.to(self.device)
+        if full_ckpts:
+            if coarse_ckpt is not None:
+                self.coarse = _load_model(
+                    ckpt=coarse_ckpt,  
+                    device=self.device,
+                    chunk_size_s=self.coarse.chunk_size_s,
+                )
+            if c2f_ckpt is not None:
+                self.c2f = _load_model(
+                    ckpt=c2f_ckpt,
+                    device=self.device,
+                    chunk_size_s=self.c2f.chunk_size_s,
+                )
+        else:
+            if coarse_ckpt is not None:
+                self.coarse.to("cpu")
+                state_dict = torch.load(coarse_ckpt, map_location="cpu")
+
+                self.coarse.load_state_dict(state_dict, strict=False)
+                self.coarse.to(self.device)
+            if c2f_ckpt is not None:
+                self.c2f.to("cpu")
+                state_dict = torch.load(c2f_ckpt, map_location="cpu")
+
+                self.c2f.load_state_dict(state_dict, strict=False)
+                self.c2f.to(self.device)
         
 
     def s2t(self, seconds: float):
@@ -290,6 +309,7 @@ class Interface(torch.nn.Module):
         z, 
         mask,
         return_mask=False,
+        gen_fn=None,
         **kwargs
     ):
         # coarse z
@@ -301,7 +321,8 @@ class Interface(torch.nn.Module):
         cz_masked, mask = apply_mask(cz, mask, self.coarse.mask_token)
         cz_masked = cz_masked[:, : self.coarse.n_codebooks, :]
 
-        c_vamp = self.coarse.sample(
+        gen_fn = gen_fn or self.coarse.sample
+        c_vamp = gen_fn(
             codec=self.codec,
             time_steps=cz.shape[-1],
             start_tokens=cz,
@@ -310,8 +331,6 @@ class Interface(torch.nn.Module):
             **kwargs
         )
 
-        # replace the mask token in cz_masked with random tokens
-        # so that we can decode it
         if return_mask:
             return c_vamp, cz_masked
         
@@ -320,53 +339,48 @@ class Interface(torch.nn.Module):
 
 if __name__ == "__main__":
     import audiotools as at
+    import logging
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    torch.set_printoptions(threshold=10000)
 
     interface = Interface(
         coarse_ckpt="./models/spotdl/coarse.pth", 
         coarse2fine_ckpt="./models/spotdl/c2f.pth", 
         codec_ckpt="./models/spotdl/codec.pth",
-        device="cpu"
+        device="cuda"
     )
 
-    sig = at.AudioSignal('cali.mp3', duration=10)
+    sig = at.AudioSignal('introspection ii-1.mp3', duration=10)
 
     z = interface.encode(sig)
 
-    mask = linear_random(z, 0.8)
-    print(mask)
-    mask = mask_and(
-        mask, inpaint(
-            z,
-            interface.s2t(3),
-            interface.s2t(3)
-        )
-    )
-    print(mask)
+    mask = linear_random(z, 1.0)
     mask = mask_and(
         mask, periodic_mask(
             z,
-            7,
+            32,
             1,
             random_roll=True
         )
     )
-    mask = dropout(mask, 0.0)
-    mask = codebook_unmask(mask, 0)
+    # mask = dropout(mask, 0.0)
+    # mask = codebook_unmask(mask, 0)
     
 
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
-        sampling_steps=1,
-        temperature=(0.8,1),
-        return_mask=True
+        sampling_steps=36,
+        temperature=6.0,
+        return_mask=True, 
+        # gen_fn=interface.coarse.generate
     )
 
     use_coarse2fine = False
     if use_coarse2fine: 
         zv = interface.coarse_to_fine(zv)
 
-    print(mask_z)
     mask = interface.to_signal(mask_z).cpu()
 
     sig = interface.to_signal(zv).cpu()

@@ -13,6 +13,10 @@ import gradio as gr
 from vampnet.interface import Interface
 from vampnet import mask as pmask
 
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.CRITICAL)
+
 Interface = argbind.bind(Interface)
 AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
@@ -68,6 +72,12 @@ checkpoints = {
         "c2f": "./models/finetuned/titi/c2f.pth",
         "codec": "./models/spotdl/codec.pth",
         "full_ckpt": False
+    }, 
+    "titi-clean": {
+        "coarse": "./models/finetuned/titi-clean/coarse.pth",
+        "c2f": "./models/finetuned/titi-clean/c2f.pth",
+        "codec": "./models/spotdl/codec.pth",
+        "full_ckpt": False
     }
 }
 interface.checkpoint_key = "spotdl"
@@ -112,10 +122,8 @@ def _vamp(data, return_mask=False):
             checkpoints[data[checkpoint_key]]["coarse"],
             checkpoints[data[checkpoint_key]]["c2f"],
             checkpoints[data[checkpoint_key]]["full_ckpt"],
-            reset=(data[checkpoint_key] == "spotdl")
         )
         interface.checkpoint_key = data[checkpoint_key]
-        
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
@@ -158,22 +166,23 @@ def _vamp(data, return_mask=False):
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
-    if data[topk] is not None:
-        top_k = data[topk] if data[topk] > 0 else None
-    else:
-        top_k = None
+    # if data[topk] is not None:
+    #     top_k = data[topk] if data[topk] > 0 else None
+    # else:
+    #     top_k = None
 
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
         sampling_steps=data[num_steps],
-        temperature=(data[init_temp], data[final_temp]),
+        temperature=(data[init_temp]*10, data[final_temp]*10),
         return_mask=True, 
-        sample=data[sampling_strategy], 
+        # sample=data[sampling_strategy], 
         typical_filtering=data[typical_filtering], 
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
-        top_k=top_k,
+        # top_k=top_k,
+        gen_fn=interface.coarse.generate,
     )
 
     if use_coarse2fine: 
@@ -360,7 +369,7 @@ with gr.Blocks() as demo:
                     label="final temperature (should probably stay between 0.7 and 2)",
                     minimum=0.0,
                     maximum=2.0,
-                    value=1.0
+                    value=0.8
                 )
 
             with gr.Accordion("sampling settings", open=False):
@@ -371,7 +380,7 @@ with gr.Blocks() as demo:
                 )
                 typical_filtering = gr.Checkbox(
                     label="typical filtering (cannot be used with topk)",
-                    value=True
+                    value=False
                 )
                 typical_mass = gr.Slider(
                     label="typical mass (should probably stay between 0.1 and 0.5)",
@@ -386,13 +395,7 @@ with gr.Blocks() as demo:
                     step=1,
                     value=1
                 )
-                topk = gr.Slider(
-                    label="topk (cannot be used with typical filtering). 0 = None",
-                    minimum=0,
-                    maximum=256,
-                    step=1,
-                    value=0
-                )
+
 
 
 
@@ -481,7 +484,7 @@ with gr.Blocks() as demo:
             typical_filtering,
             typical_mass,
             typical_min_tokens,
-            topk,
+            # topk,
             checkpoint_key
         }
   

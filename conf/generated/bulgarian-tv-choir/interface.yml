@@ -1,0 +1,7 @@
+AudioLoader.sources:
+- - /media/CHONK/hugo/loras/bulgarian-female-tv-choir/
+Interface.coarse2fine_ckpt: ./models/spotdl/c2f.pth
+Interface.coarse2fine_lora_ckpt: ./runs/bulgarian-tv-choir/c2f/latest/lora.pth
+Interface.coarse_ckpt: ./models/spotdl/coarse.pth
+Interface.coarse_lora_ckpt: ./runs/bulgarian-tv-choir/coarse/latest/lora.pth
+Interface.codec_ckpt: ./models/spotdl/codec.pth

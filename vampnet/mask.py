@@ -6,7 +6,7 @@ from audiotools import AudioSignal
 from .util import scalar_to_batch_tensor
 
 def _gamma(r):
-    return (r * torch.pi / 2).cos()
+    return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
 
 def _invgamma(y):
     if not torch.is_tensor(y):

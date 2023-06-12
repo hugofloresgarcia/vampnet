@@ -353,12 +353,9 @@ def train(
                     mask[:, vn.n_conditioning_codebooks :, :],
                 )
 
-                if vn.noise_mode == "mask":
-                    # replace target with ignore index for masked tokens
-                    t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-                    output["loss"] = criterion(z_hat, t_masked)
-                else:
-                    output["loss"] = criterion(z_hat, target)
+                # replace target with ignore index for masked tokens
+                t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+                output["loss"] = criterion(z_hat, t_masked)
 
                 self._metrics(
                     vn=vn,
@@ -429,12 +426,9 @@ def train(
             )
 
             output = {}
-            if vn.noise_mode == "mask":
-                # replace target with ignore index for masked tokens
-                t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-                output["loss"] = criterion(z_hat, t_masked)
-            else:
-                output["loss"] = criterion(z_hat, target)
+            # replace target with ignore index for masked tokens
+            t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+            output["loss"] = criterion(z_hat, t_masked)
 
             self._metrics(
                 vn=vn,
