@@ -7,21 +7,23 @@ from dataclasses import dataclass
 
 import argbind
 import audiotools as at
+import dac
 import torch
 import torch.nn as nn
 from audiotools import AudioSignal
 from audiotools.data import transforms
+from dac.model.dac import DAC
+from dac.utils import load_model as load_dac
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
 from tensorboardX import SummaryWriter
 
 import vampnet
-from vampnet.modules.transformer import VampNet
-from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
-# from dac.model.dac import DAC
-from lac.model.lac import LAC as DAC
+from vampnet.modules.transformer import VampNet
+from vampnet.util import codebook_flatten
+from vampnet.util import codebook_unflatten
 
 from audiotools.ml.decorators import (
     timer, Tracker, when
@@ -68,7 +70,7 @@ IGNORE_INDEX = -100
 @argbind.bind("train", "val", without_prefix=True)
 def build_transform():
     transform = transforms.Compose(
-        tfm.VolumeNorm(("const", -24)),
+        # tfm.VolumeNorm(("const", -24)),
         # tfm.PitchShift(),
         tfm.RescaleAudio(),
     )
@@ -440,7 +442,6 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
-
     mask = pmask.random(z, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
@@ -485,12 +486,13 @@ def load(
     save_path: str,
     resume: bool = False,
     tag: str = "latest",
-    load_weights: bool = False,
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
+    dac_path: str = "./models/",
 ) -> State:
-    codec = DAC.load(args["codec_ckpt"], map_location="cpu")
+    codec = load_dac(load_path=dac_path)
     codec.eval()
+    codec.to(accel.device)
 
     model, v_extra = None, {}
 
@@ -498,7 +500,7 @@ def load(
         kwargs = {
             "folder": f"{save_path}/{tag}",
             "map_location": "cpu",
-            "package": not load_weights,
+            "package": False,
         }
         tracker.print(f"Loading checkpoint from {kwargs['folder']}")
         if (Path(kwargs["folder"]) / "vampnet").exists():
@@ -508,20 +510,20 @@ def load(
                 f"Could not find a VampNet checkpoint in {kwargs['folder']}"
             )
 
-
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = VampNet.load(location=Path(fine_tune_checkpoint), map_location="cpu")
+        model = torch.compile(
+            VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu", 
+            )
+        )
 
 
-    model = VampNet() if model is None else model
-
+    model = torch.compile(VampNet()) if model is None else model
     model = accel.prepare_model(model)
 
     # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
-    assert (
-        accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
-    )
+    assert accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
 
     optimizer = AdamW(model.parameters(), use_zero=accel.use_ddp)
     scheduler = NoamScheduler(optimizer, d_model=accel.unwrap(model).embedding_dim)
@@ -568,7 +570,6 @@ def train(
     args,
     accel: at.ml.Accelerator,
     seed: int = 0,
-    codec_ckpt: str = None,
     save_path: str = "ckpt",
     num_iters: int = int(1000e6),
     save_iters: list = [10000, 50000, 100000, 300000, 500000,],
@@ -579,8 +580,6 @@ def train(
     num_workers: int = 10,
     fine_tune: bool = False, 
 ):
-    assert codec_ckpt is not None, "codec_ckpt is required"
-
     seed = seed + accel.local_rank
     at.util.seed(seed)
     writer = None
@@ -616,8 +615,6 @@ def train(
         collate_fn=state.val_data.collate,
         persistent_workers=True,
     )
-
-    
 
     if fine_tune:
         lora.mark_only_lora_as_trainable(state.model)

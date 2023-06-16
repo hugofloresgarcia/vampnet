@@ -30,10 +30,11 @@ setup(
         "argbind>=0.3.2",
         "numpy==1.22",
         "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat",
-        "lac @ git+https://github.com/hugofloresgarcia/lac.git",
+        "descript-audio-codec @ git+https://github.com/hugofloresgarcia/descript-audio-codec.git@bump-audiotools",
         "descript-audiotools @ git+https://github.com/descriptinc/audiotools.git@0.7.2",
         "gradio", 
         "tensorboardX",
         "loralib",
+        "x_transformers @ git+https://github.com/hugofloresgarcia/x-transformers.git@lora",
     ],
 )

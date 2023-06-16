@@ -1,20 +1,21 @@
-import argbind
 from pathlib import Path
-import yaml
 from typing import List
 
-
+import argbind
+import yaml
 
 
 """example output: (yaml)
 
 """
 
+
 @argbind.bind(without_prefix=True, positional=True)
 def fine_tune(audio_files_or_folders: List[str], name: str):
-
     conf_dir = Path("conf")
-    assert conf_dir.exists(), "conf directory not found. are you in the vampnet directory?"
+    assert (
+        conf_dir.exists()
+    ), "conf directory not found. are you in the vampnet directory?"
 
     conf_dir = conf_dir / "generated"
     conf_dir.mkdir(exist_ok=True)
@@ -48,11 +49,12 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
     }
 
     interface_conf = {
-        "Interface.coarse_ckpt": f"./models/vampnet/coarse.pth",
+        "Interface.coarse_ckpt": f"./runs/{name}/coarse/latest/vampnet/weights.pth",
         "Interface.coarse_lora_ckpt": f"./runs/{name}/coarse/latest/lora.pth",
 
-        "Interface.coarse2fine_ckpt": f"./models/vampnet/c2f.pth",
+        "Interface.coarse2fine_ckpt": f"./runs/{name}/c2f/latest/vampnet/weights.pth",
         "Interface.coarse2fine_lora_ckpt": f"./runs/{name}/c2f/latest/lora.pth",
+        "Interface.wavebeat_ckpt": "./models/wavebeat.pth",
 
         "Interface.codec_ckpt": "./models/vampnet/codec.pth",
         "AudioLoader.sources": [audio_files_or_folders],
@@ -64,19 +66,17 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
 
     with open(finetune_dir / "coarse.yml", "w") as f:
         yaml.dump(finetune_coarse_conf, f)
-    
-    with open(finetune_dir / "interface.yml", "w") as f: 
+
+    with open(finetune_dir / "interface.yml", "w") as f:
         yaml.dump(interface_conf, f)
 
+    print(
+        f"generated confs in {finetune_dir}. run training jobs with `python scripts/exp/train.py --args.load {finetune_dir}/<c2f/coarse>.yml` "
+    )
 
-    print(f"generated confs in {finetune_dir}. run training jobs with `python scripts/exp/train.py --args.load {finetune_dir}/<c2f/coarse>.yml` ")
 
 if __name__ == "__main__":
     args = argbind.parse_args()
 
     with argbind.scope(args):
         fine_tune()
-
-
-
-    
