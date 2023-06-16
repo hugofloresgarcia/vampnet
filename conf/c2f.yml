@@ -1,5 +1,5 @@
 $include:
-  - conf/vampnet.yml
+  - conf/base.yml
 
 VampNet.n_codebooks: 14
 VampNet.n_conditioning_codebooks: 4

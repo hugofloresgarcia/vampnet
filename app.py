@@ -1,17 +1,18 @@
-from pathlib import Path
-from typing import Tuple
-import yaml
 import tempfile
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Tuple
 
-import numpy as np
-import audiotools as at
 import argbind
-
+import audiotools as at
 import gradio as gr
-from vampnet.interface import Interface
+import numpy as np
+import yaml
+
 from vampnet import mask as pmask
+from vampnet.interface import Interface
 
 Interface = argbind.bind(Interface)
 # AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
@@ -59,8 +60,7 @@ def load_audio(file):
     print(file)
     filepath = file.name
     sig = at.AudioSignal.salient_excerpt(
-        filepath, 
-        duration=interface.coarse.chunk_size_s
+        filepath, duration=interface.coarse.chunk_size_s
     )
     sig = interface.preprocess(sig)
 
@@ -91,19 +91,12 @@ def _vamp(data, return_mask=False):
     # build the mask
     mask = pmask.linear_random(z, data[rand_mask_intensity])
     mask = pmask.mask_and(
-        mask, pmask.inpaint(
-            z,
-            interface.s2t(data[prefix_s]),
-            interface.s2t(data[suffix_s])
-        )
+        mask,
+        pmask.inpaint(z, interface.s2t(data[prefix_s]), interface.s2t(data[suffix_s])),
     )
     mask = pmask.mask_and(
-        mask, pmask.periodic_mask(
-            z,
-            data[periodic_p],
-            data[periodic_w],
-            random_roll=True
-        )
+        mask,
+        pmask.periodic_mask(z, data[periodic_p], data[periodic_w], random_roll=True),
     )
     if data[onset_mask_width] > 0:
         mask = pmask.mask_or(
@@ -145,11 +138,11 @@ def _vamp(data, return_mask=False):
     
     _top_p = data[top_p] if data[top_p] > 0 else None
     # save the mask as a txt file
-    np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
+    np.savetxt(out_dir / "mask.txt", mask[:, 0, :].long().cpu().numpy())
 
     _seed = data[seed] if data[seed] > 0 else None
     zv, mask_z = interface.coarse_vamp(
-        z, 
+        z,
         mask=mask,
         sampling_steps=data[num_steps],
         mask_temperature=data[masktemp]*10,
@@ -178,8 +171,6 @@ def _vamp(data, return_mask=False):
     sig = interface.to_signal(zv).cpu()
     print("done")
 
-    
-
     sig.write(out_dir / "output.wav")
 
     if return_mask:
@@ -189,12 +180,22 @@ def _vamp(data, return_mask=False):
     else:
         return sig.path_to_file
 
+
+def generate(data):
+    audio = at.AudioSignal.zeros(interface.coarse.chunk_size_s, interface.codec.sample_rate)
+    return _vamp(data, return_mask=True, audio=audio)
+
 def vamp(data):
-    return _vamp(data, return_mask=True)
+    if data[unconditional_gen]:
+        return generate(data)
+    else:
+        return _vamp(data, return_mask=True)
+
 
 def api_vamp(data):
     return _vamp(data, return_mask=False)
-        
+
+
 def save_vamp(data):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +205,7 @@ def save_vamp(data):
 
     sig_in.write(out_dir / "input.wav")
     sig_out.write(out_dir / "output.wav")
-    
+
     _data = {
         "masktemp": data[masktemp],
         "sampletemp": data[sampletemp],
@@ -216,7 +217,7 @@ def save_vamp(data):
         "notes": data[notes_text],
         "periodic_period": data[periodic_p],
         "periodic_width": data[periodic_w],
-        "n_conditioning_codebooks": data[n_conditioning_codebooks], 
+        "n_conditioning_codebooks": data[n_conditioning_codebooks],
         "use_coarse2fine": data[use_coarse2fine],
         "stretch_factor": data[stretch_factor],
         "seed": data[seed],
@@ -228,6 +229,7 @@ def save_vamp(data):
         yaml.dump(_data, f)
 
     import zipfile
+
     zip_path = out_dir.with_suffix(".zip")
     with zipfile.ZipFile(zip_path, "w") as zf:
         for file in out_dir.iterdir():
@@ -236,9 +238,7 @@ def save_vamp(data):
     return f"saved! your save code is {out_dir.stem}", zip_path
 
 
-
 with gr.Blocks() as demo:
-
     with gr.Row():
         with gr.Column():
             gr.Markdown("# VampNet Audio Vamping")
@@ -259,22 +259,21 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
 
-
             manual_audio_upload = gr.File(
                 label=f"upload some audio (will be randomly trimmed to max of {interface.coarse.chunk_size_s:.2f}s)",
-                file_types=["audio"]
+                file_types=["audio"],
             )
             load_example_audio_button = gr.Button("or load example audio")
 
             input_audio = gr.Audio(
-                label="input audio",
-                interactive=False, 
+                label="input audio (will be ignored if unconditional)",
+                interactive=False,
                 type="filepath",
             )
 
             audio_mask = gr.Audio(
-                label="audio mask (listen to this to hear the mask hints)",
-                interactive=False, 
+                label="audio mask (you should listen to this to hear the mask hints)",
+                interactive=False,
                 type="filepath",
             )
 
@@ -286,11 +285,9 @@ with gr.Blocks() as demo:
             )
 
             manual_audio_upload.change(
-                fn=load_audio,
-                inputs=[manual_audio_upload],
-                outputs=[ input_audio]
+                fn=load_audio, inputs=[manual_audio_upload], outputs=[input_audio]
             )
-                
+
         # mask settings
         with gr.Column():
 
@@ -442,13 +439,13 @@ with gr.Blocks() as demo:
                     label="prefix hint length (seconds)",
                     minimum=0.0,
                     maximum=10.0,
-                    value=0.0
+                    value=0.0,
                 )
                 suffix_s = gr.Slider(
                     label="suffix hint length (seconds)",
                     minimum=0.0,
                     maximum=10.0,
-                    value=0.0
+                    value=0.0,
                 )
 
             masktemp = gr.Slider(
@@ -482,14 +479,21 @@ with gr.Blocks() as demo:
                     label="typical mass (should probably stay between 0.1 and 0.5)",
                     minimum=0.01,
                     maximum=0.99,
-                    value=0.15
+                    value=0.15,
                 )
                 typical_min_tokens = gr.Slider(
                     label="typical min tokens (should probably stay between 1 and 256)",
                     minimum=1,
                     maximum=256,
                     step=1,
-                    value=64
+                    value=64,
+                )
+                sample_cutoff = gr.Slider(
+                    label="sample cutoff",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.5, 
+                    step=0.01
                 )
                 sample_cutoff = gr.Slider(
                     label="sample cutoff",
@@ -510,24 +514,18 @@ with gr.Blocks() as demo:
                 minimum=1,
                 maximum=128,
                 step=1,
-                value=36
+                value=36,
             )
 
-            dropout = gr.Slider(
-                label="mask dropout",
-                minimum=0.0,
-                maximum=1.0,
-                step=0.01,
-                value=0.0
-            )
-
+                dropout = gr.Slider(
+                    label="mask dropout", minimum=0.0, maximum=1.0, step=0.01, value=0.0
+                )
 
             seed = gr.Number(
                 label="seed (0 for random)",
                 value=0,
                 precision=0,
             )
-
 
 
         # mask settings
@@ -542,25 +540,22 @@ with gr.Blocks() as demo:
 
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
-                label="output audio",
-                interactive=False,
-                type="filepath"
+                label="output audio", interactive=False, type="filepath"
             )
 
-            notes_text = gr.Textbox(
-                label="type any notes about the generated audio here", 
-                value="",
-                interactive=True
-            )
-            save_button = gr.Button("save vamp")
-            download_file = gr.File(
-                label="vamp to download will appear here",
-                interactive=False
-            )
-            use_as_input_button = gr.Button("use output as input")
-            
-            thank_you = gr.Markdown("")
+            with gr.Accordion("liked your output?", open=False):
+                notes_text = gr.Textbox(
+                    label="type any notes about the generated audio here",
+                    value="",
+                    interactive=True,
+                )
+                save_button = gr.Button("save vamp")
+                download_file = gr.File(
+                    label="vamp to download will appear here", interactive=False
+                )
+                use_as_input_button = gr.Button("use output as input")
 
+                thank_you = gr.Markdown("")
 
     _inputs = {
             input_audio, 
@@ -591,27 +586,22 @@ with gr.Blocks() as demo:
     vamp_button.click(
         fn=vamp,
         inputs=_inputs,
-        outputs=[output_audio, audio_mask], 
+        outputs=[output_audio, audio_mask],
     )
 
     api_vamp_button = gr.Button("api vamp", visible=False)
     api_vamp_button.click(
-        fn=api_vamp,
-        inputs=_inputs, 
-        outputs=[output_audio], 
-        api_name="vamp"
+        fn=api_vamp, inputs=_inputs, outputs=[output_audio], api_name="vamp"
     )
 
     use_as_input_button.click(
-        fn=lambda x: x,
-        inputs=[output_audio],
-        outputs=[input_audio]
+        fn=lambda x: x, inputs=[output_audio], outputs=[input_audio]
     )
 
     save_button.click(
         fn=save_vamp,
         inputs=_inputs | {notes_text, output_audio},
-        outputs=[thank_you, download_file]
+        outputs=[thank_you, download_file],
     )
 
 demo.launch(share=True, enable_queue=True, debug=True)

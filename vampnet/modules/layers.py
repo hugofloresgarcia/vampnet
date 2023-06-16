@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch.nn.utils import weight_norm
 
+
 # Scripting this brings model speed up 1.4x
 @torch.jit.script
 def snake(x, alpha):
@@ -52,56 +53,6 @@ def WNConvTranspose1d(*args, **kwargs):
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
 
 
-class SequentialWithFiLM(nn.Module):
-    """
-    handy wrapper for nn.Sequential that allows FiLM layers to be
-    inserted in between other layers.
-    """
-
-    def __init__(self, *layers):
-        super().__init__()
-        self.layers = nn.ModuleList(layers)
-
-    @staticmethod
-    def has_film(module):
-        mod_has_film = any(
-            [res for res in recurse_children(module, lambda c: isinstance(c, FiLM))]
-        )
-        return mod_has_film
-
-    def forward(self, x, cond):
-        for layer in self.layers:
-            if self.has_film(layer):
-                x = layer(x, cond)
-            else:
-                x = layer(x)
-        return x
-
-
-class FiLM(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int):
-        super().__init__()
-
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-
-        if input_dim > 0:
-            self.beta = nn.Linear(input_dim, output_dim)
-            self.gamma = nn.Linear(input_dim, output_dim)
-
-    def forward(self, x, r):
-        if self.input_dim == 0:
-            return x
-        else:
-            beta, gamma = self.beta(r), self.gamma(r)
-            beta, gamma = (
-                beta.view(x.size(0), self.output_dim, 1),
-                gamma.view(x.size(0), self.output_dim, 1),
-            )
-            x = x * (gamma + 1) + beta
-        return x
-
-
 class CodebookEmbedding(nn.Module):
     def __init__(
         self,
@@ -132,10 +83,10 @@ class CodebookEmbedding(nn.Module):
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
 
     def from_codes(self, codes: torch.Tensor, codec):
-        """ 
-        get a sequence of continuous embeddings from a sequence of discrete codes. 
+        """
+        get a sequence of continuous embeddings from a sequence of discrete codes.
         unlike it's counterpart in the original VQ-VAE, this function adds for any special tokens
-        necessary for the language model, like <MASK>. 
+        necessary for the language model, like <MASK>.
         """
         n_codebooks = codes.shape[1]
         latent = []
@@ -161,4 +112,3 @@ class CodebookEmbedding(nn.Module):
         """
         x = self.out_proj(latents)
         return x
-

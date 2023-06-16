@@ -26,8 +26,8 @@ pip install -e ./vampnet
 ```
 
 ## A note on argbind
-This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
-Config files are stored in the `conf/` folder. 
+This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files.
+Config files are stored in the `conf/` folder.
 
 ## Getting the Pretrained Models
 
@@ -53,7 +53,7 @@ python app.py --args.load conf/interface.yml --Interface.device cuda
 To train a model, run the following script: 
 
 ```bash
-python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints
+python scripts/utils/vamp_folder.py  --args.load conf/interface/spotdl.yml --Interface.device cuda --exp_type sampling-steps
 ```
 
 You can edit `conf/vampnet.yml` to change the dataset paths or any training hyperparameters. 
@@ -72,21 +72,21 @@ python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/a
 
 This will create a folder under `conf/<fine_tune_name>/` with the 3 configuration files.
 
-The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`. 
+The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`.
 
-launch the coarse job: 
+launch the coarse job:
 ```bash
-python scripts/exp/train.py --args.load conf/<fine_tune_name>/coarse.yml 
+python scripts/exp/train.py --args.load conf/<fine_tune_name>/coarse.yml
 ```
 
 this will save the coarse model to `runs/<fine_tune_name>/coarse/ckpt/best/`.
 
-launch the c2f job: 
+launch the c2f job:
 ```bash
-python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml 
+python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml
 ```
 
-launch the interface: 
+launch the interface:
 ```bash
 python  app.py --args.load conf/generated/<fine_tune_name>/interface.yml 
 ```

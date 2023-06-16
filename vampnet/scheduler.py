@@ -3,6 +3,7 @@ from typing import List
 
 import torch
 
+
 class NoamScheduler:
     """OG scheduler from transformer paper: https://arxiv.org/pdf/1706.03762.pdf
     Implementation from Annotated Transformer: https://nlp.seas.harvard.edu/2018/04/03/attention.html
@@ -44,4 +45,3 @@ class NoamScheduler:
 
         for p in self.optimizer.param_groups:
             p["lr"] = self.lr
-

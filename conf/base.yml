@@ -22,15 +22,13 @@ NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 10000
 
 VampNet.vocab_size: 1024
-VampNet.n_codebooks: 4
+VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
-VampNet.r_cond_dim: 0
-VampNet.noise_mode: mask
 VampNet.embedding_dim: 1280
-VampNet.n_layers: 20
-VampNet.n_heads: 20
-VampNet.flash_attn: false
-VampNet.dropout: 0.1
+VampNet.n_layers: 10
+VampNet.n_heads: 10
+VampNet.dropout: 0.05
+# VampNet.chroma_dim: 0
 
 AudioLoader.relative_path: /data/
 AudioDataset.loudness_cutoff: -30.0
@@ -43,6 +41,7 @@ train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:
   - /media/CHONK/hugo/spotdl/audio-train
 
+# val/AudioDataset.n_examples: 2000
 val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
   - /media/CHONK/hugo/spotdl/audio-val

@@ -20,10 +20,10 @@ def augment(
     dest_folder: Path = None,
     n_augmentations: int = 10,
 ):
-    """ 
-        Augment a folder of audio files by applying audiotools and pedalboard transforms. 
+    """
+        Augment a folder of audio files by applying audiotools and pedalboard transforms.
 
-        The dest foler will contain a folder for each of the clean dataset's files. 
+        The dest foler will contain a folder for each of the clean dataset's files.
         Under each of these folders, there will be a clean file and many augmented files.
     """
     assert audio_folder is not None

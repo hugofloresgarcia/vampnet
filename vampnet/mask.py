@@ -5,17 +5,21 @@ from audiotools import AudioSignal
 
 from .util import scalar_to_batch_tensor
 
+
 def _gamma(r):
     return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
+
 
 def _invgamma(y):
     if not torch.is_tensor(y):
         y = torch.tensor(y)[None]
     return 2 * y.acos() / torch.pi
 
+
 def full_mask(x: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     return torch.ones_like(x).long()
+
 
 def empty_mask(x: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
@@ -37,10 +41,8 @@ def apply_mask(
 
     return x, mask
 
-def random(
-    x: torch.Tensor,
-    r: torch.Tensor
-):
+
+def random(x: torch.Tensor, r: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     if not isinstance(r, torch.Tensor):
         r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
@@ -52,6 +54,7 @@ def random(
     mask = mask.round().long()
 
     return mask
+
 
 def linear_random(
     x: torch.Tensor,
@@ -71,19 +74,21 @@ def linear_random(
 
     return mask
 
-def inpaint(x: torch.Tensor, 
+
+def inpaint(
+    x: torch.Tensor,
     n_prefix,
     n_suffix,
 ):
     assert n_prefix is not None
     assert n_suffix is not None
-    
+
     mask = full_mask(x)
 
     # if we have a prefix or suffix, set their mask prob to 0
     if n_prefix > 0:
         if not isinstance(n_prefix, torch.Tensor):
-            n_prefix = scalar_to_batch_tensor(n_prefix, x.shape[0]).to(x.device) 
+            n_prefix = scalar_to_batch_tensor(n_prefix, x.shape[0]).to(x.device)
         for i, n in enumerate(n_prefix):
             if n > 0:
                 mask[i, :, :n] = 0.0
@@ -94,13 +99,15 @@ def inpaint(x: torch.Tensor,
             if n > 0:
                 mask[i, :, -n:] = 0.0
 
-    
     return mask
 
-def periodic_mask(x: torch.Tensor, 
-                period: int, width: int = 1, 
-                random_roll=False,
-    ):
+
+def periodic_mask(
+    x: torch.Tensor,
+    period: int,
+    width: int = 1,
+    random_roll=False,
+):
     mask = full_mask(x)
     if period == 0:
         return mask
@@ -113,8 +120,8 @@ def periodic_mask(x: torch.Tensor,
         for j in range(mask.shape[-1]):
             if j % factor == 0:
                 # figure out how wide the mask should be
-                j_start = max(0, j - width // 2  )
-                j_end = min(mask.shape[-1] - 1, j + width // 2 ) + 1 
+                j_start = max(0, j - width // 2)
+                j_end = min(mask.shape[-1] - 1, j + width // 2) + 1
                 # flip a coin for each position in the mask
                 j_mask = torch.bernoulli(torch.ones(j_end - j_start))
                 assert torch.all(j_mask == 1)
@@ -129,10 +136,8 @@ def periodic_mask(x: torch.Tensor,
 
     return mask
 
-def codebook_unmask(
-    mask: torch.Tensor, 
-    n_conditioning_codebooks: int
-):
+
+def codebook_unmask(mask: torch.Tensor, n_conditioning_codebooks: int):
     if n_conditioning_codebooks == None:
         return mask
     # if we have any conditioning codebooks, set their mask  to 0
@@ -140,12 +145,11 @@ def codebook_unmask(
     mask[:, :n_conditioning_codebooks, :] = 0
     return mask
 
-def mask_and(
-    mask1: torch.Tensor, 
-    mask2: torch.Tensor
-):
+
+def mask_and(mask1: torch.Tensor, mask2: torch.Tensor):
     assert mask1.shape == mask2.shape, "masks must be same shape"
     return torch.min(mask1, mask2)
+
 
 def dropout(
     mask: torch.Tensor,
@@ -170,8 +174,9 @@ def mask_or(
     assert mask2.min() >= 0, "mask2 must be binary"
     return (mask1 + mask2).clamp(0, 1)
 
+
 def time_stretch_mask(
-    x: torch.Tensor, 
+    x: torch.Tensor,
     stretch_factor: int,
 ):
     assert stretch_factor >= 1, "stretch factor must be >= 1"

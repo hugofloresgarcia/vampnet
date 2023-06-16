@@ -14,7 +14,7 @@ train = []
 validation = []
 test = []
 for key, split in maestro["split"].items():
-    audio_filename = maestro['audio_filename'][key]
+    audio_filename = maestro["audio_filename"][key]
     if split == "train":
         train.append(audio_filename)
     elif split == "test":

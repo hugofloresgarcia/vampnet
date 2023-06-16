@@ -1,5 +1,5 @@
 $include:
-  - conf/vampnet.yml
+  - conf/base.yml
 
 fine_tune: True
 
