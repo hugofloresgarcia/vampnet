@@ -741,7 +741,7 @@ class VampNet(at.ml.BaseModel):
         sampling_steps: int = 36,
         start_tokens: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
-        temperature: Union[float, Tuple[float, float]] = 0.8,
+        temperature: Union[float, Tuple[float, float]] = 8.0,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
@@ -848,15 +848,10 @@ class VampNet(at.ml.BaseModel):
             probs = torch.softmax(logits, dim=-1)
             logging.info(f"computed probs with shape: {probs.shape}")
 
-            # flatten z_masked and mask, so we can deal with the sampling logic
-            # we'll unflatten them at the end of the loop for the next forward pass
-            z_masked = codebook_flatten(z_masked)            
 
             # sample from logits with multinomial sampling
             b = probs.shape[0]
             probs = rearrange(probs, "b seq prob -> (b seq) prob")
-
-
 
             sampled_z =  torch.multinomial(probs, 1).squeeze(-1)
 
@@ -864,10 +859,16 @@ class VampNet(at.ml.BaseModel):
             probs = rearrange(probs, "(b seq) prob -> b seq prob", b=b)
             logging.info(f"sampled z with shape: {sampled_z.shape}")
 
-            # update the mask
-            mask = (z_masked == self.mask_token).int()
-            logging.info(f"updated mask with shape: {mask.shape}")
 
+            # flatten z_masked and mask, so we can deal with the sampling logic
+            # we'll unflatten them at the end of the loop for the next forward pass
+            # remove conditioning codebooks, we'll add them back at the end
+            z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])            
+
+            mask = (z_masked == self.mask_token).int()
+            
+            # update the mask, remove conditioning codebooks from the mask
+            logging.info(f"updated mask with shape: {mask.shape}")
             # add z back into sampled z where the mask was false
             sampled_z = torch.where(
                 mask.bool(), sampled_z, z_masked
@@ -902,17 +903,9 @@ class VampNet(at.ml.BaseModel):
 
 
             # get our new mask
-            # print(tmpt * (1-_gamma(r)))
             mask = mask_by_random_topk(
                 num_to_mask, selected_probs, tmpt * (1-r)
-            )    
-
-            # print(f"most confident tokens: ")
-            # print(torch.take_along_dim(
-            #     sampled_z, selected_probs.argsort(descending=False), dim=-1)
-            # )
-            # print(sampled_z[~mask.bool()])
-
+            )  
 
             # update the mask
             z_masked = torch.where(
@@ -920,22 +913,29 @@ class VampNet(at.ml.BaseModel):
             )
             logging.info(f"updated z_masked with shape: {z_masked.shape}")
 
-
-            z_masked = codebook_unflatten(z_masked, self.n_codebooks)
-            mask = codebook_unflatten(mask, self.n_codebooks)
+            z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
+            mask = codebook_unflatten(mask, n_infer_codebooks)
             logging.info(f"unflattened z_masked with shape: {z_masked.shape}")
 
+            # add conditioning codebooks back to z_masked
+            z_masked = torch.cat(
+                (z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1
+            )
+            logging.info(f"added conditioning codebooks back to z_masked with shape: {z_masked.shape}")
 
-            logging.info(f"updated z_masked with shape: {z_masked.shape}")
 
+        # add conditioning codebooks back to sampled_z
+        sampled_z = codebook_unflatten(sampled_z, n_infer_codebooks)
+        sampled_z = torch.cat(
+            (z[:, :self.n_conditioning_codebooks, :], sampled_z), dim=1
+        )
 
         logging.info(f"finished sampling")
-        z = codebook_unflatten(sampled_z, self.n_codebooks)
 
         if return_signal:
-            return self.to_signal(z, codec)
+            return self.to_signal(sampled_z, codec)
         else:
-            return z
+            return sampled_z
 
 
 def mask_by_random_topk(num_to_mask: int, probs: torch.Tensor, temperature: float = 1.0):

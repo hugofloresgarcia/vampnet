@@ -292,7 +292,7 @@ class Interface(torch.nn.Module):
         fine_z = []
         for i in range(n_chunks):
             chunk = coarse_z[:, :, i * chunk_len : (i + 1) * chunk_len]
-            chunk = self.c2f.sample(
+            chunk = self.c2f.generate(
                 codec=self.codec,
                 time_steps=chunk_len,
                 start_tokens=chunk,
@@ -343,6 +343,7 @@ if __name__ == "__main__":
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     torch.set_printoptions(threshold=10000)
+    at.util.seed(42)
 
     interface = Interface(
         coarse_ckpt="./models/spotdl/coarse.pth", 
@@ -372,20 +373,20 @@ if __name__ == "__main__":
         z, 
         mask=mask,
         sampling_steps=36,
-        temperature=6.0,
+        temperature=8.0,
         return_mask=True, 
-        # gen_fn=interface.coarse.generate
+        gen_fn=interface.coarse.generate
     )
 
-    use_coarse2fine = False
+    use_coarse2fine = True
     if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv)
+        zv = interface.coarse_to_fine(zv, temperature=0.8)
 
     mask = interface.to_signal(mask_z).cpu()
 
     sig = interface.to_signal(zv).cpu()
     print("done")
 
-    sig.write("output.wav")
+    sig.write("output3.wav")
     mask.write("mask.wav")
         

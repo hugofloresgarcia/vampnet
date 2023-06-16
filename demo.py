@@ -68,7 +68,19 @@ checkpoints = {
         "c2f": "./models/finetuned/titi/c2f.pth",
         "codec": "./models/spotdl/codec.pth",
         "full_ckpt": False
-    }
+    }, 
+    "titi-clean": {
+        "coarse": "./models/finetuned/titi-clean/coarse.pth",
+        "c2f": "./models/finetuned/titi-clean/c2f.pth",
+        "codec": "./models/spotdl/codec.pth",
+        "full_ckpt": False
+    }, 
+    "breaks-steps": {
+        "coarse": "./models/finetuned/breaks-steps/coarse.pth",
+        "c2f": None, #"./models/finetuned/breaks-steps/c2f.pth",
+        "codec": "./models/spotdl/codec.pth",
+        "full_ckpt": False
+    },
 }
 interface.checkpoint_key = "spotdl"
 
@@ -112,10 +124,8 @@ def _vamp(data, return_mask=False):
             checkpoints[data[checkpoint_key]]["coarse"],
             checkpoints[data[checkpoint_key]]["c2f"],
             checkpoints[data[checkpoint_key]]["full_ckpt"],
-            reset=(data[checkpoint_key] == "spotdl")
         )
         interface.checkpoint_key = data[checkpoint_key]
-        
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
@@ -154,30 +164,24 @@ def _vamp(data, return_mask=False):
     mask = pmask.dropout(mask, data[dropout])
     mask = pmask.codebook_unmask(mask, ncc)
 
-    print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}, codebook unmask {ncc}, onset mask {data[onset_mask_width]}, num steps {data[num_steps]}, init temp {data[init_temp]}, final temp {data[final_temp]}, use coarse2fine {data[use_coarse2fine]}")
+    print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}, codebook unmask {ncc}, onset mask {data[onset_mask_width]}, num steps {data[num_steps]}, init temp {data[temp]},  use coarse2fine {data[use_coarse2fine]}")
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
-
-    if data[topk] is not None:
-        top_k = data[topk] if data[topk] > 0 else None
-    else:
-        top_k = None
 
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
         sampling_steps=data[num_steps],
-        temperature=(data[init_temp], data[final_temp]),
+        temperature=data[temp]*10,
         return_mask=True, 
-        sample=data[sampling_strategy], 
         typical_filtering=data[typical_filtering], 
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
-        top_k=top_k,
+        gen_fn=interface.coarse.generate,
     )
 
     if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv)
+        zv = interface.coarse_to_fine(zv, temperature=data[temp])
 
     sig = interface.to_signal(zv).cpu()
     print("done")
@@ -210,8 +214,7 @@ def save_vamp(data):
     sig_out.write(out_dir / "output.wav")
     
     _data = {
-        "init_temp": data[init_temp],
-        "final_temp": data[final_temp],
+        "temp": data[temp],
         "prefix_s": data[prefix_s],
         "suffix_s": data[suffix_s],
         "rand_mask_intensity": data[rand_mask_intensity],
@@ -349,52 +352,31 @@ with gr.Blocks() as demo:
                     value=0.0
                 )
 
-            with gr.Accordion("temperature settings", open=False):
-                init_temp = gr.Slider(
-                    label="initial temperature (should probably stay between 0.6 and 1)",
-                    minimum=0.0,
-                    maximum=1.5,
-                    value=0.8
-                )
-                final_temp = gr.Slider(
-                    label="final temperature (should probably stay between 0.7 and 2)",
-                    minimum=0.0,
-                    maximum=2.0,
-                    value=1.0
-                )
+            temp = gr.Slider(
+                label="temperature",
+                minimum=0.0,
+                maximum=1.5,
+                value=0.8
+            )
 
             with gr.Accordion("sampling settings", open=False):
-                sampling_strategy = gr.Radio(
-                    label="sampling strategy",
-                    choices=["gumbel", "multinomial"],
-                    value="gumbel"
-                )
                 typical_filtering = gr.Checkbox(
-                    label="typical filtering (cannot be used with topk)",
+                    label="typical filtering ",
                     value=True
                 )
                 typical_mass = gr.Slider(
                     label="typical mass (should probably stay between 0.1 and 0.5)",
                     minimum=0.01,
                     maximum=0.99,
-                    value=0.2
+                    value=0.15
                 )
                 typical_min_tokens = gr.Slider(
                     label="typical min tokens (should probably stay between 1 and 256)",
                     minimum=1,
                     maximum=256,
                     step=1,
-                    value=1
+                    value=64
                 )
-                topk = gr.Slider(
-                    label="topk (cannot be used with typical filtering). 0 = None",
-                    minimum=0,
-                    maximum=256,
-                    step=1,
-                    value=0
-                )
-
-
 
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
@@ -427,28 +409,6 @@ with gr.Blocks() as demo:
                 type="filepath"
             )
 
-
-        
-        # with gr.Column():
-        #     with gr.Accordion(label="beat unmask (how much time around the beat should be hinted?)"):
-        #         use_beats = gr.Checkbox(
-        #             label="use beat hints (helps the output stick to the beat structure of the input)",
-        #             value=False
-        #         )
-
-        #         snap_to_beats = gr.Checkbox(
-        #             label="trim to beat markers (uncheck if the output audio is too short.)",
-        #             value=True
-        #         )
-                
-        #         beat_unmask_dur = gr.Slider(
-        #             label="duration", 
-        #             minimum=0.0,
-        #             maximum=3.0,
-        #             value=0.07
-        #         )
-
-
             notes_text = gr.Textbox(
                 label="type any notes about the generated audio here", 
                 value="",
@@ -467,7 +427,7 @@ with gr.Blocks() as demo:
     _inputs = {
             input_audio, 
             num_steps,
-            init_temp, final_temp,
+            temp,
             prefix_s, suffix_s, 
             rand_mask_intensity, 
             periodic_p, periodic_w,
@@ -477,11 +437,9 @@ with gr.Blocks() as demo:
             stretch_factor, 
             onset_mask_width, 
             input_pitch_shift, 
-            sampling_strategy, 
             typical_filtering,
             typical_mass,
             typical_min_tokens,
-            topk,
             checkpoint_key
         }
   
