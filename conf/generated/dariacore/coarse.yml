@@ -1,0 +1,8 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+fine_tune_checkpoint: ./models/spotdl/coarse.pth
+save_path: ./runs/dariacore/coarse
+train/AudioLoader.sources: &id001
+- /media/CHONK/hugo/loras/dariacore
+val/AudioLoader.sources: *id001
