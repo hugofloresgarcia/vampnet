@@ -39,6 +39,7 @@ setup(
         "google-cloud-logging==2.2.0",
         "einops",
         # "frechet_audio_distance", 
-        "gradio"
+        "gradio", 
+        "tensorboardX",
     ],
 )
