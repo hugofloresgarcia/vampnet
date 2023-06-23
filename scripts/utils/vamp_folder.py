@@ -9,9 +9,12 @@ from tqdm import tqdm
 import torch
 
 from vampnet.interface import Interface
+from vampnet import mask as pmask
 import audiotools as at
 
 Interface: Interface = argbind.bind(Interface)
+
+
 
 def calculate_bitrate(
         interface, num_codebooks, 
@@ -38,29 +41,19 @@ def coarse2fine(sig, interface):
     z = interface.coarse_to_fine(z)
     return interface.to_signal(z)
 
-def coarse2fine_argmax(sig, interface):
-    z = interface.encode(sig)
-    z = z[:, :interface.c2f.n_conditioning_codebooks, :]
-
-    z = interface.coarse_to_fine(z, 
-        sample="argmax", sampling_steps=1, 
-        temperature=1.0
-    )
-    return interface.to_signal(z)
-
 class CoarseCond:
 
-    def __init__(self, num_codebooks, downsample_factor):
-        self.num_codebooks = num_codebooks
+    def __init__(self, num_conditioning_codebooks, downsample_factor):
+        self.num_conditioning_codebooks = num_conditioning_codebooks
         self.downsample_factor = downsample_factor
 
     def __call__(self, sig, interface):
-        n_conditioning_codebooks = interface.coarse.n_codebooks - self.num_codebooks
-        zv = interface.coarse_vamp(sig, 
-            n_conditioning_codebooks=n_conditioning_codebooks,
-            downsample_factor=self.downsample_factor, 
-        )
+        z = interface.encode(sig)
+        mask = pmask.full_mask(z)
+        mask = pmask.codebook_unmask(mask, self.num_conditioning_codebooks)
+        mask = pmask.periodic_mask(mask, self.downsample_factor)
 
+        zv = interface.coarse_vamp(z, mask)
         zv = interface.coarse_to_fine(zv)
         return interface.to_signal(zv)
 
@@ -97,24 +90,24 @@ def opus(sig, interface, bitrate=128):
 
 def mask_ratio_1_step(ratio=1.0):
     def wrapper(sig, interface):
-        r = interface.coarse.invgamma(ratio).to(interface.device)
-        intensity = 1-r
-
+        z = interface.encode(sig)
+        mask = pmask.linear_random(z, ratio)
         zv = interface.coarse_vamp(
-            sig, 
-            sample='argmax',
+            z, 
+            mask,
             sampling_steps=1, 
-            intensity=intensity
         )
 
         return interface.to_signal(zv)
     return wrapper
 
 def num_sampling_steps(num_steps=1):
-    def wrapper(sig, interface):
+    def wrapper(sig, interface: Interface):
+        z = interface.encode(sig)
+        mask = pmask.periodic_mask(z, 16)
         zv = interface.coarse_vamp(
-            sig, 
-            downsample_factor=16,
+            z, 
+            mask,
             sampling_steps=num_steps, 
         )
 
@@ -130,9 +123,9 @@ def beat_mask(ctx_time):
             after_beat_s=ctx_time,
             invert=True
         )
+        z = interface.encode(sig)
         zv = interface.coarse_vamp(
-            sig, 
-            ext_mask=beat_mask, 
+            z, beat_mask, 
         )
 
         zv = interface.coarse_to_fine(zv)
@@ -140,15 +133,26 @@ def beat_mask(ctx_time):
     return wrapper
 
 def inpaint(ctx_time):
-    def wrapper(sig, interface):
-        zv = interface.coarse_vamp(
-            sig, 
-            prefix_dur_s=ctx_time,
-            suffix_dur_s=ctx_time,
-        )
+    def wrapper(sig, interface: Interface):
+        z = interface.encode(sig)
+        mask = pmask.inpaint(z, interface.s2t(ctx_time), interface.s2t(ctx_time))
 
+        zv = interface.coarse_vamp(z, mask)
         zv = interface.coarse_to_fine(zv)
+        
         return interface.to_signal(zv)
+    return wrapper
+
+def token_noise(noise_amt):
+    def wrapper(sig, interface: Interface):
+        z = interface.encode(sig)
+        mask = pmask.random(z, noise_amt)
+        z = torch.where(
+            mask, 
+            torch.randint_like(z, 0, interface.coarse.vocab_size), 
+            z
+        )
+        return interface.to_signal(z)
     return wrapper
 
 EXP_REGISTRY = {}
@@ -158,62 +162,27 @@ EXP_REGISTRY["gen-compression"] = {
     "reconstructed": reconstructed,
     "coarse2fine": coarse2fine,
     **{
-        f"{n}_codebooks_downsampled_{x}x": CoarseCond(num_codebooks=n, downsample_factor=x)
+        f"{n}_codebooks_downsampled_{x}x": CoarseCond(num_conditioning_codebooks=n, downsample_factor=x)
             for (n, x) in (
-                (4, 2), # 4 codebooks, downsampled 2x, 
-                (2, 2), # 2 codebooks, downsampled 2x
-                (1, None), # 1 codebook, no downsampling
+                (1, 1), # 1 codebook, no downsampling
                 (4, 4), # 4 codebooks, downsampled 4x
-                (1, 2), # 1 codebook, downsampled 2x, 
-                (4, 6), # 4 codebooks, downsampled 6x
-                (4, 8), # 4 codebooks, downsampled 8x
                 (4, 16), # 4 codebooks, downsampled 16x
                 (4, 32), # 4 codebooks, downsampled 16x
             )
     }, 
+    **{
+        f"token_noise_{x}": mask_ratio_1_step(ratio=x)
+            for x in [0.25, 0.5, 0.75]
+    },
 
 }
 
-EXP_REGISTRY["opus-jazzpop"] = {
-    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
-    for bitrate in [5620, 1875, 1250, 625]
-}
-
-EXP_REGISTRY["opus-spotdl"] = {
-    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
-    for bitrate in [8036, 2296, 1148, 574]
-}
-
-EXP_REGISTRY["opus-baseline"]  = {
-    f"opus_{bitrate}": lambda sig, interface: opus(sig, interface, bitrate=bitrate)
-    for bitrate in [8000, 12000, 16000]
-}
-
-EXP_REGISTRY["c2f"]  = {
-    "baseline": baseline,
-    "reconstructed": reconstructed,
-    "coarse2fine": coarse2fine,
-    "coarse2fine_argmax": coarse2fine_argmax,
-}
-
-EXP_REGISTRY["token-noise"] = {
-    f"token_noise_{r}": token_noise(r)  for r in [0.25, 0.5, 0.75, 1.0]
-}
-
-EXP_REGISTRY["mask-ratio"] = {
-    "codec": reconstructed,
-    **{f"mask_ratio_{r}": mask_ratio_1_step(r)  for r in [0.25, 0.5, 0.75, 0.9]}
-}
 
 EXP_REGISTRY["sampling-steps"] = {
-    "codec": reconstructed,
-    **{f"steps_{n}": num_sampling_steps(n)  for n in [1, 4, 12, 24, 36, 64, 72]},
+    # "codec": reconstructed,
+    **{f"steps_{n}": num_sampling_steps(n)  for n in [1, 4, 12, 36, 64, 72]},
 }
 
-EXP_REGISTRY["baseline"] = {
-    "baseline": baseline,
-    "codec": reconstructed,
-}
 
 EXP_REGISTRY["musical-sampling"] = {
     "baseline": baseline,
@@ -226,12 +195,13 @@ EXP_REGISTRY["musical-sampling"] = {
 @argbind.bind(without_prefix=True)
 def main(
         sources=[
-            "/data/spotdl/audio/val", "/data/spotdl/audio/test"
+            "/media/CHONK/hugo/spotdl/audio-test",
         ], 
         output_dir: str = "./samples",
-        max_excerpts: int = 5000,
-        exp_type: str = "coarse", 
+        max_excerpts: int = 2000,
+        exp_type: str = "gen-compression", 
         seed: int = 0,
+        ext: str = [".mp3"],
     ):
     at.util.seed(seed)
     interface = Interface()
@@ -241,7 +211,7 @@ def main(
 
     from audiotools.data.datasets import AudioLoader, AudioDataset
 
-    loader = AudioLoader(sources=sources, shuffle_state=seed)
+    loader = AudioLoader(sources=sources, shuffle_state=seed, ext=ext)
     dataset = AudioDataset(loader, 
         sample_rate=interface.codec.sample_rate, 
         duration=interface.coarse.chunk_size_s, 

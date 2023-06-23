@@ -342,8 +342,6 @@ def train(
                 dtype = torch.bfloat16 if accel.amp else None
                 with accel.autocast(dtype=dtype):
                     z_hat = model(z_mask_latent, r)
-                    # for mask mode
-                    z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
                 target = codebook_flatten(
                     z[:, vn.n_conditioning_codebooks :, :],
@@ -414,8 +412,6 @@ def train(
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
-            # for mask mode
-            z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
             target = codebook_flatten(
                 z[:, vn.n_conditioning_codebooks :, :],
@@ -573,8 +569,6 @@ def train(
             z_mask_latent = vn.embedding.from_codes(z_mask, codec)
 
             z_hat = model(z_mask_latent, r)
-            # for mask mode
-            z_hat = vn.add_truth_to_logits(z, z_hat, mask)
 
             z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
             z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)

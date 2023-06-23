@@ -321,7 +321,7 @@ class Interface(torch.nn.Module):
         cz_masked, mask = apply_mask(cz, mask, self.coarse.mask_token)
         cz_masked = cz_masked[:, : self.coarse.n_codebooks, :]
 
-        gen_fn = gen_fn or self.coarse.sample
+        gen_fn = gen_fn or self.coarse.generate
         c_vamp = gen_fn(
             codec=self.codec,
             time_steps=cz.shape[-1],
