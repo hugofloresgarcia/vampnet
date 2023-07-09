@@ -7,22 +7,22 @@ This repository contains recipes for training generative music models on top of 
 install AudioTools
 
 ```bash
-git clone https://github.com/hugofloresgarcia/audiotools.git
+git clone https://github.com/descriptinc/audiotools.git
 pip install -e ./audiotools
 ```
 
-install the LAC library. 
+install the Descript Audio Codec. 
 
 ```bash
-git clone https://github.com/hugofloresgarcia/lac.git
-pip install -e ./lac
+git clone https://github.com/descriptinc/dac.git
+pip install -e ./dac
 ```
 
 install VampNet
 
 ```bash
-git clone https://github.com/hugofloresgarcia/vampnet2.git
-pip install -e ./vampnet2
+git clone https://github.com/hugofloresgarcia/vampnet.git
+pip install -e ./vampnet
 ```
 
 ## A note on argbind
@@ -54,9 +54,11 @@ stage --name my_run --run_dir /path/to/staging/folder
 python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints
 ```
 
+See `python scripts/exp/train.py -h` for a list of options.
+
 ## Fine-tuning
 To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
-The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to fine-tune the interface.
+The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to launch the gradio interface.
 
 ```bash
 python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/audio3.wav" <fine_tune_name>
