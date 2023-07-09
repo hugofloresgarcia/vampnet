@@ -14,8 +14,8 @@ pip install -e ./audiotools
 install the Descript Audio Codec. 
 
 ```bash
-git clone https://github.com/descriptinc/dac.git
-pip install -e ./dac
+git clone https://github.com/descriptinc/descript-audio-codec.git
+pip install -e ./descript-audio-codec
 ```
 
 install VampNet
