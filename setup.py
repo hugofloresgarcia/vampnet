@@ -28,7 +28,7 @@ setup(
     install_requires=[
         "torch",
         "argbind>=0.3.2",
-        "audiotools @ git+https://github.com/descriptinc/audiotools.git",
+        "audiotools @ git+https://github.com/descriptinc/audiotools.git@f35914b5b3c6f1bf589cd09481478d741538828e",
         "dac @ git+https://github.com/descriptinc/descript-audio-codec.git",
         "gradio", 
         "tensorboardX",
