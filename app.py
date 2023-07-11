@@ -97,8 +97,7 @@ def _vamp(data, return_mask=False):
     if data[beat_mask_width] > 0:
         beat_mask = interface.make_beat_mask(
             sig,
-            before_beat_s=(data[beat_mask_width]/1000)/2, 
-            after_beat_s=(data[beat_mask_width]/1000)/2, 
+            after_beat_s=(data[beat_mask_width]/1000), 
             mask_upbeats=not data[beat_mask_downbeats],
         )
         mask = pmask.mask_and(mask, beat_mask)
@@ -350,7 +349,7 @@ with gr.Blocks() as demo:
 
         # mask settings
         with gr.Column():
-            vamp_button = gr.Button("vamp!!!")
+            vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
                 label="output audio",
                 interactive=False,
@@ -398,7 +397,7 @@ with gr.Blocks() as demo:
         outputs=[output_audio, audio_mask], 
     )
 
-    api_vamp_button = gr.Button("api vamp")
+    api_vamp_button = gr.Button("api vamp", visible=False)
     api_vamp_button.click(
         fn=api_vamp,
         inputs=_inputs, 
