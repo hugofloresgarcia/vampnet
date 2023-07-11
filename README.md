@@ -4,6 +4,8 @@ This repository contains recipes for training generative music models on top of 
 
 # Setting up
 
+Requires Python 3.9 or later. 
+
 install [audiotools](https://github.com/descriptinc/audiotools.git) 
 ```bash
 git clone https://github.com/descriptinc/audiotools.git
