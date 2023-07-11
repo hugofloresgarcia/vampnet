@@ -4,11 +4,10 @@ This repository contains recipes for training generative music models on top of 
 
 # Setting up
 
-install [audiotools](https://github.com/descriptinc/audiotools.git) (make sure to use this specific commit for now)
+install [audiotools](https://github.com/descriptinc/audiotools.git) 
 ```bash
 git clone https://github.com/descriptinc/audiotools.git
 cd audiotools
-git checkout f35914b5b3c6f1bf589cd09481478d741538828e
 pip install -e .
 ```
 
