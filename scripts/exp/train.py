@@ -20,7 +20,7 @@ import vampnet
 from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
-from lac.model.lac import LAC
+from dac.model.dac import DAC
 
 
 # Enable cudnn autotuner to speed up training
@@ -109,7 +109,7 @@ def load(
     load_weights: bool = False,
     fine_tune_checkpoint: Optional[str] = None,
 ):
-    codec = LAC.load(args["codec_ckpt"], map_location="cpu")
+    codec = DAC.load(args["codec_ckpt"], map_location="cpu")
     codec.eval()
 
     model, v_extra = None, {}

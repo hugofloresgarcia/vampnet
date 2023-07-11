@@ -11,7 +11,7 @@ from .modules.transformer import VampNet
 from .beats import WaveBeat
 from .mask import *
 
-from lac.model.lac import LAC
+from dac.model.dac import DAC
 
 
 def signal_concat(
@@ -63,7 +63,7 @@ class Interface(torch.nn.Module):
     ):
         super().__init__()
         assert codec_ckpt is not None, "must provide a codec checkpoint"
-        self.codec = LAC.load(Path(codec_ckpt))
+        self.codec = DAC.load(Path(codec_ckpt))
         self.codec.eval()
         self.codec.to(device)
 
