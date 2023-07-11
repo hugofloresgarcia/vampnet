@@ -36,7 +36,7 @@ Config files are stored in the `conf/` folder.
 ### Licensing for Pretrained Models: 
 The weights for the models are licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml). Likewise, any VampNet models fine-tuned on the pretrained models are also licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml).
 
-Download the pretrained models from [this link](https://drive.google.com/file/d/1ZIBMJMt8QRE8MYYGjg4lH7v7BLbZneq2/view?usp=sharing). Then, extract the models to the `models/` folder. 
+Download the pretrained models from [this link](https://zenodo.org/record/8136545). Then, extract the models to the `models/` folder. 
 
 
 # Usage
