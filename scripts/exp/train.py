@@ -20,7 +20,8 @@ import vampnet
 from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
-from dac.model.dac import DAC
+# from dac.model.dac import DAC
+from lac.model.lac import LAC as DAC
 
 
 # Enable cudnn autotuner to speed up training

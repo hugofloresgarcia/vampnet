@@ -11,7 +11,8 @@ from .modules.transformer import VampNet
 from .beats import WaveBeat
 from .mask import *
 
-from dac.model.dac import DAC
+# from dac.model.dac import DAC
+from lac.model.lac import LAC as DAC
 
 
 def signal_concat(

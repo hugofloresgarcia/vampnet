@@ -178,6 +178,23 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         with gr.Column():
+            gr.Markdown("# VampNet Audio Vamping")
+            gr.Markdown("""## Description:
+            This is a demo of the VampNet, a generative audio model that transforms the input audio based on the chosen settings. 
+            You can control the extent and nature of variation with a set of manual controls and presets. 
+            Use this interface to experiment with different mask settings and explore the audio outputs.
+            """)
+
+            gr.Markdown("""
+            ## Instructions:
+            1. You can start by uploading some audio, or by loading the example audio. 
+            2. Choose a preset for the vamp operation, or manually adjust the controls to customize the mask settings. 
+            3. Click the "generate (vamp)!!!" button to apply the vamp operation. Listen to the output audio.
+            4. Optionally, you can add some notes and save the result. 
+            5. You can also use the output as the new input and continue experimenting!
+            """)
+    with gr.Row():
+        with gr.Column():
 
 
             manual_audio_upload = gr.File(
@@ -214,66 +231,142 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
-            periodic_p = gr.Slider(
-                label="periodic prompt  (0.0 means no prompt, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
-                minimum=0,
-                maximum=128, 
-                step=1,
-                value=3, 
+
+            presets = {
+                    "unconditional": {
+                        "periodic_p": 0,
+                        "onset_mask_width": 0,
+                        "beat_mask_width": 0,
+                        "beat_mask_downbeats": False,
+                    }, 
+                    "slight periodic variation": {
+                        "periodic_p": 5,
+                        "onset_mask_width": 0,
+                        "beat_mask_width": 0,
+                        "beat_mask_downbeats": False,
+                    },
+                    "moderate periodic variation": {
+                        "periodic_p": 5,
+                        "onset_mask_width": 5,
+                        "beat_mask_width": 0,
+                        "beat_mask_downbeats": False,
+                    },
+                    "strong periodic variation": {
+                        "periodic_p": 13,
+                        "onset_mask_width": 5,
+                        "beat_mask_width": 0,
+                        "beat_mask_downbeats": False,
+                    },
+                    "very strong periodic variation": {
+                        "periodic_p": 21,
+                        "onset_mask_width": 5,
+                        "beat_mask_width": 0,
+                        "beat_mask_downbeats": False,
+                    },
+                    "beat-driven variation": {
+                        "periodic_p": 0,
+                        "onset_mask_width": 0,
+                        "beat_mask_width": 50,
+                        "beat_mask_downbeats": False,
+                    },
+                    "beat-driven variation (downbeats only)": {
+                        "periodic_p": 0,
+                        "onset_mask_width": 0,
+                        "beat_mask_width": 50,
+                        "beat_mask_downbeats": True,
+                    },
+                    "beat-driven variation (downbeats only, strong)": {
+                        "periodic_p": 0,
+                        "onset_mask_width": 0,
+                        "beat_mask_width": 20,
+                        "beat_mask_downbeats": True,
+                    },
+                }
+
+            preset = gr.Dropdown(
+                label="preset", 
+                choices=list(presets.keys()),
+                value="strong periodic variation",
             )
+            load_preset_button = gr.Button("load_preset")
 
-
-            onset_mask_width = gr.Slider(
-                label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) ",
-                minimum=0,
-                maximum=20,
-                step=1,
-                value=5,
-            )
-
-            beat_mask_width = gr.Slider(
-                label="beat mask width (in milliseconds)",
-                minimum=0,
-                maximum=200,
-                value=0,
-            )
-            beat_mask_downbeats = gr.Checkbox(
-                label="beat mask downbeats only?", 
-                value=False
-            )
-
-
-            with gr.Accordion("extras ", open=False):
-                rand_mask_intensity = gr.Slider(
-                    label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
-                    minimum=0.0,
-                    maximum=1.0,
-                    value=1.0
+            with gr.Accordion("manual controls", open=True):
+                periodic_p = gr.Slider(
+                    label="periodic prompt  (0 - unconditional, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
+                    minimum=0,
+                    maximum=128, 
+                    step=1,
+                    value=3, 
                 )
 
-                periodic_w = gr.Slider(
-                    label="periodic prompt width (steps, 1 step ~= 10milliseconds)",
-                    minimum=1,
+
+                onset_mask_width = gr.Slider(
+                    label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) ",
+                    minimum=0,
                     maximum=20,
                     step=1,
-                    value=1,
-                )
-                n_conditioning_codebooks = gr.Number(
-                    label="number of conditioning codebooks. probably 0", 
-                    value=0,
-                    precision=0,
+                    value=5,
                 )
 
-                stretch_factor = gr.Slider(
-                    label="time stretch factor",
+                beat_mask_width = gr.Slider(
+                    label="beat mask width (in milliseconds)",
                     minimum=0,
-                    maximum=64, 
-                    step=1,
-                    value=1, 
+                    maximum=200,
+                    value=0,
+                )
+                beat_mask_downbeats = gr.Checkbox(
+                    label="beat mask downbeats only?", 
+                    value=False
                 )
 
 
-            with gr.Accordion("prefix/suffix hints", open=False):
+                with gr.Accordion("extras ", open=False):
+                    rand_mask_intensity = gr.Slider(
+                        label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=1.0
+                    )
+
+                    periodic_w = gr.Slider(
+                        label="periodic prompt width (steps, 1 step ~= 10milliseconds)",
+                        minimum=1,
+                        maximum=20,
+                        step=1,
+                        value=1,
+                    )
+                    n_conditioning_codebooks = gr.Number(
+                        label="number of conditioning codebooks. probably 0", 
+                        value=0,
+                        precision=0,
+                    )
+
+                    stretch_factor = gr.Slider(
+                        label="time stretch factor",
+                        minimum=0,
+                        maximum=64, 
+                        step=1,
+                        value=1, 
+                    )
+
+            preset_outputs = {
+                periodic_p, 
+                onset_mask_width, 
+                beat_mask_width,
+                beat_mask_downbeats,
+            }
+
+            def load_preset(_preset):
+                return tuple(presets[_preset].values())
+
+            load_preset_button.click(
+                fn=load_preset,
+                inputs=[preset],
+                outputs=preset_outputs
+            )
+
+
+            with gr.Accordion("prefix/suffix prompts", open=False):
                 prefix_s = gr.Slider(
                     label="prefix hint length (seconds)",
                     minimum=0.0,
@@ -290,7 +383,7 @@ with gr.Blocks() as demo:
             temp = gr.Slider(
                 label="temperature",
                 minimum=0.0,
-                maximum=3.0,
+                maximum=10.0,
                 value=0.8
             )
 
