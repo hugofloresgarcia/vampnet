@@ -45,7 +45,7 @@ Download the pretrained models from [this link](https://zenodo.org/record/813654
 You can launch a gradio UI to play with vampnet. 
 
 ```bash
-python demo.py --args.load conf/interface.yml --Interface.device cuda
+python app.py --args.load conf/interface.yml --Interface.device cuda
 ```
 
 # Training / Fine-tuning 
