@@ -130,8 +130,6 @@ def _vamp(data, return_mask=False):
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
-    #pitch shift input
-    sig = sig.shift_pitch(data[input_pitch_shift])
 
     # TODO: random pitch shift of segments in the signal to prompt! window size should be a parameter, pitch shift width should be a parameter
 
@@ -160,9 +158,19 @@ def _vamp(data, return_mask=False):
         mask = pmask.mask_or(
             mask, pmask.onset_mask(sig, z, interface, width=data[onset_mask_width])
         )
+    if data[beat_mask_width] > 0:
+        beat_mask = interface.make_beat_mask(
+            sig,
+            before_beat_s=(data[beat_mask_width]/1000)/2, 
+            after_beat_s=(data[beat_mask_width]/1000)/2, 
+            mask_upbeats=not data[beat_mask_downbeats],
+        )
+        mask = pmask.mask_and(mask, beat_mask)
+
     # these should be the last two mask ops
     mask = pmask.dropout(mask, data[dropout])
     mask = pmask.codebook_unmask(mask, ncc)
+
 
     print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}, codebook unmask {ncc}, onset mask {data[onset_mask_width]}, num steps {data[num_steps]}, init temp {data[temp]},  use coarse2fine {data[use_coarse2fine]}")
     # save the mask as a txt file
@@ -322,6 +330,18 @@ with gr.Blocks() as demo:
                 value=5,
             )
 
+            beat_mask_width = gr.Slider(
+                label="beat mask width (in milliseconds)",
+                minimum=0,
+                maximum=200,
+                value=0,
+            )
+            beat_mask_downbeats = gr.Checkbox(
+                label="beat mask downbeats only?", 
+                value=False
+            )
+
+
             with gr.Accordion("extras ", open=False):
                 n_conditioning_codebooks = gr.Number(
                     label="number of conditioning codebooks. probably 0", 
@@ -355,14 +375,14 @@ with gr.Blocks() as demo:
             temp = gr.Slider(
                 label="temperature",
                 minimum=0.0,
-                maximum=1.5,
+                maximum=3.0,
                 value=0.8
             )
 
             with gr.Accordion("sampling settings", open=False):
                 typical_filtering = gr.Checkbox(
                     label="typical filtering ",
-                    value=True
+                    value=False
                 )
                 typical_mass = gr.Slider(
                     label="typical mass (should probably stay between 0.1 and 0.5)",
@@ -440,7 +460,9 @@ with gr.Blocks() as demo:
             typical_filtering,
             typical_mass,
             typical_min_tokens,
-            checkpoint_key
+            checkpoint_key,
+            beat_mask_width,
+            beat_mask_downbeats
         }
   
     # connect widgets

@@ -265,7 +265,12 @@ class Interface(torch.nn.Module):
         if invert:
             mask = 1 - mask
         
-        return mask[None, None, :].bool().long()
+        mask = mask[None, None, :].bool().long()
+        if self.c2f is not None:
+            mask = mask.repeat(1, self.c2f.n_codebooks, 1)
+        else:
+            mask = mask.repeat(1, self.coarse.n_codebooks, 1)
+        return mask
         
     def coarse_to_fine(
         self, 
@@ -349,26 +354,32 @@ if __name__ == "__main__":
         coarse_ckpt="./models/spotdl/coarse.pth", 
         coarse2fine_ckpt="./models/spotdl/c2f.pth", 
         codec_ckpt="./models/spotdl/codec.pth",
-        device="cuda"
+        device="cuda", 
+        wavebeat_ckpt="./models/wavebeat.pth"
     )
 
-    sig = at.AudioSignal('introspection ii-1.mp3', duration=10)
+
+    sig = at.AudioSignal.zeros(duration=10, sample_rate=44100)
 
     z = interface.encode(sig)
 
-    mask = linear_random(z, 1.0)
-    mask = mask_and(
-        mask, periodic_mask(
-            z,
-            32,
-            1,
-            random_roll=True
-        )
+    # mask = linear_random(z, 1.0)
+    # mask = mask_and(
+    #     mask, periodic_mask(
+    #         z,
+    #         32,
+    #         1,
+    #         random_roll=True
+    #     )
+    # )
+
+    mask = interface.make_beat_mask(
+        sig, 0.0, 0.075
     )
     # mask = dropout(mask, 0.0)
     # mask = codebook_unmask(mask, 0)
     
-
+    breakpoint()
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,

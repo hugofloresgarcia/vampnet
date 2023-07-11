@@ -26,9 +26,9 @@ def apply_mask(
         mask: torch.Tensor, 
         mask_token: int
     ):
-    assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq)"
-    assert mask.shape == x.shape, "mask must be same shape as x"
-    assert mask.dtype == torch.long, "mask must be long dtype"
+    assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq), but got {mask.ndim}"
+    assert mask.shape == x.shape, f"mask must be same shape as x, but got {mask.shape} and {x.shape}" 
+    assert mask.dtype == torch.long, "mask must be long dtype, but got {mask.dtype}"
     assert ~torch.any(mask > 1), "mask must be binary"
     assert ~torch.any(mask < 0), "mask must be binary"
 
@@ -163,7 +163,7 @@ def mask_or(
     mask1: torch.Tensor, 
     mask2: torch.Tensor
 ):
-    assert mask1.shape == mask2.shape, "masks must be same shape"
+    assert mask1.shape == mask2.shape, f"masks must be same shape, but got {mask1.shape} and {mask2.shape}"
     assert mask1.max() <= 1, "mask1 must be binary"
     assert mask2.max() <= 1, "mask2 must be binary"
     assert mask1.min() >= 0, "mask1 must be binary"
