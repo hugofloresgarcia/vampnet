@@ -29,7 +29,7 @@ setup(
         "torch",
         "argbind>=0.3.2",
         "audiotools @ git+https://github.com/descriptinc/audiotools.git",
-        "lac @ git+https://github.com/descriptinc/descript-audio-codec.git",
+        "dac @ git+https://github.com/descriptinc/descript-audio-codec.git",
         "gradio", 
         "tensorboardX",
     ],
