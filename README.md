@@ -4,20 +4,6 @@ This repository contains recipes for training generative music models on top of 
 
 # Setting up
 
-install AudioTools
-
-```bash
-git clone https://github.com/descriptinc/audiotools.git
-pip install -e ./audiotools
-```
-
-install the Descript Audio Codec. 
-
-```bash
-git clone https://github.com/descriptinc/descript-audio-codec.git
-pip install -e ./descript-audio-codec
-```
-
 install VampNet
 
 ```bash
@@ -40,19 +26,26 @@ First, you'll want to set up your environment
 source ./env/env.sh
 ```
 
-## Staging a Run
+## Launching the Gradio Interface
+You can launch a gradio UI to play with vampnet. 
 
-Staging a run makes a copy of all the git-tracked files in the codebase and saves them to a folder for reproducibility. You can then run the training script from the staged folder. 
+```bash
+python demo.py --args.load conf/interface/spotdl.yml --Interface.device cuda
+```
 
-```
-stage --name my_run --run_dir /path/to/staging/folder
-```
+# Training / Fine-tuning 
 
 ## Training a model
+
+To train a model, run the following script: 
 
 ```bash
 python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints
 ```
+
+You can edit `conf/vampnet.yml` to change the dataset paths or any training hyperparameters. 
+
+For coarse2fine models, you can use `conf/c2f.yml` as a starting configuration. 
 
 See `python scripts/exp/train.py -h` for a list of options.
 
@@ -86,7 +79,3 @@ python  demo.py --args.load conf/generated/<fine_tune_name>/interface.yml
 ```
 
 
-## Launching the Gradio Interface
-```bash
-python demo.py --args.load conf/interface/spotdl.yml --Interface.device cuda
-```
