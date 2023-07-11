@@ -4,7 +4,22 @@ This repository contains recipes for training generative music models on top of 
 
 # Setting up
 
-install VampNet
+install [audiotools](https://github.com/descriptinc/audiotools.git) (make sure to use this specific commit for now)
+```bash
+git clone https://github.com/descriptinc/audiotools.git
+cd audiotools
+git checkout f35914b5b3c6f1bf589cd09481478d741538828e
+pip install -e .
+```
+
+install the [`Descript Audio Codec`](https://github.com/descriptinc/descript-audio-codec.git). 
+```bash
+git clone https://github.com/descriptinc/descript-audio-codec.git
+cd descript-audio-codec
+pip install -e .
+```
+
+now, install VampNet
 
 ```bash
 git clone https://github.com/hugofloresgarcia/vampnet.git
