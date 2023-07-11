@@ -407,4 +407,4 @@ with gr.Blocks() as demo:
         outputs=[thank_you, download_file]
     )
 
-demo.launch(share=True, enable_queue=False, debug=True, server_name="0.0.0.0")
+demo.launch(share=True, enable_queue=False, debug=True)
