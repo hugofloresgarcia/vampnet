@@ -6,21 +6,8 @@ This repository contains recipes for training generative music models on top of 
 
 Requires Python 3.9 or later. 
 
-install my fork of [audiotools](https://github.com/hugofloresgarcia/audiotools.git) 
-```bash
-git clone https://github.com/hugofloresgarcia/audiotools.git
-cd audiotools
-pip install -e .
-```
 
-install the [`Descript Audio Codec`](https://github.com/descriptinc/descript-audio-codec.git). 
-```bash
-git clone https://github.com/descriptinc/descript-audio-codec.git
-cd descript-audio-codec
-pip install -e .
-```
-
-now, install VampNet
+install VampNet
 
 ```bash
 git clone https://github.com/hugofloresgarcia/vampnet.git

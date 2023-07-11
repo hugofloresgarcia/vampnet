@@ -4,5 +4,5 @@ numpy==1.22
 gradio
 loralib
 wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat
-descript-audio-codec @ git+https://github.com/descriptinc/descript-audio-codec.git
+lac @ git+https://github.com/hugofloresgarcia/lac.git
 audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git@main
