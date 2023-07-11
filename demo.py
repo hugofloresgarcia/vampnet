@@ -33,56 +33,14 @@ dataset = at.data.datasets.AudioDataset(
 
 
 checkpoints = {
-    "spotdl": {
-        "coarse": "./models/spotdl/coarse.pth",
-        "c2f": "./models/spotdl/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
+    "vampnet": {
+        "coarse": "./models/vampnet/coarse.pth",
+        "c2f": "./models/vampnet/c2f.pth",
+        "codec": "./models/vampnet/codec.pth",
         "full_ckpt": True
     }, 
-    "berta": {
-        "coarse": "./models/finetuned/berta-goldman-speech/coarse.pth",
-        "c2f": "./models/finetuned/berta-goldman-speech/c2f.pth",
-        "codec": "./model/spotdl/codec.pth",
-        "full_ckpt": True
-    }, 
-    "xeno-canto-2": {
-        "coarse": "./models/finetuned/xeno-canto-2/coarse.pth",
-        "c2f": "./models/finetuned/xeno-canto-2/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": True
-    }, 
-    "panchos": {
-        "coarse": "./models/finetuned/panchos/coarse.pth",
-        "c2f": "./models/finetuned/panchos/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": False
-    },
-    "tv-choir": {
-        "coarse": "./models/finetuned/tv-choir/coarse.pth",
-        "c2f": "./models/finetuned/tv-choir/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": False
-    }, 
-    "titi": {
-        "coarse": "./models/finetuned/titi/coarse.pth",
-        "c2f": "./models/finetuned/titi/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": False
-    }, 
-    "titi-clean": {
-        "coarse": "./models/finetuned/titi-clean/coarse.pth",
-        "c2f": "./models/finetuned/titi-clean/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": False
-    }, 
-    "breaks-steps": {
-        "coarse": "./models/finetuned/breaks-steps/coarse.pth",
-        "c2f": None, #"./models/finetuned/breaks-steps/c2f.pth",
-        "codec": "./models/spotdl/codec.pth",
-        "full_ckpt": False
-    },
 }
-interface.checkpoint_key = "spotdl"
+interface.checkpoint_key = "vampnet"
 
 
 OUT_DIR = Path("gradio-outputs")

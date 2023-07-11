@@ -10,7 +10,6 @@ install [audiotools](https://github.com/descriptinc/audiotools.git)
 ```bash
 git clone https://github.com/descriptinc/audiotools.git
 cd audiotools
-git checkout f35914b5b3c6f1bf589cd09481478d741538828e
 pip install -e .
 ```
 
@@ -51,7 +50,7 @@ source ./env/env.sh
 You can launch a gradio UI to play with vampnet. 
 
 ```bash
-python demo.py --args.load conf/interface/spotdl.yml --Interface.device cuda
+python demo.py --args.load conf/interface.yml --Interface.device cuda
 ```
 
 # Training / Fine-tuning 

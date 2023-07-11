@@ -178,3 +178,5 @@ samples-*/**
 gradio-outputs/
 models/
 samples*/
+models-all/
+models.zip
