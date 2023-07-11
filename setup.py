@@ -32,5 +32,6 @@ setup(
         "dac @ git+https://github.com/descriptinc/descript-audio-codec.git",
         "gradio", 
         "tensorboardX",
+        "loralib"
     ],
 )
