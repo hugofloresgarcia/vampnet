@@ -14,22 +14,22 @@ from vampnet.interface import Interface
 from vampnet import mask as pmask
 
 Interface = argbind.bind(Interface)
-AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
+# AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
 conf = argbind.parse_args()
 
 with argbind.scope(conf):
     interface = Interface()
-    loader = AudioLoader()
+    # loader = AudioLoader()
     print(f"interface device is {interface.device}")
 
-dataset = at.data.datasets.AudioDataset(
-    loader,
-    sample_rate=interface.codec.sample_rate,
-    duration=interface.coarse.chunk_size_s,
-    n_examples=5000,
-    without_replacement=True,
-)
+# dataset = at.data.datasets.AudioDataset(
+#     loader,
+#     sample_rate=interface.codec.sample_rate,
+#     duration=interface.coarse.chunk_size_s,
+#     n_examples=5000,
+#     without_replacement=True,
+# )
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -50,15 +50,8 @@ def load_audio(file):
     return sig.path_to_file
 
 
-def load_random_audio():
-    index = np.random.randint(0, len(dataset))
-    sig = dataset[index]["signal"]
-    sig = interface.preprocess(sig)
-
-    out_dir = OUT_DIR / "tmp" / str(uuid.uuid4())
-    out_dir.mkdir(parents=True, exist_ok=True)
-    sig.write(out_dir / "input.wav")
-    return sig.path_to_file
+def load_example_audio():
+    return "./assets/example.wav"
 
 
 def _vamp(data, return_mask=False):
@@ -191,7 +184,7 @@ with gr.Blocks() as demo:
                 label=f"upload some audio (will be randomly trimmed to max of {interface.coarse.chunk_size_s:.2f}s)",
                 file_types=["audio"]
             )
-            load_random_audio_button = gr.Button("or load random audio")
+            load_example_audio_button = gr.Button("or load example audio")
 
             input_audio = gr.Audio(
                 label="input audio",
@@ -206,8 +199,8 @@ with gr.Blocks() as demo:
             )
 
             # connect widgets
-            load_random_audio_button.click(
-                fn=load_random_audio,
+            load_example_audio_button.click(
+                fn=load_example_audio,
                 inputs=[],
                 outputs=[ input_audio]
             )
