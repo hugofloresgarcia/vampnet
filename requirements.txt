@@ -3,5 +3,6 @@ argbind>=0.3.2
 numpy==1.22
 gradio
 loralib
+wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat
 descript-audio-codec @ git+https://github.com/descriptinc/descript-audio-codec.git
 audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git@main
