@@ -41,11 +41,6 @@ Download the pretrained models from [this link](https://zenodo.org/record/813654
 
 # Usage
 
-First, you'll want to set up your environment
-```bash
-source ./env/env.sh
-```
-
 ## Launching the Gradio Interface
 You can launch a gradio UI to play with vampnet. 
 

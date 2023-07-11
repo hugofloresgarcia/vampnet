@@ -32,15 +32,6 @@ dataset = at.data.datasets.AudioDataset(
 )
 
 
-checkpoints = {
-    "vampnet": {
-        "coarse": "./models/vampnet/coarse.pth",
-        "c2f": "./models/vampnet/c2f.pth",
-        "codec": "./models/vampnet/codec.pth",
-        "full_ckpt": True
-    }, 
-}
-interface.checkpoint_key = "vampnet"
 
 
 OUT_DIR = Path("gradio-outputs")
@@ -74,22 +65,9 @@ def load_random_audio():
 
 
 def _vamp(data, return_mask=False):
-
-    # if our checkpoint key is different, we need to load a new checkpoint
-    if data[checkpoint_key] != interface.checkpoint_key:
-        print(f"loading checkpoint {data[checkpoint_key]}")
-        interface.lora_load(
-            checkpoints[data[checkpoint_key]]["coarse"],
-            checkpoints[data[checkpoint_key]]["c2f"],
-            checkpoints[data[checkpoint_key]]["full_ckpt"],
-        )
-        interface.checkpoint_key = data[checkpoint_key]
-
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
-
-    # TODO: random pitch shift of segments in the signal to prompt! window size should be a parameter, pitch shift width should be a parameter
 
     z = interface.encode(sig)
 
@@ -211,10 +189,7 @@ with gr.Blocks() as demo:
 
     with gr.Row():
         with gr.Column():
-            use_coarse2fine = gr.Checkbox(
-                label="use coarse2fine",
-                value=True
-            )
+
 
             manual_audio_upload = gr.File(
                 label=f"upload some audio (will be randomly trimmed to max of {interface.coarse.chunk_size_s:.2f}s)",
@@ -250,38 +225,17 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
-            input_pitch_shift = gr.Slider(
-                label="input pitch shift (semitones)",
-                minimum=-36,
-                maximum=36,
-                step=1,
-                value=0,
-            )
-
-            rand_mask_intensity = gr.Slider(
-                label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
-                minimum=0.0,
-                maximum=1.0,
-                value=1.0
-            )
-
             periodic_p = gr.Slider(
-                label="periodic prompt  (0.0 means no hint, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
+                label="periodic prompt  (0.0 means no prompt, 2 - lots of hints, 8 - a couple of hints, 16 - occasional hint, 32 - very occasional hint, etc)",
                 minimum=0,
                 maximum=128, 
                 step=1,
                 value=3, 
             )
-            periodic_w = gr.Slider(
-                label="periodic prompt width (steps, 1 step ~= 10milliseconds)",
-                minimum=1,
-                maximum=20,
-                step=1,
-                value=1,
-            )
+
 
             onset_mask_width = gr.Slider(
-                label="onset mask width (steps, 1 step ~= 10milliseconds)",
+                label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) ",
                 minimum=0,
                 maximum=20,
                 step=1,
@@ -301,6 +255,20 @@ with gr.Blocks() as demo:
 
 
             with gr.Accordion("extras ", open=False):
+                rand_mask_intensity = gr.Slider(
+                    label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=1.0
+                )
+
+                periodic_w = gr.Slider(
+                    label="periodic prompt width (steps, 1 step ~= 10milliseconds)",
+                    minimum=1,
+                    maximum=20,
+                    step=1,
+                    value=1,
+                )
                 n_conditioning_codebooks = gr.Number(
                     label="number of conditioning codebooks. probably 0", 
                     value=0,
@@ -337,6 +305,8 @@ with gr.Blocks() as demo:
                 value=0.8
             )
 
+
+
             with gr.Accordion("sampling settings", open=False):
                 typical_filtering = gr.Checkbox(
                     label="typical filtering ",
@@ -355,6 +325,11 @@ with gr.Blocks() as demo:
                     step=1,
                     value=64
                 )
+
+            use_coarse2fine = gr.Checkbox(
+                label="use coarse2fine",
+                value=True
+            )
 
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
@@ -375,11 +350,6 @@ with gr.Blocks() as demo:
 
         # mask settings
         with gr.Column():
-            checkpoint_key = gr.Radio(
-                label="checkpoint",
-                choices=list(checkpoints.keys()),
-                value="spotdl" 
-            )
             vamp_button = gr.Button("vamp!!!")
             output_audio = gr.Audio(
                 label="output audio",
@@ -414,11 +384,9 @@ with gr.Blocks() as demo:
             use_coarse2fine, 
             stretch_factor, 
             onset_mask_width, 
-            input_pitch_shift, 
             typical_filtering,
             typical_mass,
             typical_min_tokens,
-            checkpoint_key,
             beat_mask_width,
             beat_mask_downbeats
         }
