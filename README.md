@@ -1,6 +1,6 @@
 # VampNet
 
-This repository contains recipes for training generative music models on top of the Lyrebird Audio Codec.
+This repository contains recipes for training generative music models on top of the Descript Audio Codec.
 
 # Setting up
 
