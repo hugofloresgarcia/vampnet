@@ -9,6 +9,7 @@ from typing import Tuple
 from typing import Union
 
 import librosa
+import torch
 import numpy as np
 from audiotools import AudioSignal
 
@@ -203,7 +204,7 @@ class WaveBeat(BeatTracker):
     def __init__(self, ckpt_path: str = "checkpoints/wavebeat", device: str = "cpu"):
         from wavebeat.dstcn import dsTCNModel
 
-        model = dsTCNModel.load_from_checkpoint(ckpt_path)
+        model = dsTCNModel.load_from_checkpoint(ckpt_path, map_location=torch.device(device))
         model.eval()
 
         self.device = device
