@@ -2,6 +2,9 @@
 
 This repository contains recipes for training generative music models on top of the Descript Audio Codec.
 
+## try `unloop`
+you can try vampnet in a co-creative looper called unloop. see this link: https://github.com/hugofloresgarcia/unloop
+
 # Setting up
 
 Requires Python 3.9 or later. 
