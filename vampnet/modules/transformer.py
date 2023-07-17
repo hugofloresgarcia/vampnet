@@ -581,7 +581,7 @@ class VampNet(at.ml.BaseModel):
         sampling_steps: int = 24,
         start_tokens: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
-        temperature: Union[float, Tuple[float, float]] = 2.5,
+        temperature: float = 2.5,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
@@ -592,7 +592,7 @@ class VampNet(at.ml.BaseModel):
         #####################
         # resolve temperature #
         #####################
-        assert isinstance(temperature, float)
+
         logging.debug(f"temperature: {temperature}")
 
 
