@@ -485,7 +485,6 @@ def load(
     save_path: str,
     resume: bool = False,
     tag: str = "latest",
-    load_weights: bool = False,
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
 ) -> State:
@@ -498,7 +497,7 @@ def load(
         kwargs = {
             "folder": f"{save_path}/{tag}",
             "map_location": "cpu",
-            "package": not load_weights,
+            "package": False,
         }
         tracker.print(f"Loading checkpoint from {kwargs['folder']}")
         if (Path(kwargs["folder"]) / "vampnet").exists():
@@ -511,11 +510,14 @@ def load(
 
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = VampNet.load(location=Path(fine_tune_checkpoint), map_location="cpu")
+        model = torch.compile(
+            VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu", 
+            )
+        )
 
 
-    model = VampNet() if model is None else model
-
+    model = torch.compile(VampNet()) if model is None else model
     model = accel.prepare_model(model)
 
     # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
