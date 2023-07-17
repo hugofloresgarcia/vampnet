@@ -114,7 +114,7 @@ def _vamp(data, return_mask=False):
     )
 
     if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv, temperature=data[temp])
+        zv = interface.coarse_to_fine(zv, temperature=data[temp], mask=mask)
 
     sig = interface.to_signal(zv).cpu()
     print("done")
@@ -410,7 +410,8 @@ with gr.Blocks() as demo:
 
             use_coarse2fine = gr.Checkbox(
                 label="use coarse2fine",
-                value=True
+                value=True, 
+                visible=False
             )
 
             num_steps = gr.Slider(

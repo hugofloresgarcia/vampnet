@@ -22,6 +22,7 @@ def signal_concat(
 
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
+
 def _load_model(
     ckpt: str, 
     lora_ckpt: str = None,
@@ -275,36 +276,47 @@ class Interface(torch.nn.Module):
         
     def coarse_to_fine(
         self, 
-        coarse_z: torch.Tensor,
+        z: torch.Tensor,
+        mask: torch.Tensor = None,
         **kwargs
     ):
         assert self.c2f is not None, "No coarse2fine model loaded"
-        length = coarse_z.shape[-1]
+        length = z.shape[-1]
         chunk_len = self.s2t(self.c2f.chunk_size_s)
-        n_chunks = math.ceil(coarse_z.shape[-1] / chunk_len)
+        n_chunks = math.ceil(z.shape[-1] / chunk_len)
 
         # zero pad to chunk_len
         if length % chunk_len != 0:
             pad_len = chunk_len - (length % chunk_len)
-            coarse_z = torch.nn.functional.pad(coarse_z, (0, pad_len))
+            z = torch.nn.functional.pad(z, (0, pad_len))
+            mask = torch.nn.functional.pad(mask, (0, pad_len)) if mask is not None else None
 
-        n_codebooks_to_append = self.c2f.n_codebooks - coarse_z.shape[1]
+        n_codebooks_to_append = self.c2f.n_codebooks - z.shape[1]
         if n_codebooks_to_append > 0:
-            coarse_z = torch.cat([
-                coarse_z,
-                torch.zeros(coarse_z.shape[0], n_codebooks_to_append, coarse_z.shape[-1]).long().to(self.device)
+            z = torch.cat([
+                z,
+                torch.zeros(z.shape[0], n_codebooks_to_append, z.shape[-1]).long().to(self.device)
             ], dim=1)
+
+        # set the mask to 0 for all conditioning codebooks
+        if mask is not None:
+            mask = mask.clone()
+            mask[:, :self.c2f.n_conditioning_codebooks, :] = 0
 
         fine_z = []
         for i in range(n_chunks):
-            chunk = coarse_z[:, :, i * chunk_len : (i + 1) * chunk_len]
+            chunk = z[:, :, i * chunk_len : (i + 1) * chunk_len]
+            mask_chunk = mask[:, :, i * chunk_len : (i + 1) * chunk_len] if mask is not None else None
+            
             chunk = self.c2f.generate(
                 codec=self.codec,
                 time_steps=chunk_len,
                 start_tokens=chunk,
                 return_signal=False,
+                mask=mask_chunk,
                 **kwargs
             )
+            breakpoint()
             fine_z.append(chunk)
 
         fine_z = torch.cat(fine_z, dim=-1)
@@ -337,6 +349,12 @@ class Interface(torch.nn.Module):
             **kwargs
         )
 
+        # add the fine codes back in
+        c_vamp = torch.cat(
+            [c_vamp, z[:, self.coarse.n_codebooks :, :]], 
+            dim=1
+        )
+
         if return_mask:
             return c_vamp, cz_masked
         
@@ -352,17 +370,18 @@ if __name__ == "__main__":
     at.util.seed(42)
 
     interface = Interface(
-        coarse_ckpt="./models/spotdl/coarse.pth", 
-        coarse2fine_ckpt="./models/spotdl/c2f.pth", 
-        codec_ckpt="./models/spotdl/codec.pth",
+        coarse_ckpt="./models/vampnet/coarse.pth", 
+        coarse2fine_ckpt="./models/vampnet/c2f.pth", 
+        codec_ckpt="./models/vampnet/codec.pth",
         device="cuda", 
         wavebeat_ckpt="./models/wavebeat.pth"
     )
 
 
-    sig = at.AudioSignal.zeros(duration=10, sample_rate=44100)
+    sig = at.AudioSignal('assets/example.wav')
 
     z = interface.encode(sig)
+    breakpoint()
 
     # mask = linear_random(z, 1.0)
     # mask = mask_and(
@@ -374,13 +393,14 @@ if __name__ == "__main__":
     #     )
     # )
 
-    mask = interface.make_beat_mask(
-        sig, 0.0, 0.075
-    )
+    # mask = interface.make_beat_mask(
+    #     sig, 0.0, 0.075
+    # )
     # mask = dropout(mask, 0.0)
     # mask = codebook_unmask(mask, 0)
+
+    mask = inpaint(z, n_prefix=100, n_suffix=100)
     
-    breakpoint()
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
@@ -389,16 +409,16 @@ if __name__ == "__main__":
         return_mask=True, 
         gen_fn=interface.coarse.generate
     )
+    
 
     use_coarse2fine = True
     if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv, temperature=0.8)
+        zv = interface.coarse_to_fine(zv, temperature=0.8, mask=mask)
+        breakpoint()
 
     mask = interface.to_signal(mask_z).cpu()
 
     sig = interface.to_signal(zv).cpu()
     print("done")
 
-    sig.write("output3.wav")
-    mask.write("mask.wav")
         
