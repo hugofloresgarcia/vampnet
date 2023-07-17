@@ -31,7 +31,7 @@ setup(
         "numpy==1.22",
         "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat",
         "lac @ git+https://github.com/hugofloresgarcia/lac.git",
-        "audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git",
+        "descript-audiotools @ git+https://github.com/descriptinc/audiotools.git@0.7.2",
         "gradio", 
         "tensorboardX",
         "loralib",

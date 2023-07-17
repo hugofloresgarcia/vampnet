@@ -1,9 +1,9 @@
 import os
-import subprocess
-import time
+import sys
 import warnings
 from pathlib import Path
 from typing import Optional
+from dataclasses import dataclass
 
 import argbind
 import audiotools as at
@@ -22,6 +22,12 @@ from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
 # from dac.model.dac import DAC
 from lac.model.lac import LAC as DAC
+
+from audiotools.ml.decorators import (
+    timer, Tracker, when
+)
+
+import loralib as lora
 
 
 # Enable cudnn autotuner to speed up training
@@ -85,11 +91,7 @@ def build_datasets(args, sample_rate: int):
         )
     with argbind.scope(args, "val"):
         val_data = AudioDataset(AudioLoader(), sample_rate, transform=build_transform())
-    with argbind.scope(args, "test"):
-        test_data = AudioDataset(
-            AudioLoader(), sample_rate, transform=build_transform()
-        )
-    return train_data, val_data, test_data
+    return train_data, val_data
 
 
 def rand_float(shape, low, high, rng):
@@ -98,72 +100,6 @@ def rand_float(shape, low, high, rng):
 
 def flip_coin(shape, p, rng):
     return rng.draw(shape)[:, 0] < p
-
-
-@argbind.bind(without_prefix=True)
-def load(
-    args,
-    accel: at.ml.Accelerator,
-    save_path: str,
-    resume: bool = False,
-    tag: str = "latest",
-    load_weights: bool = False,
-    fine_tune_checkpoint: Optional[str] = None,
-):
-    codec = DAC.load(args["codec_ckpt"], map_location="cpu")
-    codec.eval()
-
-    model, v_extra = None, {}
-
-    if resume:
-        kwargs = {
-            "folder": f"{save_path}/{tag}",
-            "map_location": "cpu",
-            "package": not load_weights,
-        }
-        if (Path(kwargs["folder"]) / "vampnet").exists():
-            model, v_extra = VampNet.load_from_folder(**kwargs)
-        else:
-            raise ValueError(
-                f"Could not find a VampNet checkpoint in {kwargs['folder']}"
-            )
-
-
-    if args["fine_tune"]:
-        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = VampNet.load(location=Path(fine_tune_checkpoint), map_location="cpu")
-
-
-    model = VampNet() if model is None else model
-
-    model = accel.prepare_model(model)
-
-    # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
-    assert (
-        accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
-    )
-
-    optimizer = AdamW(model.parameters(), use_zero=accel.use_ddp)
-    scheduler = NoamScheduler(optimizer, d_model=accel.unwrap(model).embedding_dim)
-    scheduler.step()
-
-    trainer_state = {"state_dict": None, "start_idx": 0}
-
-    if "optimizer.pth" in v_extra:
-        optimizer.load_state_dict(v_extra["optimizer.pth"])
-    if "scheduler.pth" in v_extra:
-        scheduler.load_state_dict(v_extra["scheduler.pth"])
-    if "trainer.pth" in v_extra:
-        trainer_state = v_extra["trainer.pth"]
-
-    return {
-        "model": model,
-        "codec": codec,
-        "optimizer": optimizer,
-        "scheduler": scheduler,
-        "trainer_state": trainer_state,
-    }
-
 
 
 def num_params_hook(o, p):
@@ -210,26 +146,438 @@ def accuracy(
 
     return accuracy
 
+def _metrics(z_hat, r, target, flat_mask, output):
+    for r_range in [(0, 0.5), (0.5, 1.0)]:
+        unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
+        masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+
+        assert target.shape[0] == r.shape[0]
+        # grab the indices of the r values that are in the range
+        r_idx = (r >= r_range[0]) & (r < r_range[1])
+
+        # grab the target and z_hat values that are in the range
+        r_unmasked_target = unmasked_target[r_idx]
+        r_masked_target = masked_target[r_idx]
+        r_z_hat = z_hat[r_idx]
+
+        for topk in (1, 25):
+            s, e = r_range
+            tag = f"accuracy-{s}-{e}/top{topk}"
+
+            output[f"{tag}/unmasked"] = accuracy(
+                preds=r_z_hat,
+                target=r_unmasked_target,
+                ignore_index=IGNORE_INDEX,
+                top_k=topk,
+            )
+            output[f"{tag}/masked"] = accuracy(
+                preds=r_z_hat,
+                target=r_masked_target,
+                ignore_index=IGNORE_INDEX,
+                top_k=topk,
+            )
+
+
+@dataclass
+class State:
+    model: VampNet
+    codec: DAC
+
+    optimizer: AdamW
+    scheduler: NoamScheduler
+    criterion: CrossEntropyLoss
+    grad_clip_val: float
+
+    rng: torch.quasirandom.SobolEngine
+
+    train_data: AudioDataset
+    val_data: AudioDataset
+
+    tracker: Tracker
+
+
+@timer()
+def train_loop(state: State, batch: dict, accel: Accelerator):
+    state.model.train()
+    batch = at.util.prepare_batch(batch, accel.device)
+    signal = apply_transform(state.train_data.transform, batch)
+
+    output = {}
+    vn = accel.unwrap(state.model)
+    with accel.autocast():
+        with torch.inference_mode():
+            state.codec.to(accel.device)
+            z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+            z = z[:, : vn.n_codebooks, :]
+
+        n_batch = z.shape[0]
+        r = state.rng.draw(n_batch)[:, 0].to(accel.device)
+
+        mask = pmask.random(z, r)
+        mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        
+        z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
+
+        dtype = torch.bfloat16 if accel.amp else None
+        with accel.autocast(dtype=dtype):
+            z_hat = state.model(z_mask_latent, r)
+
+        target = codebook_flatten(
+            z[:, vn.n_conditioning_codebooks :, :],
+        )
+
+        flat_mask = codebook_flatten(
+            mask[:, vn.n_conditioning_codebooks :, :],
+        )
+
+        # replace target with ignore index for masked tokens
+        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        output["loss"] = state.criterion(z_hat, t_masked)
+
+        _metrics(
+            r=r,
+            z_hat=z_hat,
+            target=target,
+            flat_mask=flat_mask,
+            output=output,
+        )
+
+    
+    accel.backward(output["loss"])
+
+    output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
+    output["other/batch_size"] = z.shape[0]
+
+
+    accel.scaler.unscale_(state.optimizer)
+    output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
+        state.model.parameters(), state.grad_clip_val
+    )
+
+    accel.step(state.optimizer)
+    state.optimizer.zero_grad()
+
+    state.scheduler.step()
+    accel.update()
+
+
+    return {k: v for k, v in sorted(output.items())}
+
+
+@timer()
+@torch.no_grad()
+def val_loop(state: State, batch: dict, accel: Accelerator):
+    state.model.eval()
+    state.codec.eval()
+    batch = at.util.prepare_batch(batch, accel.device)
+    signal = apply_transform(state.val_data.transform, batch)
+
+    vn = accel.unwrap(state.model)
+    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+    z = z[:, : vn.n_codebooks, :]
+
+    n_batch = z.shape[0]
+    r = state.rng.draw(n_batch)[:, 0].to(accel.device)
+
+    mask = pmask.random(z, r)
+    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
+    z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
+
+    z_hat = state.model(z_mask_latent, r)
+
+    target = codebook_flatten(
+        z[:, vn.n_conditioning_codebooks :, :],
+    )
+
+    flat_mask = codebook_flatten(
+        mask[:, vn.n_conditioning_codebooks :, :]
+    )
+
+    output = {}
+    # replace target with ignore index for masked tokens
+    t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+    output["loss"] = state.criterion(z_hat, t_masked)
+
+    _metrics(
+        r=r,
+        z_hat=z_hat,
+        target=target,
+        flat_mask=flat_mask,
+        output=output,
+    )
+
+    return output
+
+
+def validate(state, val_dataloader, accel):
+    for batch in val_dataloader:
+        output = val_loop(state, batch, accel)
+    # Consolidate state dicts if using ZeroRedundancyOptimizer
+    if hasattr(state.optimizer, "consolidate_state_dict"):
+        state.optimizer.consolidate_state_dict()
+    return output
+
+
+def checkpoint(state, save_iters, save_path, fine_tune):
+    if accel.local_rank != 0:
+        state.tracker.print(f"ERROR:Skipping checkpoint on rank {accel.local_rank}")
+        return
+
+    metadata = {"logs": dict(state.tracker.history)}
+
+    tags = ["latest"]
+    state.tracker.print(f"Saving to {str(Path('.').absolute())}")
+
+    if state.tracker.step in save_iters:
+        tags.append(f"{state.tracker.step // 1000}k")
+
+    if state.tracker.is_best("val", "loss"):
+        state.tracker.print(f"Best model so far")
+        tags.append("best")
+
+    if fine_tune:
+        for tag in tags: 
+            # save the lora model 
+            (Path(save_path) / tag).mkdir(parents=True, exist_ok=True)
+            torch.save(
+                lora.lora_state_dict(accel.unwrap(state.model)), 
+                f"{save_path}/{tag}/lora.pth"
+            )
+
+    for tag in tags:
+        model_extra = {
+            "optimizer.pth": state.optimizer.state_dict(),
+            "scheduler.pth": state.scheduler.state_dict(),
+            "tracker.pth": state.tracker.state_dict(),
+            "metadata.pth": metadata,
+        }
+
+        accel.unwrap(state.model).metadata = metadata
+        accel.unwrap(state.model).save_to_folder(
+            f"{save_path}/{tag}", model_extra, package=False
+        )
+
+
+def save_sampled(state, z, writer):
+    num_samples = z.shape[0]
+
+    for i in range(num_samples):
+        sampled = accel.unwrap(state.model).generate(
+            codec=state.codec,
+            time_steps=z.shape[-1],
+            start_tokens=z[i : i + 1],
+        )
+        sampled.cpu().write_audio_to_tb(
+            f"sampled/{i}",
+            writer,
+            step=state.tracker.step,
+            plot_fn=None,
+        )
+
+
+def save_imputation(state, z, val_idx, writer):
+    n_prefix = int(z.shape[-1] * 0.25)
+    n_suffix = int(z.shape[-1] *  0.25)
+
+    vn = accel.unwrap(state.model)
+
+    mask = pmask.inpaint(z, n_prefix, n_suffix)
+    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
+    imputed_noisy = vn.to_signal(z_mask, state.codec)
+    imputed_true = vn.to_signal(z, state.codec)
+
+    imputed = []
+    for i in range(len(z)):
+        imputed.append(
+            vn.generate(
+                codec=state.codec,
+                time_steps=z.shape[-1],
+                start_tokens=z[i][None, ...],
+                mask=mask[i][None, ...],
+            )   
+        )   
+    imputed = AudioSignal.batch(imputed)
+
+    for i in range(len(val_idx)):
+        imputed_noisy[i].cpu().write_audio_to_tb(
+            f"imputed_noisy/{i}",
+            writer,
+            step=state.tracker.step,
+            plot_fn=None,
+        )
+        imputed[i].cpu().write_audio_to_tb(
+            f"imputed/{i}",
+            writer,
+            step=state.tracker.step,
+            plot_fn=None,
+        )
+        imputed_true[i].cpu().write_audio_to_tb(
+            f"imputed_true/{i}",
+            writer,
+            step=state.tracker.step,
+            plot_fn=None,
+        )
+
+
+@torch.no_grad()
+def save_samples(state: State, val_idx: int, writer: SummaryWriter):
+    state.model.eval()
+    state.codec.eval()
+    vn = accel.unwrap(state.model)
+
+    batch = [state.val_data[i] for i in val_idx]
+    batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
+
+    signal = apply_transform(state.val_data.transform, batch)
+
+    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+    z = z[:, : vn.n_codebooks, :]
+
+    r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
+
+
+    mask = pmask.random(z, r)
+    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
+    z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
+
+    z_hat = state.model(z_mask_latent, r)
+
+    z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
+    z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
+    z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
+
+    generated = vn.to_signal(z_pred, state.codec)
+    reconstructed = vn.to_signal(z, state.codec)
+    masked = vn.to_signal(z_mask.squeeze(1), state.codec)
+
+    for i in range(generated.batch_size):
+        audio_dict = {
+            "original": signal[i],
+            "masked": masked[i],
+            "generated": generated[i],
+            "reconstructed": reconstructed[i],
+        }
+        for k, v in audio_dict.items():
+            v.cpu().write_audio_to_tb(
+                f"samples/_{i}.r={r[i]:0.2f}/{k}",
+                writer,
+                step=state.tracker.step,
+                plot_fn=None,
+            )
+
+    save_sampled(state=state, z=z, writer=writer)
+    save_imputation(state=state, z=z, val_idx=val_idx, writer=writer)
+
+
+
+@argbind.bind(without_prefix=True)
+def load(
+    args,
+    accel: at.ml.Accelerator,
+    tracker: Tracker,
+    save_path: str,
+    resume: bool = False,
+    tag: str = "latest",
+    load_weights: bool = False,
+    fine_tune_checkpoint: Optional[str] = None,
+    grad_clip_val: float = 5.0,
+) -> State:
+    codec = DAC.load(args["codec_ckpt"], map_location="cpu")
+    codec.eval()
+
+    model, v_extra = None, {}
+
+    if resume:
+        kwargs = {
+            "folder": f"{save_path}/{tag}",
+            "map_location": "cpu",
+            "package": not load_weights,
+        }
+        tracker.print(f"Loading checkpoint from {kwargs['folder']}")
+        if (Path(kwargs["folder"]) / "vampnet").exists():
+            model, v_extra = VampNet.load_from_folder(**kwargs)
+        else:
+            raise ValueError(
+                f"Could not find a VampNet checkpoint in {kwargs['folder']}"
+            )
+
+
+    if args["fine_tune"]:
+        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
+        model = VampNet.load(location=Path(fine_tune_checkpoint), map_location="cpu")
+
+
+    model = VampNet() if model is None else model
+
+    model = accel.prepare_model(model)
+
+    # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
+    assert (
+        accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
+    )
+
+    optimizer = AdamW(model.parameters(), use_zero=accel.use_ddp)
+    scheduler = NoamScheduler(optimizer, d_model=accel.unwrap(model).embedding_dim)
+    scheduler.step()
+
+    if "optimizer.pth" in v_extra:
+        optimizer.load_state_dict(v_extra["optimizer.pth"])
+        scheduler.load_state_dict(v_extra["scheduler.pth"])
+    if "tracker.pth" in v_extra:
+        tracker.load_state_dict(v_extra["tracker.pth"])
+    
+    criterion = CrossEntropyLoss()
+
+    sample_rate = codec.sample_rate
+
+    # a better rng for sampling from our schedule
+    rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=args["seed"])  
+
+    # log a model summary w/ num params
+    if accel.local_rank == 0:
+        add_num_params_repr_hook(accel.unwrap(model))
+        with open(f"{save_path}/model.txt", "w") as f:
+            f.write(repr(accel.unwrap(model)))
+
+    # load the datasets
+    train_data, val_data = build_datasets(args, sample_rate)
+
+    return State(
+        tracker=tracker,
+        model=model,
+        codec=codec,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        criterion=criterion,
+        rng=rng,
+        train_data=train_data,
+        val_data=val_data,
+        grad_clip_val=grad_clip_val,
+    )
+
 
 @argbind.bind(without_prefix=True)
 def train(
     args,
     accel: at.ml.Accelerator,
-    codec_ckpt: str = None,
     seed: int = 0,
+    codec_ckpt: str = None,
     save_path: str = "ckpt",
-    max_epochs: int = int(100e3),
-    epoch_length: int = 1000,
-    save_audio_epochs: int = 2,
-    save_epochs: list = [10, 50, 100, 200, 300, 400,],
-    batch_size: int = 48,
-    grad_acc_steps: int = 1,
+    num_iters: int = int(1000e6),
+    save_iters: list = [10000, 50000, 100000, 300000, 500000,],
+    sample_freq: int = 10000, 
+    val_freq: int = 1000,
+    batch_size: int = 12,
     val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     num_workers: int = 10,
-    detect_anomaly: bool = False,
-    grad_clip_val: float = 5.0,
     fine_tune: bool = False, 
-    quiet: bool = False,
 ):
     assert codec_ckpt is not None, "codec_ckpt is required"
 
@@ -241,376 +589,76 @@ def train(
         writer = SummaryWriter(log_dir=f"{save_path}/logs/")
         argbind.dump_args(args, f"{save_path}/args.yml")
 
+        tracker = Tracker(
+            writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
+        )
+
     # load the codec model
-    loaded = load(args, accel, save_path)
-    model = loaded["model"]
-    codec = loaded["codec"]
-    optimizer = loaded["optimizer"]
-    scheduler = loaded["scheduler"]
-    trainer_state = loaded["trainer_state"]
+    state: State = load(
+        args=args, 
+        accel=accel, 
+        tracker=tracker, 
+        save_path=save_path)
 
-    sample_rate = codec.sample_rate
 
-    # a better rng for sampling from our schedule
-    rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=seed)  
-
-    # log a model summary w/ num params
-    if accel.local_rank == 0:
-        add_num_params_repr_hook(accel.unwrap(model))
-        with open(f"{save_path}/model.txt", "w") as f:
-            f.write(repr(accel.unwrap(model)))
-
-    # load the datasets
-    train_data, val_data, _ = build_datasets(args, sample_rate)
     train_dataloader = accel.prepare_dataloader(
-        train_data,
-        start_idx=trainer_state["start_idx"],
+        state.train_data,
+        start_idx=state.tracker.step * batch_size,
         num_workers=num_workers,
         batch_size=batch_size,
-        collate_fn=train_data.collate,
+        collate_fn=state.train_data.collate,
     )
     val_dataloader = accel.prepare_dataloader(
-        val_data,
+        state.val_data,
         start_idx=0,
         num_workers=num_workers,
         batch_size=batch_size,
-        collate_fn=val_data.collate,
+        collate_fn=state.val_data.collate,
+        persistent_workers=True,
     )
 
-    criterion = CrossEntropyLoss()
+    
 
     if fine_tune:
-        import loralib as lora
-        lora.mark_only_lora_as_trainable(model)
+        lora.mark_only_lora_as_trainable(state.model)
 
+    # Wrap the functions so that they neatly track in TensorBoard + progress bars
+    # and only run when specific conditions are met.
+    global train_loop, val_loop, validate, save_samples, checkpoint
 
-    class Trainer(at.ml.BaseTrainer):
-        _last_grad_norm = 0.0
-
-        def _metrics(self, vn, z_hat, r, target, flat_mask, output):
-            for r_range in [(0, 0.5), (0.5, 1.0)]:
-                unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
-                masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-
-                assert target.shape[0] == r.shape[0]
-                # grab the indices of the r values that are in the range
-                r_idx = (r >= r_range[0]) & (r < r_range[1])
-
-                # grab the target and z_hat values that are in the range
-                r_unmasked_target = unmasked_target[r_idx]
-                r_masked_target = masked_target[r_idx]
-                r_z_hat = z_hat[r_idx]
-
-                for topk in (1, 25):
-                    s, e = r_range
-                    tag = f"accuracy-{s}-{e}/top{topk}"
-
-                    output[f"{tag}/unmasked"] = accuracy(
-                        preds=r_z_hat,
-                        target=r_unmasked_target,
-                        ignore_index=IGNORE_INDEX,
-                        top_k=topk,
-                    )
-                    output[f"{tag}/masked"] = accuracy(
-                        preds=r_z_hat,
-                        target=r_masked_target,
-                        ignore_index=IGNORE_INDEX,
-                        top_k=topk,
-                    )
-
-        def train_loop(self, engine, batch):
-            model.train()
-            batch = at.util.prepare_batch(batch, accel.device)
-            signal = apply_transform(train_data.transform, batch)
-
-            output = {}
-            vn = accel.unwrap(model)
-            with accel.autocast():
-                with torch.inference_mode():
-                    codec.to(accel.device)
-                    z = codec.encode(signal.samples, signal.sample_rate)["codes"]
-                    z = z[:, : vn.n_codebooks, :]
-
-                n_batch = z.shape[0]
-                r = rng.draw(n_batch)[:, 0].to(accel.device)
-
-                mask = pmask.random(z, r)
-                mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-                z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
-                
-                z_mask_latent = vn.embedding.from_codes(z_mask, codec)
-
-                dtype = torch.bfloat16 if accel.amp else None
-                with accel.autocast(dtype=dtype):
-                    z_hat = model(z_mask_latent, r)
-
-                target = codebook_flatten(
-                    z[:, vn.n_conditioning_codebooks :, :],
-                )
-
-                flat_mask = codebook_flatten(
-                    mask[:, vn.n_conditioning_codebooks :, :],
-                )
-
-                # replace target with ignore index for masked tokens
-                t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-                output["loss"] = criterion(z_hat, t_masked)
-
-                self._metrics(
-                    vn=vn,
-                    r=r,
-                    z_hat=z_hat,
-                    target=target,
-                    flat_mask=flat_mask,
-                    output=output,
-                )
-
-            
-            accel.backward(output["loss"] / grad_acc_steps)
-
-            output["other/learning_rate"] = optimizer.param_groups[0]["lr"]
-            output["other/batch_size"] = z.shape[0]
-
-            if (
-                (engine.state.iteration % grad_acc_steps == 0)
-                or (engine.state.iteration % epoch_length == 0)
-                or (engine.state.iteration % epoch_length == 1)
-            ):  # (or we reached the end of the epoch)
-                accel.scaler.unscale_(optimizer)
-                output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), grad_clip_val
-                )
-                self._last_grad_norm = output["other/grad_norm"]
-
-                accel.step(optimizer)
-                optimizer.zero_grad()
-
-                scheduler.step()
-                accel.update()
-            else:
-                output["other/grad_norm"] = self._last_grad_norm
-
-            return {k: v for k, v in sorted(output.items())}
-
-        @torch.no_grad()
-        def val_loop(self, engine, batch):
-            model.eval()
-            codec.eval()
-            batch = at.util.prepare_batch(batch, accel.device)
-            signal = apply_transform(val_data.transform, batch)
-
-            vn = accel.unwrap(model)
-            z = codec.encode(signal.samples, signal.sample_rate)["codes"]
-            z = z[:, : vn.n_codebooks, :]
-
-            n_batch = z.shape[0]
-            r = rng.draw(n_batch)[:, 0].to(accel.device)
-
-            mask = pmask.random(z, r)
-            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
-
-            z_mask_latent = vn.embedding.from_codes(z_mask, codec)
-
-            z_hat = model(z_mask_latent, r)
-
-            target = codebook_flatten(
-                z[:, vn.n_conditioning_codebooks :, :],
-            )
-
-            flat_mask = codebook_flatten(
-                mask[:, vn.n_conditioning_codebooks :, :]
-            )
-
-            output = {}
-            # replace target with ignore index for masked tokens
-            t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-            output["loss"] = criterion(z_hat, t_masked)
-
-            self._metrics(
-                vn=vn,
-                r=r,
-                z_hat=z_hat,
-                target=target,
-                flat_mask=flat_mask,
-                output=output,
-            )
-
-            return output
-
-        def checkpoint(self, engine):
-            if accel.local_rank != 0:
-                print(f"ERROR:Skipping checkpoint on rank {accel.local_rank}")
-                return
-
-            metadata = {"logs": dict(engine.state.logs["epoch"])}
-
-            if self.state.epoch % save_audio_epochs == 0:
-                self.save_samples()
-
-            tags = ["latest"]
-            loss_key = "loss/val" if "loss/val" in metadata["logs"] else "loss/train"
-            self.print(f"Saving to {str(Path('.').absolute())}")
-
-            if self.state.epoch in save_epochs:
-                tags.append(f"epoch={self.state.epoch}")
-
-            if self.is_best(engine, loss_key):
-                self.print(f"Best model so far")
-                tags.append("best")
-
-            if fine_tune:
-                for tag in tags: 
-                    # save the lora model 
-                    (Path(save_path) / tag).mkdir(parents=True, exist_ok=True)
-                    torch.save(
-                        lora.lora_state_dict(accel.unwrap(model)), 
-                        f"{save_path}/{tag}/lora.pth"
-                    )
-
-            for tag in tags:
-                model_extra = {
-                    "optimizer.pth": optimizer.state_dict(),
-                    "scheduler.pth": scheduler.state_dict(),
-                    "trainer.pth": {
-                        "start_idx": self.state.iteration * batch_size,
-                        "state_dict": self.state_dict(),
-                    },
-                    "metadata.pth": metadata,
-                }
-
-                accel.unwrap(model).metadata = metadata
-                accel.unwrap(model).save_to_folder(
-                    f"{save_path}/{tag}", model_extra,
-                )
-
-        def save_sampled(self, z):
-            num_samples = z.shape[0]
-
-            for i in range(num_samples):
-                sampled = accel.unwrap(model).generate(
-                    codec=codec,
-                    time_steps=z.shape[-1],
-                    start_tokens=z[i : i + 1],
-                )
-                sampled.cpu().write_audio_to_tb(
-                    f"sampled/{i}",
-                    self.writer,
-                    step=self.state.epoch,
-                    plot_fn=None,
-                )
-
-
-        def save_imputation(self, z: torch.Tensor):
-            n_prefix = int(z.shape[-1] * 0.25)
-            n_suffix = int(z.shape[-1] *  0.25)
-
-            vn = accel.unwrap(model)
-
-            mask = pmask.inpaint(z, n_prefix, n_suffix)
-            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
-
-            imputed_noisy = vn.to_signal(z_mask, codec)
-            imputed_true = vn.to_signal(z, codec)
-
-            imputed = []
-            for i in range(len(z)):
-                imputed.append(
-                    vn.generate(
-                        codec=codec,
-                        time_steps=z.shape[-1],
-                        start_tokens=z[i][None, ...],
-                        mask=mask[i][None, ...],
-                    )   
-                )   
-            imputed = AudioSignal.batch(imputed)
-
-            for i in range(len(val_idx)):
-                imputed_noisy[i].cpu().write_audio_to_tb(
-                    f"imputed_noisy/{i}",
-                    self.writer,
-                    step=self.state.epoch,
-                    plot_fn=None,
-                )
-                imputed[i].cpu().write_audio_to_tb(
-                    f"imputed/{i}",
-                    self.writer,
-                    step=self.state.epoch,
-                    plot_fn=None,
-                )
-                imputed_true[i].cpu().write_audio_to_tb(
-                    f"imputed_true/{i}",
-                    self.writer,
-                    step=self.state.epoch,
-                    plot_fn=None,
-                )
-
-        @torch.no_grad()
-        def save_samples(self):
-            model.eval()
-            codec.eval()
-            vn = accel.unwrap(model)
-
-            batch = [val_data[i] for i in val_idx]
-            batch = at.util.prepare_batch(val_data.collate(batch), accel.device)
-
-            signal = apply_transform(val_data.transform, batch)
-
-            z = codec.encode(signal.samples, signal.sample_rate)["codes"]
-            z = z[:, : vn.n_codebooks, :]
-
-            r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
-
-
-            mask = pmask.random(z, r)
-            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-            z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
-
-            z_mask_latent = vn.embedding.from_codes(z_mask, codec)
-
-            z_hat = model(z_mask_latent, r)
-
-            z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
-            z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
-            z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
-
-            generated = vn.to_signal(z_pred, codec)
-            reconstructed = vn.to_signal(z, codec)
-            masked = vn.to_signal(z_mask.squeeze(1), codec)
-
-            for i in range(generated.batch_size):
-                audio_dict = {
-                    "original": signal[i],
-                    "masked": masked[i],
-                    "generated": generated[i],
-                    "reconstructed": reconstructed[i],
-                }
-                for k, v in audio_dict.items():
-                    v.cpu().write_audio_to_tb(
-                        f"samples/_{i}.r={r[i]:0.2f}/{k}",
-                        self.writer,
-                        step=self.state.epoch,
-                        plot_fn=None,
-                    )
-
-            self.save_sampled(z)
-            self.save_imputation(z)
-
-    trainer = Trainer(writer=writer, quiet=quiet)
-
-    if trainer_state["state_dict"] is not None:
-        trainer.load_state_dict(trainer_state["state_dict"])
-    if hasattr(train_dataloader.sampler, "set_epoch"):
-        train_dataloader.sampler.set_epoch(trainer.trainer.state.epoch)
-
-    trainer.run(
-        train_dataloader,
-        val_dataloader,
-        num_epochs=max_epochs,
-        epoch_length=epoch_length,
-        detect_anomaly=detect_anomaly,
+    train_loop = tracker.log("train", "value", history=False)(
+        tracker.track("train", num_iters, completed=state.tracker.step)(train_loop)
     )
+    val_loop = tracker.track("val", len(val_dataloader))(val_loop)
+    validate = tracker.log("val", "mean")(validate)
+
+    save_samples = when(lambda: accel.local_rank == 0)(save_samples)
+    checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
+
+    with tracker.live:
+        for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
+            train_loop(state, batch, accel)
+
+            last_iter = (
+                tracker.step == num_iters - 1 if num_iters is not None else False
+            )
+
+            if tracker.step % sample_freq == 0 or last_iter:
+                save_samples(state, val_idx, writer)
+
+            if tracker.step % val_freq == 0 or last_iter:
+                validate(state, val_dataloader, accel)
+                checkpoint(
+                    state=state, 
+                    save_iters=save_iters, 
+                    save_path=save_path, 
+                    fine_tune=fine_tune)
+
+                # Reset validation progress bar, print summary since last validation.
+                tracker.done("val", f"Iteration {tracker.step}")
+
+            if last_iter:
+                break
 
 
 if __name__ == "__main__":
@@ -618,4 +666,6 @@ if __name__ == "__main__":
     args["args.debug"] = int(os.getenv("LOCAL_RANK", 0)) == 0
     with argbind.scope(args):
         with Accelerator() as accel:
+            if accel.local_rank != 0:
+                sys.tracebacklimit = 0
             train(args, accel)

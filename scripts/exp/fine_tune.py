@@ -35,7 +35,7 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
         "AudioDataset.duration": 3.0,
         "AudioDataset.loudness_cutoff": -40.0,
         "save_path": f"./runs/{name}/c2f",
-        "fine_tune_checkpoint": "./models/spotdl/c2f.pth"
+        "fine_tune_checkpoint": "./models/vampnet/c2f.pth"
     }
 
     finetune_coarse_conf = {
@@ -44,17 +44,17 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
         "train/AudioLoader.sources": audio_files_or_folders,
         "val/AudioLoader.sources": audio_files_or_folders,
         "save_path": f"./runs/{name}/coarse",
-        "fine_tune_checkpoint": "./models/spotdl/coarse.pth"
+        "fine_tune_checkpoint": "./models/vampnet/coarse.pth"
     }
 
     interface_conf = {
-        "Interface.coarse_ckpt": f"./models/spotdl/coarse.pth",
+        "Interface.coarse_ckpt": f"./models/vampnet/coarse.pth",
         "Interface.coarse_lora_ckpt": f"./runs/{name}/coarse/latest/lora.pth",
 
-        "Interface.coarse2fine_ckpt": f"./models/spotdl/c2f.pth",
+        "Interface.coarse2fine_ckpt": f"./models/vampnet/c2f.pth",
         "Interface.coarse2fine_lora_ckpt": f"./runs/{name}/c2f/latest/lora.pth",
 
-        "Interface.codec_ckpt": "./models/spotdl/codec.pth",
+        "Interface.codec_ckpt": "./models/vampnet/codec.pth",
         "AudioLoader.sources": [audio_files_or_folders],
     }
 

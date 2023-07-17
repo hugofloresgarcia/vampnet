@@ -1,21 +1,17 @@
 
-codec_ckpt: ./models/spotdl/codec.pth
+codec_ckpt: ./models/vampnet/codec.pth
 save_path: ckpt
-max_epochs: 1000
-epoch_length: 1000
-save_audio_epochs: 2
-val_idx: [0,1,2,3,4,5,6,7,8,9]
 
-prefix_amt: 0.0
-suffix_amt: 0.0
-prefix_dropout: 0.1
-suffix_dropout: 0.1
+num_iters: 1000000000
+save_iters: [10000, 50000, 100000, 300000, 500000]
+val_idx: [0,1,2,3,4,5,6,7,8,9]
+sample_freq: 10000
+val_freq: 1000
 
 batch_size: 8
 num_workers: 10
 
 # Optimization
-detect_anomaly: false
 amp: false
 
 CrossEntropyLoss.label_smoothing: 0.1
@@ -24,9 +20,6 @@ AdamW.lr: 0.001
 
 NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 10000
-
-PitchShift.shift_amount: [const, 0]
-PitchShift.prob: 0.0
 
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 4
@@ -48,12 +41,9 @@ AudioDataset.duration: 10.0
 
 train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:
-  - /data/spotdl/audio/train
+  - /media/CHONK/hugo/spotdl/audio-train
 
 val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
-  - /data/spotdl/audio/val
+  - /media/CHONK/hugo/spotdl/audio-val
 
-test/AudioDataset.n_examples: 1000
-test/AudioLoader.sources:
-  - /data/spotdl/audio/test
