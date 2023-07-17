@@ -316,7 +316,6 @@ class Interface(torch.nn.Module):
                 mask=mask_chunk,
                 **kwargs
             )
-            breakpoint()
             fine_z.append(chunk)
 
         fine_z = torch.cat(fine_z, dim=-1)
