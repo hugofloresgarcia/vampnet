@@ -114,7 +114,12 @@ def _vamp(data, return_mask=False):
     )
 
     if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv, temperature=data[temp], mask=mask)
+        zv = interface.coarse_to_fine(
+            zv, 
+            temperature=data[temp], 
+            mask=mask,
+            sampling_steps=data[num_steps]
+        )
 
     sig = interface.to_signal(zv).cpu()
     print("done")
