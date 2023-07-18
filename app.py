@@ -97,28 +97,35 @@ def _vamp(data, return_mask=False):
     mask = pmask.codebook_unmask(mask, ncc)
 
 
-    print(f"created mask with: linear random {data[rand_mask_intensity]}, inpaint {data[prefix_s]}:{data[suffix_s]}, periodic {data[periodic_p]}:{data[periodic_w]}, dropout {data[dropout]}, codebook unmask {ncc}, onset mask {data[onset_mask_width]}, num steps {data[num_steps]}, init temp {data[temp]},  use coarse2fine {data[use_coarse2fine]}")
+    print(data)
+    _top_p = data[top_p] if data[top_p] > 0 else None
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
+    _seed = data[seed] if data[seed] > 0 else None
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
         sampling_steps=data[num_steps],
-        temperature=data[temp]*10,
+        mask_temperature=data[masktemp]*10,
+        sampling_temperature=data[sampletemp],
         return_mask=True, 
         typical_filtering=data[typical_filtering], 
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
+        top_p=_top_p,
         gen_fn=interface.coarse.generate,
+        seed=_seed,
     )
 
     if use_coarse2fine: 
         zv = interface.coarse_to_fine(
             zv, 
-            temperature=data[temp], 
+            mask_temperature=data[masktemp]*10, 
+            sampling_temperature=data[sampletemp],
             mask=mask,
-            sampling_steps=data[num_steps]
+            sampling_steps=data[num_steps], 
+            seed=_seed,
         )
 
     sig = interface.to_signal(zv).cpu()
@@ -152,7 +159,9 @@ def save_vamp(data):
     sig_out.write(out_dir / "output.wav")
     
     _data = {
-        "temp": data[temp],
+        "masktemp": data[masktemp],
+        "sampletemp": data[sampletemp],
+        "top_p": data[top_p],
         "prefix_s": data[prefix_s],
         "suffix_s": data[suffix_s],
         "rand_mask_intensity": data[rand_mask_intensity],
@@ -163,6 +172,7 @@ def save_vamp(data):
         "n_conditioning_codebooks": data[n_conditioning_codebooks], 
         "use_coarse2fine": data[use_coarse2fine],
         "stretch_factor": data[stretch_factor],
+        "seed": data[seed],
     }
 
     # save with yaml
@@ -385,16 +395,28 @@ with gr.Blocks() as demo:
                     value=0.0
                 )
 
-            temp = gr.Slider(
-                label="temperature",
+            masktemp = gr.Slider(
+                label="mask temperature",
                 minimum=0.0,
                 maximum=10.0,
-                value=0.8
+                value=1.5
             )
-
+            sampletemp = gr.Slider(
+                label="sample temperature",
+                minimum=0.1,
+                maximum=2.0,
+                value=1.0
+            )
+        
 
 
             with gr.Accordion("sampling settings", open=False):
+                top_p = gr.Slider(
+                    label="top p (0.0 = off)",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.0
+                )
                 typical_filtering = gr.Checkbox(
                     label="typical filtering ",
                     value=False
@@ -435,6 +457,18 @@ with gr.Blocks() as demo:
                 value=0.0
             )
 
+            use_new_trick = gr.Checkbox(
+                label="new trick",
+                value=False
+            )
+
+            seed = gr.Number(
+                label="seed (0 for random)",
+                value=0,
+                precision=0,
+            )
+
+
 
         # mask settings
         with gr.Column():
@@ -463,7 +497,9 @@ with gr.Blocks() as demo:
     _inputs = {
             input_audio, 
             num_steps,
-            temp,
+            masktemp,
+            sampletemp,
+            top_p,
             prefix_s, suffix_s, 
             rand_mask_intensity, 
             periodic_p, periodic_w,
@@ -476,7 +512,9 @@ with gr.Blocks() as demo:
             typical_mass,
             typical_min_tokens,
             beat_mask_width,
-            beat_mask_downbeats
+            beat_mask_downbeats,
+            seed, 
+            seed
         }
   
     # connect widgets

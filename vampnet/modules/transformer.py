@@ -367,6 +367,15 @@ class TransformerLayer(nn.Module):
 
         return x, position_bias, encoder_decoder_position_bias
 
+def t_schedule(n_steps, max_temp=1.0, min_temp=0.0, k=1.0):
+    x = np.linspace(0, 1, n_steps)
+    a = (0.5 - min_temp) / (max_temp - min_temp)
+
+    x = (x * 12) - 6
+    x0 = np.log((1 / a - 1) + 1e-5) / k
+    y = (1 / (1 + np.exp(- k *(x-x0))))[::-1]
+
+    return y
 
 class TransformerStack(nn.Module):
     def __init__(
@@ -580,20 +589,20 @@ class VampNet(at.ml.BaseModel):
         time_steps: int = 300,
         sampling_steps: int = 24,
         start_tokens: Optional[torch.Tensor] = None,
+        sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
-        temperature: float = 2.5,
+        mask_temperature: float = 20.5,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
+        top_p=None,
         return_signal=True,
+        seed: int = None
     ):
+        if seed is not None:
+            at.util.seed(seed)
         logging.debug(f"beginning generation with {sampling_steps} steps")
 
-        #####################
-        # resolve temperature #
-        #####################
-
-        logging.debug(f"temperature: {temperature}")
 
 
         ##################### 
@@ -641,12 +650,10 @@ class VampNet(at.ml.BaseModel):
         #################
         # begin sampling #
         #################
+        t_sched = t_schedule(sampling_steps, max_temp=sampling_temperature)
 
         for i in range(sampling_steps):
             logging.debug(f"step {i} of {sampling_steps}")
-
-            # our current temperature
-            logging.debug(f"temperature: {temperature}")
 
             # our current schedule step
             r = scalar_to_batch_tensor(
@@ -664,38 +671,18 @@ class VampNet(at.ml.BaseModel):
             # NOTE: this collapses the codebook dimension into the sequence dimension
             logits = self.forward(latents, r) # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
-            if typical_filtering:
-                typical_filter(logits, 
-                               typical_mass=typical_mass, 
-                               typical_min_tokens=typical_min_tokens
-                )
-
+            b = logits.shape[0]
 
             logging.debug(f"permuted logits with shape: {logits.shape}")
 
-
-            # logits2probs
-            probs = torch.softmax(logits, dim=-1)
-            logging.debug(f"computed probs with shape: {probs.shape}")
-
-
-            # sample from logits with multinomial sampling
-            b = probs.shape[0]
-            probs = rearrange(probs, "b seq prob -> (b seq) prob")
-
-            sampled_z =  torch.multinomial(probs, 1).squeeze(-1)
-
-            sampled_z = rearrange(sampled_z, "(b seq)-> b seq", b=b)
-            probs = rearrange(probs, "(b seq) prob -> b seq prob", b=b)
-            logging.debug(f"sampled z with shape: {sampled_z.shape}")
-
-            # get the confidences: which tokens did we sample? 
-            selected_probs = (
-                torch.take_along_dim(
-                    probs, sampled_z.long().unsqueeze(-1), 
-                    dim=-1
-                ).squeeze(-1)
+            sampled_z, selected_probs = sample_from_logits(
+                logits, sample=True, temperature=t_sched[i],
+                typical_filtering=typical_filtering, typical_mass=typical_mass,
+                typical_min_tokens=typical_min_tokens,
+                top_k=None, top_p=top_p, return_probs=True
             )
+
+            logging.debug(f"sampled z with shape: {sampled_z.shape}")
 
             # flatten z_masked and mask, so we can deal with the sampling logic
             # we'll unflatten them at the end of the loop for the next forward pass
@@ -733,7 +720,7 @@ class VampNet(at.ml.BaseModel):
 
             # get our new mask
             mask = mask_by_random_topk(
-                num_to_mask, selected_probs, temperature * (1-r)
+                num_to_mask, selected_probs, mask_temperature * (1-r)
             )  
 
             # update the mask
@@ -765,6 +752,91 @@ class VampNet(at.ml.BaseModel):
             return self.to_signal(sampled_z, codec)
         else:
             return sampled_z
+
+def sample_from_logits(
+        logits, 
+        sample: bool = True,
+        temperature: float = 1.0,
+        top_k: int = None,
+        top_p: float = None,
+        typical_filtering: bool = False,
+        typical_mass: float = 0.2,
+        typical_min_tokens: int = 1,
+        return_probs: bool = False
+    ):
+    """Convenience function to sample from a categorial distribution with input as
+    unnormalized logits.
+
+    Parameters
+    ----------
+    logits : Tensor[..., vocab_size]
+    config: SamplingConfig
+        The set of hyperparameters to be used for sampling
+        sample : bool, optional
+            Whether to perform multinomial sampling, by default True
+        temperature : float, optional
+            Scaling parameter when multinomial samping, by default 1.0
+        top_k : int, optional
+            Restricts sampling to only `top_k` values acc. to probability,
+            by default None
+        top_p : float, optional
+            Restricts sampling to only those values with cumulative
+            probability = `top_p`, by default None
+
+    Returns
+    -------
+    Tensor[...]
+        Sampled tokens
+    """
+    shp = logits.shape[:-1]
+
+    if typical_filtering:
+        typical_filter(logits, 
+                        typical_mass=typical_mass, 
+                        typical_min_tokens=typical_min_tokens
+        )
+
+    # Apply top_k sampling
+    if top_k is not None:
+        v, _ = logits.topk(top_k)
+        logits[logits < v[..., [-1]]] = -float("inf")
+
+    # Apply top_p (nucleus) sampling
+    if top_p is not None and top_p < 1.0:
+        v, sorted_indices = logits.sort(descending=True)
+        cumulative_probs = v.softmax(dim=-1).cumsum(dim=-1)
+
+        sorted_indices_to_remove = cumulative_probs > top_p
+        # Right shift indices_to_remove to keep 1st token over threshold
+        sorted_indices_to_remove = F.pad(sorted_indices_to_remove, (1, 0), value=False)[
+            ..., :-1
+        ]
+
+        # Compute indices_to_remove in unsorted array
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            -1, sorted_indices, sorted_indices_to_remove
+        )
+
+        logits[indices_to_remove] = -float("inf")
+
+    # Perform multinomial sampling after normalizing logits
+    probs = (
+        F.softmax(logits / temperature, dim=-1)
+        if temperature > 0
+        else logits.softmax(dim=-1)
+    )
+    token = (
+        probs.view(-1, probs.size(-1)).multinomial(1).squeeze(1).view(*shp)
+        if sample
+        else logits.argmax(-1)
+    )
+
+    if return_probs:
+        token_probs = probs.take_along_dim(token.unsqueeze(-1), dim=-1).squeeze(-1)
+        return token, token_probs
+    else:
+        return token
+    
 
 
 def mask_by_random_topk(num_to_mask: int, probs: torch.Tensor, temperature: float = 1.0):
