@@ -1,34 +1,30 @@
 import os
 import sys
 import warnings
-from pathlib import Path
-from typing import Optional
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Any
 
 import argbind
 import audiotools as at
+import loralib as lora
 import torch
 import torch.nn as nn
 from audiotools import AudioSignal
 from audiotools.data import transforms
+from audiotools.ml.decorators import (
+    timer, Tracker, when
+)
 from einops import rearrange
+from lac.model.lac import LAC as DAC
 from rich import pretty
 from rich.traceback import install
 from tensorboardX import SummaryWriter
 
 import vampnet
+from vampnet import mask as pmask
 from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten
-from vampnet import mask as pmask
-# from dac.model.dac import DAC
-from lac.model.lac import LAC as DAC
-
-from audiotools.ml.decorators import (
-    timer, Tracker, when
-)
-
-import loralib as lora
-
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
@@ -194,6 +190,8 @@ class State:
     val_data: AudioDataset
 
     tracker: Tracker
+    wandb_instance: Any = None
+    uncond_geneation_seed: int = 42
 
 
 @timer()
@@ -216,7 +214,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
-        
+
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
         dtype = torch.bfloat16 if accel.amp else None
@@ -243,7 +241,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
             output=output,
         )
 
-    
+
     accel.backward(output["loss"])
 
     output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
@@ -261,8 +259,11 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
     state.scheduler.step()
     accel.update()
 
+    loop_result = {k: v for k, v in sorted(output.items())}
+    if state.wandb_instance is not None:
+        state.wandb_instance.log(loop_result)
 
-    return {k: v for k, v in sorted(output.items())}
+    return loop_result
 
 
 @timer()
@@ -309,6 +310,9 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         output=output,
     )
 
+    if state.wandb_instance is not None:
+        state.wandb_instance.log(output)
+
     return output
 
 
@@ -339,11 +343,11 @@ def checkpoint(state, save_iters, save_path, fine_tune):
         tags.append("best")
 
     if fine_tune:
-        for tag in tags: 
+        for tag in tags:
             # save the lora model 
             (Path(save_path) / tag).mkdir(parents=True, exist_ok=True)
             torch.save(
-                lora.lora_state_dict(accel.unwrap(state.model)), 
+                lora.lora_state_dict(accel.unwrap(state.model)),
                 f"{save_path}/{tag}/lora.pth"
             )
 
@@ -369,6 +373,7 @@ def save_sampled(state, z, writer):
             codec=state.codec,
             time_steps=z.shape[-1],
             start_tokens=z[i : i + 1],
+            seed=state.uncond_geneation_seed
         )
         sampled.cpu().write_audio_to_tb(
             f"sampled/{i}",
@@ -376,11 +381,17 @@ def save_sampled(state, z, writer):
             step=state.tracker.step,
             plot_fn=None,
         )
+        if state.wandb_instance is not None:
+            state.wandb_instance.log(
+                {f"unconditional/{i}": state.wandb_instance.Audio(sampled.cpu().numpy()[0][0],
+                                                                  sample_rate=sampled.sample_rate)},
+                step=state.tracker.step,
+            )
 
 
 def save_imputation(state, z, val_idx, writer):
     n_prefix = int(z.shape[-1] * 0.25)
-    n_suffix = int(z.shape[-1] *  0.25)
+    n_suffix = int(z.shape[-1] * 0.25)
 
     vn = accel.unwrap(state.model)
 
@@ -399,8 +410,8 @@ def save_imputation(state, z, val_idx, writer):
                 time_steps=z.shape[-1],
                 start_tokens=z[i][None, ...],
                 mask=mask[i][None, ...],
-            )   
-        )   
+            )
+        )
     imputed = AudioSignal.batch(imputed)
 
     for i in range(len(val_idx)):
@@ -422,6 +433,18 @@ def save_imputation(state, z, val_idx, writer):
             step=state.tracker.step,
             plot_fn=None,
         )
+        if state.wandb_instance is not None:
+            state.wandb_instance.log(
+                {
+                    f"imputed_noisy/{i}": state.wandb_instance.Audio(imputed_noisy[i].cpu().numpy()[0][0],
+                                                                     sample_rate=imputed_noisy[i].sample_rate),
+                    f"imputed/{i}": state.wandb_instance.Audio(imputed[i].cpu().numpy()[0][0],
+                                                               sample_rate=imputed[i].sample_rate),
+                    f"imputed_true/{i}": state.wandb_instance.Audio(imputed_true[i].cpu().numpy()[0][0],
+                                                                    sample_rate=imputed_true[i].sample_rate),
+                },
+                step=state.tracker.step,
+            )
 
 
 @torch.no_grad()
@@ -471,6 +494,12 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
                 step=state.tracker.step,
                 plot_fn=None,
             )
+            if state.wandb_instance is not None:
+                state.wandb_instance.log(
+                    {f"samples/_{i}.r={r[i]:0.2f}/{k}": state.wandb_instance.Audio(v.cpu().numpy()[0][0],
+                                                                                   sample_rate=v.sample_rate)},
+                    step=state.tracker.step,
+                )
 
     save_sampled(state=state, z=z, writer=writer)
     save_imputation(state=state, z=z, val_idx=val_idx, writer=writer)
@@ -511,8 +540,8 @@ def load(
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
         model = torch.compile(
-            VampNet.load(location=Path(fine_tune_checkpoint), 
-                         map_location="cpu", 
+            VampNet.load(location=Path(fine_tune_checkpoint),
+                         map_location="cpu",
             )
         )
 
@@ -534,13 +563,13 @@ def load(
         scheduler.load_state_dict(v_extra["scheduler.pth"])
     if "tracker.pth" in v_extra:
         tracker.load_state_dict(v_extra["tracker.pth"])
-    
+
     criterion = CrossEntropyLoss()
 
     sample_rate = codec.sample_rate
 
     # a better rng for sampling from our schedule
-    rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=args["seed"])  
+    rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=args["seed"])
 
     # log a model summary w/ num params
     if accel.local_rank == 0:
@@ -574,12 +603,12 @@ def train(
     save_path: str = "ckpt",
     num_iters: int = int(1000e6),
     save_iters: list = [10000, 50000, 100000, 300000, 500000,],
-    sample_freq: int = 10000, 
+    sample_freq: int = 10000,
     val_freq: int = 1000,
     batch_size: int = 12,
     val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     num_workers: int = 10,
-    fine_tune: bool = False, 
+    fine_tune: bool = False,
 ):
     assert codec_ckpt is not None, "codec_ckpt is required"
 
@@ -597,11 +626,16 @@ def train(
 
     # load the codec model
     state: State = load(
-        args=args, 
-        accel=accel, 
-        tracker=tracker, 
+        args=args,
+        accel=accel,
+        tracker=tracker,
         save_path=save_path)
 
+    if args['wandb']:
+        import wandb
+        # wandb.tensorboard.patch(root_logdir=f"{save_path}/logs")
+        wandb.init(project="vampnet", config=args)
+        state.wandb_instance = wandb
 
     train_dataloader = accel.prepare_dataloader(
         state.train_data,
@@ -619,7 +653,7 @@ def train(
         persistent_workers=True,
     )
 
-    
+
 
     if fine_tune:
         lora.mark_only_lora_as_trainable(state.model)
@@ -651,9 +685,9 @@ def train(
             if tracker.step % val_freq == 0 or last_iter:
                 validate(state, val_dataloader, accel)
                 checkpoint(
-                    state=state, 
-                    save_iters=save_iters, 
-                    save_path=save_path, 
+                    state=state,
+                    save_iters=save_iters,
+                    save_path=save_path,
                     fine_tune=fine_tune)
 
                 # Reset validation progress bar, print summary since last validation.

@@ -2,6 +2,7 @@ $include:
   - conf/vampnet.yml
 
 fine_tune: True
+wandb: True
 
 train/AudioDataset.n_examples: 100000000
 val/AudioDataset.n_examples: 100
