@@ -126,6 +126,7 @@ def _vamp(data, return_mask=False):
             mask_temperature=data[masktemp]*10, 
             sampling_temperature=data[sampletemp],
             mask=mask,
+            sampling_steps=data[num_steps],
             sample_cutoff=data[sample_cutoff], 
             seed=_seed,
         )
