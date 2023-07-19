@@ -102,6 +102,17 @@ def _vamp(data, return_mask=False):
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
+
+    if interface.coarse.classlist is not None:
+        # make a class prob vector
+        import torch
+        _classes = torch.stack([
+            torch.tensor(data[class_probs[c]]) for c in interface.coarse.classlist
+        ]).to(interface.device).float().unsqueeze(0)
+    else:
+        _classes = None
+
+
     _seed = data[seed] if data[seed] > 0 else None
     zv, mask_z = interface.coarse_vamp(
         z, 
@@ -145,12 +156,15 @@ def _vamp(data, return_mask=False):
     else:
         return sig.path_to_file
 
+
 def vamp(data):
     return _vamp(data, return_mask=True)
+
 
 def api_vamp(data):
     return _vamp(data, return_mask=False)
         
+
 def save_vamp(data):
     out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -176,6 +190,7 @@ def save_vamp(data):
         "use_coarse2fine": data[use_coarse2fine],
         "stretch_factor": data[stretch_factor],
         "seed": data[seed],
+        "dropout": data[dropout],
         "samplecutoff": data[sample_cutoff],
     }
 
@@ -439,6 +454,13 @@ with gr.Blocks() as demo:
                     value=64
                 )
 
+                sample_cutoff = gr.Slider(
+                    label="sample cutoff (should probably stay at 0.5)",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.5
+                )
+
             use_coarse2fine = gr.Checkbox(
                 label="use coarse2fine",
                 value=True, 
@@ -461,11 +483,6 @@ with gr.Blocks() as demo:
                 value=0.0
             )
 
-            use_new_trick = gr.Checkbox(
-                label="new trick",
-                value=False
-            )
-
             seed = gr.Number(
                 label="seed (0 for random)",
                 value=0,
@@ -476,6 +493,20 @@ with gr.Blocks() as demo:
 
         # mask settings
         with gr.Column():
+            # probability number box for each class
+            class_probs = {}
+            for _class in interface.coarse.classlist:
+                class_probs[_class] = gr.Slider(
+                    label=f"{_class} probability",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.0,
+                    visible=interface.coarse.classlist is not None
+                )
+
+
+
+
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
                 label="output audio",
@@ -519,6 +550,7 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             sample_cutoff,
+            *class_probs.values(),
         }
   
     # connect widgets

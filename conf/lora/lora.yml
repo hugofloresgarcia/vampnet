@@ -11,10 +11,12 @@ NoamScheduler.warmup: 500
 
 batch_size: 7
 num_workers: 7
-save_iters: [100000, 200000, 300000, 4000000, 500000]
+save_iters: [1000, 5000, 10000, 20000, 30000, 40000, 50000]
+sample_freq: 500
+val_freq: 250
 
 AdamW.lr: 0.0001
 
 # let's us organize sound classes into folders and choose from those sound classes uniformly
 AudioDataset.without_replacement: False
-num_iters: 500000
+num_iters: 50000

@@ -1,6 +1,6 @@
 import math
 import logging
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 import numpy as np
 import torch
@@ -367,6 +367,7 @@ class TransformerLayer(nn.Module):
 
         return x, position_bias, encoder_decoder_position_bias
 
+
 def t_schedule(n_steps, max_temp=1.0, min_temp=0.0, k=1.0):
     x = np.linspace(0, 1, n_steps)
     a = (0.5 - min_temp) / (max_temp - min_temp)
@@ -376,6 +377,7 @@ def t_schedule(n_steps, max_temp=1.0, min_temp=0.0, k=1.0):
     y = (1 / (1 + np.exp(- k *(x-x0))))[::-1]
 
     return y
+
 
 class TransformerStack(nn.Module):
     def __init__(
@@ -465,7 +467,7 @@ class VampNet(at.ml.BaseModel):
         self,
         n_heads: int = 20,
         n_layers: int = 16,
-        r_cond_dim: int = 64,
+        r_cond_dim: int = 0,
         n_codebooks: int = 9,
         n_conditioning_codebooks: int = 0,
         latent_dim: int = 8,
@@ -473,7 +475,8 @@ class VampNet(at.ml.BaseModel):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",
-        dropout: float = 0.1
+        dropout: float = 0.1, 
+        classlist: List[str] = None, 
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -497,6 +500,11 @@ class VampNet(at.ml.BaseModel):
             special_tokens=["MASK"],
         )
         self.mask_token = self.embedding.special_idxs["MASK"]
+
+        # if we're given a classlist
+        self.classlist = classlist
+        if classlist is not None:
+            self.class_cond_emb = FiLM(len(self.classlist), embedding_dim)
 
         self.transformer = TransformerStack(
             d_model=embedding_dim,
@@ -522,14 +530,32 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x, cond):
+
+    def one_hot(self, classes):
+        classes = torch.tensor([self.classlist.index(c) for c in classes]).to(self.device)
+        classes = F.one_hot(classes, num_classes=len(self.classlist)).float()
+        return classes
+
+
+    def forward(self, x, classes=None, cond=None):
         x = self.embedding(x)
+        seq_len = x.shape[-1]
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
-
-        cond = self.r_embed(cond)
-
         x = rearrange(x, "b d n -> b n d")
-        out = self.transformer(x=x, x_mask=x_mask, cond=cond)
+
+        if self.classlist is not None and classes   is not None:
+            # one hot should be shape (batch, n_classes)
+            # unsqueeze and repeat to seq len
+            classes = classes.unsqueeze(1).repeat(1, seq_len, 1)
+
+            x = rearrange(x, "b n d -> (b n) d")
+            classes = rearrange(classes, "b n d -> (b n) d")
+
+            x = self.class_cond_emb(x, classes)
+            x = rearrange(x, "(b n) d -> b n d", n=seq_len)
+
+
+        out = self.transformer(x=x, x_mask=x_mask, cond=None)
         out = rearrange(out, "b n d -> b d n")
 
         out = self.classifier(out, cond)
@@ -538,6 +564,7 @@ class VampNet(at.ml.BaseModel):
 
         return out
     
+
     def r_embed(self, r, max_positions=10000):
         if self.r_cond_dim > 0:
             dtype = r.dtype
@@ -558,6 +585,7 @@ class VampNet(at.ml.BaseModel):
         else:
             return r
     
+
     @torch.no_grad()
     def to_signal(self, z, codec):
         """
@@ -598,7 +626,8 @@ class VampNet(at.ml.BaseModel):
         top_p=None,
         return_signal=True,
         seed: int = None, 
-        sample_cutoff: float = 0.5
+        sample_cutoff: float = 0.5, 
+        classes=None
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -667,10 +696,9 @@ class VampNet(at.ml.BaseModel):
             latents = self.embedding.from_codes(z_masked, codec)
             logging.debug(f"computed latents with shape: {latents.shape}")
 
-
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
-            logits = self.forward(latents, r) # b, prob, seq
+            logits = self.forward(latents, classes=classes) # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
             b = logits.shape[0]
 
@@ -757,6 +785,8 @@ class VampNet(at.ml.BaseModel):
         else:
             return sampled_z
 
+
+
 def sample_from_logits(
         logits, 
         sample: bool = True,
@@ -840,8 +870,6 @@ def sample_from_logits(
         return token, token_probs
     else:
         return token
-    
-
 
 def mask_by_random_topk(num_to_mask: int, probs: torch.Tensor, temperature: float = 1.0):
     """
@@ -926,7 +954,7 @@ if __name__ == "__main__":
         z_mask_latent = torch.rand(
             batch_size, model.latent_dim * model.n_codebooks, seq_len
         ).to(device)
-        z_hat = model(z_mask_latent, r)
+        z_hat = model(z_mask_latent)
 
         pred = z_hat.argmax(dim=1)
         pred = model.embedding.unflatten(pred, n_codebooks=model.n_predict_codebooks)

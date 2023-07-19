@@ -225,6 +225,8 @@ class Interface(torch.nn.Module):
         
         mask_b4 = self.s2t(before_beat_s)
         mask_after = self.s2t(after_beat_s)
+        print(f"mask_b4: {mask_b4}")
+        print(f"mask_after: {mask_after}")
 
         if beat_downsample_factor is not None:
             if beat_downsample_factor < 1:

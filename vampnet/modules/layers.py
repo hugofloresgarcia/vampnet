@@ -95,8 +95,8 @@ class FiLM(nn.Module):
         else:
             beta, gamma = self.beta(r), self.gamma(r)
             beta, gamma = (
-                beta.view(x.size(0), self.output_dim, 1),
-                gamma.view(x.size(0), self.output_dim, 1),
+                beta.view(x.size(0), self.output_dim),
+                gamma.view(x.size(0), self.output_dim),
             )
             x = x * (gamma + 1) + beta
         return x

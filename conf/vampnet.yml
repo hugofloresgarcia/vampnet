@@ -40,10 +40,10 @@ AudioLoader.shuffle: true
 AudioDataset.duration: 10.0
 
 train/AudioDataset.n_examples: 10000000
-train/AudioLoader.sources:
-  - /media/CHONK/hugo/spotdl/audio-train
+train/build_dataset.folders:
+  sig: /media/CHONK/hugo/spotdl/audio-train
 
 val/AudioDataset.n_examples: 2000
-val/AudioLoader.sources:
-  - /media/CHONK/hugo/spotdl/audio-val
+val/build_dataset.folders:
+  sig: /media/CHONK/hugo/spotdl/audio-val
 

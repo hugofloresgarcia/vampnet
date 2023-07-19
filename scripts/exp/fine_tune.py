@@ -1,17 +1,14 @@
 import argbind
 from pathlib import Path
 import yaml
-from typing import List
-
-
-
+from typing import Dict
 
 """example output: (yaml)
 
 """
 
 @argbind.bind(without_prefix=True, positional=True)
-def fine_tune(audio_files_or_folders: List[str], name: str):
+def fine_tune(audio_files_or_folders: Dict[str], name: str):
 
     conf_dir = Path("conf")
     assert conf_dir.exists(), "conf directory not found. are you in the vampnet directory?"
@@ -22,11 +19,13 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
     finetune_dir = conf_dir / name
     finetune_dir.mkdir(exist_ok=True)
 
+    assert isinstance(audio_files_or_folders, dict), "audio_files_or_folders must be a dict. to pass a dict via argbind CLI, use quotes: 'a=b b=c'"
+
     finetune_c2f_conf = {
         "$include": ["conf/lora/lora.yml"],
         "fine_tune": True,
-        "train/AudioLoader.sources": audio_files_or_folders,
-        "val/AudioLoader.sources": audio_files_or_folders,
+        "train/build_dataset.folders": audio_files_or_folders,
+        "val/build_dataset.folders": audio_files_or_folders,
         "VampNet.n_codebooks": 14,
         "VampNet.n_conditioning_codebooks": 4,
         "VampNet.embedding_dim": 1280,
@@ -41,8 +40,8 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
     finetune_coarse_conf = {
         "$include": ["conf/lora/lora.yml"],
         "fine_tune": True,
-        "train/AudioLoader.sources": audio_files_or_folders,
-        "val/AudioLoader.sources": audio_files_or_folders,
+        "train/build_dataset.folders": audio_files_or_folders,
+        "val/build_dataset.folders": audio_files_or_folders,
         "save_path": f"./runs/{name}/coarse",
         "fine_tune_checkpoint": "./models/vampnet/coarse.pth"
     }

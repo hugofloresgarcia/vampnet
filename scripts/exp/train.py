@@ -76,22 +76,59 @@ def build_transform():
 
 
 @torch.no_grad()
-def apply_transform(transform_fn, batch):
-    sig: AudioSignal = batch["signal"]
-    kwargs = batch["transform_args"]
+def apply_transform(transform_fn, batch, classlist, state):
+    if classlist is None:
+        sig: AudioSignal = batch["signal"]
+        kwargs = batch["transform_args"]
 
-    sig: AudioSignal = transform_fn(sig.clone(), **kwargs)
-    return sig
+        sig: AudioSignal = transform_fn(sig.clone(), **kwargs)
+        classes = None
+    else:
+        sigs = {c: batch[c]["signal"] for c in classlist}
+        kwargs = batch["transform_args"]
+
+        sigs = {c: transform_fn(sigs[c].clone(), **kwargs) for c in classlist}
+
+        batch_size = batch[classlist[0]]["signal"].batch_size
+        # pick a class for each sample
+        classes = torch.randint(0, len(classlist), (batch_size,))
+        sig = AudioSignal.batch([
+            sigs[classlist[c]][i] for i, c in enumerate(classes)
+        ])
+        classes = [classlist[c] for c in classes]
+
+        # convert classlist to onehot
+        classes = accel.unwrap(state.model.one_hot(classes))
+        # apply classifier dropout by multiplying by zero across the batch dim
+        keep = (torch.rand(classes.shape[0], device=classes.device) > state.classifier_dropout).float()
+        classes = classes * keep[:, None]
+
+    return sig, classes
 
 
-def build_datasets(args, sample_rate: int):
-    with argbind.scope(args, "train"):
-        train_data = AudioDataset(
-            AudioLoader(), sample_rate, transform=build_transform()
-        )
-    with argbind.scope(args, "val"):
-        val_data = AudioDataset(AudioLoader(), sample_rate, transform=build_transform())
-    return train_data, val_data
+@argbind.bind("train", "val")
+def build_dataset(
+    sample_rate: int,
+    folders: dict = None,
+):
+    assert folders is not None, "Must provide a dictionary of folders to load from."
+    # Give one loader per key/value of dictionary, where
+    # value is a list of folders. Create a dataset for each one.
+    # Concatenate the datasets with ConcatDataset, which
+    # cycles through them.
+    loaders = {}
+    for k, v in folders.items():
+        if isinstance(v, dict):
+            loaders[k] = AudioLoader(**v)
+        else:
+            loaders[k] = AudioLoader(
+                sources=v
+            )
+
+    transform = build_transform()
+    dataset = AudioDataset(loaders, sample_rate, transform=transform)
+    dataset.transform = transform
+    return dataset
 
 
 def rand_float(shape, low, high, rng):
@@ -180,6 +217,8 @@ def _metrics(z_hat, r, target, flat_mask, output):
 
 @dataclass
 class State:
+    seed: int 
+    
     model: VampNet
     codec: DAC
 
@@ -187,6 +226,7 @@ class State:
     scheduler: NoamScheduler
     criterion: CrossEntropyLoss
     grad_clip_val: float
+    classifier_dropout: float
 
     rng: torch.quasirandom.SobolEngine
 
@@ -199,11 +239,13 @@ class State:
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
     state.model.train()
-    batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.train_data.transform, batch)
+    vn = accel.unwrap(state.model)
+    batch = at.util.prepare_batch(batch, accel.device,)
+    signal, classes = apply_transform(state.train_data.transform, batch, vn.classlist, state)
+
+
 
     output = {}
-    vn = accel.unwrap(state.model)
     with accel.autocast():
         with torch.inference_mode():
             state.codec.to(accel.device)
@@ -221,7 +263,8 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
         dtype = torch.bfloat16 if accel.amp else None
         with accel.autocast(dtype=dtype):
-            z_hat = state.model(z_mask_latent, r)
+            import torch.nn.functional as F
+            z_hat = state.model(z_mask_latent, classes=classes)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -270,10 +313,11 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 def val_loop(state: State, batch: dict, accel: Accelerator):
     state.model.eval()
     state.codec.eval()
-    batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.val_data.transform, batch)
-
     vn = accel.unwrap(state.model)
+
+    batch = at.util.prepare_batch(batch, accel.device)
+    signal, classes = apply_transform(state.val_data.transform, batch, vn.classlist, state)
+
     z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
     z = z[:, : vn.n_codebooks, :]
 
@@ -285,8 +329,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
-
-    z_hat = state.model(z_mask_latent, r)
+    z_hat = state.model(z_mask_latent, classes=classes)
 
     target = codebook_flatten(
         z[:, vn.n_conditioning_codebooks :, :],
@@ -363,12 +406,20 @@ def checkpoint(state, save_iters, save_path, fine_tune):
 
 def save_sampled(state, z, writer):
     num_samples = z.shape[0]
+    vn = accel.unwrap(state.model)
 
     for i in range(num_samples):
+        if vn.classlist is not None:
+            _class = vn.classlist[i % len(vn.classlist)]
+            _class = vn.one_hot([_class])
+        else:
+            _class = None
         sampled = accel.unwrap(state.model).generate(
             codec=state.codec,
             time_steps=z.shape[-1],
             start_tokens=z[i : i + 1],
+            seed=state.seed + i,
+            classes=_class
         )
         sampled.cpu().write_audio_to_tb(
             f"sampled/{i}",
@@ -433,7 +484,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     batch = [state.val_data[i] for i in val_idx]
     batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
 
-    signal = apply_transform(state.val_data.transform, batch)
+    signal, classes = apply_transform(state.val_data.transform, batch, vn.classlist, state)
 
     z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
     z = z[:, : vn.n_codebooks, :]
@@ -447,7 +498,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent, r)
+    z_hat = state.model(z_mask_latent, classes=classes)
 
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
@@ -487,9 +538,27 @@ def load(
     tag: str = "latest",
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
+    compile: bool = True,
+    classifier_dropout: float = 0.2,
+    seed: int = 0,
 ) -> State:
     codec = DAC.load(args["codec_ckpt"], map_location="cpu")
     codec.eval()
+
+    seed = seed + accel.local_rank
+    at.util.seed(seed)
+
+    sample_rate = codec.sample_rate
+ 
+    # load the datasets
+    with argbind.scope(args, "train"):
+        train_data = build_dataset(sample_rate)
+
+    with argbind.scope(args, "val"):
+        val_data = build_dataset(sample_rate)
+
+    classlist = list(train_data.loaders.keys())
+    classlist = None if len(classlist) == 1 else classlist
 
     model, v_extra = None, {}
 
@@ -502,25 +571,22 @@ def load(
         tracker.print(f"Loading checkpoint from {kwargs['folder']}")
         if (Path(kwargs["folder"]) / "vampnet").exists():
             model, v_extra = VampNet.load_from_folder(**kwargs)
+            assert model.classlist == classlist, f"model classlist {model.classlist} !=  {classlist} (dataset classlist)"
         else:
             raise ValueError(
                 f"Could not find a VampNet checkpoint in {kwargs['folder']}"
             )
 
-
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = torch.compile(
-            VampNet.load(location=Path(fine_tune_checkpoint), 
-                         map_location="cpu", 
-            )
-        )
+        model = VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu", classlist=classlist)
 
-
-    model = torch.compile(VampNet()) if model is None else model
+    model = VampNet(classlist=classlist) if model is None else model
+    if compile:
+        model = torch.compile(model)
     model = accel.prepare_model(model)
 
-    # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
     assert (
         accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
     )
@@ -537,8 +603,6 @@ def load(
     
     criterion = CrossEntropyLoss()
 
-    sample_rate = codec.sample_rate
-
     # a better rng for sampling from our schedule
     rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=args["seed"])  
 
@@ -547,9 +611,6 @@ def load(
         add_num_params_repr_hook(accel.unwrap(model))
         with open(f"{save_path}/model.txt", "w") as f:
             f.write(repr(accel.unwrap(model)))
-
-    # load the datasets
-    train_data, val_data = build_datasets(args, sample_rate)
 
     return State(
         tracker=tracker,
@@ -562,6 +623,8 @@ def load(
         train_data=train_data,
         val_data=val_data,
         grad_clip_val=grad_clip_val,
+        classifier_dropout=classifier_dropout,
+        seed=seed,
     )
 
 
@@ -569,7 +632,6 @@ def load(
 def train(
     args,
     accel: at.ml.Accelerator,
-    seed: int = 0,
     codec_ckpt: str = None,
     save_path: str = "ckpt",
     num_iters: int = int(1000e6),
@@ -583,8 +645,7 @@ def train(
 ):
     assert codec_ckpt is not None, "codec_ckpt is required"
 
-    seed = seed + accel.local_rank
-    at.util.seed(seed)
+
     writer = None
 
     if accel.local_rank == 0:
@@ -616,7 +677,7 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.val_data.collate,
-        persistent_workers=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
 
     
