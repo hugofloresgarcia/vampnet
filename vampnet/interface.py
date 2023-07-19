@@ -194,7 +194,7 @@ class Interface(torch.nn.Module):
 
     def make_beat_mask(self, 
             signal: AudioSignal, 
-            before_beat_s: float = 0.1,
+            before_beat_s: float = 0.0,
             after_beat_s: float = 0.1,
             mask_downbeats: bool = True,
             mask_upbeats: bool = True,
