@@ -587,18 +587,18 @@ class VampNet(at.ml.BaseModel):
         self,
         codec,
         time_steps: int = 300,
-        sampling_steps: int = 24,
+        sampling_steps: int = 36,
         start_tokens: Optional[torch.Tensor] = None,
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
-        mask_temperature: float = 20.5,
+        mask_temperature: float = 10.5,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
         top_p=None,
         return_signal=True,
         seed: int = None, 
-        sample_cutoff: float = 1.0
+        sample_cutoff: float = 0.5
     ):
         if seed is not None:
             at.util.seed(seed)
