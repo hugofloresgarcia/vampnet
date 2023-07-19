@@ -116,6 +116,8 @@ def _vamp(data, return_mask=False):
         top_p=_top_p,
         gen_fn=interface.coarse.generate,
         seed=_seed,
+        sample_cutoff=data[sample_cutoff],
+        classes=_classes,
     )
 
     if use_coarse2fine: 
@@ -124,7 +126,7 @@ def _vamp(data, return_mask=False):
             mask_temperature=data[masktemp]*10, 
             sampling_temperature=data[sampletemp],
             mask=mask,
-            sampling_steps=data[num_steps], 
+            sample_cutoff=data[sample_cutoff], 
             seed=_seed,
         )
 
@@ -173,6 +175,7 @@ def save_vamp(data):
         "use_coarse2fine": data[use_coarse2fine],
         "stretch_factor": data[stretch_factor],
         "seed": data[seed],
+        "samplecutoff": data[sample_cutoff],
     }
 
     # save with yaml
@@ -514,7 +517,7 @@ with gr.Blocks() as demo:
             beat_mask_width,
             beat_mask_downbeats,
             seed, 
-            seed
+            sample_cutoff,
         }
   
     # connect widgets
