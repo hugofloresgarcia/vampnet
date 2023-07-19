@@ -597,7 +597,8 @@ class VampNet(at.ml.BaseModel):
         typical_min_tokens=1,
         top_p=None,
         return_signal=True,
-        seed: int = None
+        seed: int = None, 
+        sample_cutoff: float = 1.0
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -676,10 +677,13 @@ class VampNet(at.ml.BaseModel):
             logging.debug(f"permuted logits with shape: {logits.shape}")
 
             sampled_z, selected_probs = sample_from_logits(
-                logits, sample=True, temperature=t_sched[i],
+                logits, sample=(
+                   (i / sampling_steps) <= sample_cutoff
+                ), 
+                temperature=t_sched[i],
                 typical_filtering=typical_filtering, typical_mass=typical_mass,
                 typical_min_tokens=typical_min_tokens,
-                top_k=None, top_p=top_p, return_probs=True
+                top_k=None, top_p=top_p, return_probs=True,
             )
 
             logging.debug(f"sampled z with shape: {sampled_z.shape}")
