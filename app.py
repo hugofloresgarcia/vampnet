@@ -561,7 +561,8 @@ with gr.Blocks() as demo:
             lora_choice = gr.Dropdown(
                 label="lora choice", 
                 choices=list(loras.keys()),
-                value=LORA_NONE,
+                value=LORA_NONE, 
+                visible=False
             )
 
             vamp_button = gr.Button("generate (vamp)!!!")
