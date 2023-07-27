@@ -120,17 +120,16 @@ class Interface(torch.nn.Module):
             if coarse_ckpt is not None:
                 self.coarse.to("cpu")
                 state_dict = torch.load(coarse_ckpt, map_location="cpu")
-
+                print(f"loading coarse from {coarse_ckpt}")
                 self.coarse.load_state_dict(state_dict, strict=False)
                 self.coarse.to(self.device)
             if c2f_ckpt is not None:
                 self.c2f.to("cpu")
                 state_dict = torch.load(c2f_ckpt, map_location="cpu")
-
+                print(f"loading c2f from {c2f_ckpt}")
                 self.c2f.load_state_dict(state_dict, strict=False)
                 self.c2f.to(self.device)
         
-
     def s2t(self, seconds: float):
         """seconds to tokens"""
         if isinstance(seconds, np.ndarray):

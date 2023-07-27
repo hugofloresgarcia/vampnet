@@ -191,29 +191,47 @@ def onset_mask(
     width: int = 1
 ):
     import librosa
+    import madmom
+    from madmom.features.onsets import RNNOnsetProcessor, OnsetPeakPickingProcessor
+    import tempfile
+    import numpy as np 
 
-    onset_indices = librosa.onset.onset_detect(
-        y=sig.clone().to_mono().samples.cpu().numpy()[0, 0], 
-        sr=sig.sample_rate,
-        hop_length=interface.codec.hop_length, 
-        backtrack=True,
-    )
+    with tempfile.NamedTemporaryFile(suffix='.wav') as f:
+        sig = sig.clone()
+        sig.write(f.name)
 
-    # create a mask, set onset 
-    mask = torch.ones_like(z)
-    n_timesteps = z.shape[-1]
+        proc = RNNOnsetProcessor(online=False)
+        onsetproc = OnsetPeakPickingProcessor(threshold=0.3,
+                                              fps=sig.sample_rate/interface.codec.hop_length)
+        
+        act = proc(f.name)
+        onset_times = onsetproc(act)
 
-    for onset_index in onset_indices:
-        onset_index = min(onset_index, n_timesteps - 1)
-        onset_index = max(onset_index, 0)
-        mask[:, :, onset_index - width:onset_index + width] = 0.0
+        # convert to indices for z array
+        onset_indices = librosa.time_to_frames(onset_times, sr=sig.sample_rate, hop_length=interface.codec.hop_length)
 
-    print(mask)
+        if onset_indices.shape[0] == 0:
+            mask = empty_mask(z)   
+            print(f"no onsets found, returning empty mask")
+        else: 
+            torch.set_printoptions(threshold=1000)
+            print("onset indices: ", onset_indices)
+            print("onset times: ", onset_times)
+
+            # create a mask, set onset 
+            mask = torch.ones_like(z)
+            n_timesteps = z.shape[-1]
+
+            for onset_index in onset_indices:
+                onset_index = min(onset_index, n_timesteps - 1)
+                onset_index = max(onset_index, 0)
+                mask[:, :, onset_index - width:onset_index + width] = 0.0
+
+            print(mask)
     
     return mask
 
 
 
 if __name__ == "__main__":
-    torch.set_printoptions(threshold=10000)
-
+    pass

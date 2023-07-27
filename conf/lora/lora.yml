@@ -4,14 +4,16 @@ $include:
 fine_tune: True
 
 train/AudioDataset.n_examples: 100000000
-val/AudioDataset.n_examples: 100
+val/AudioDataset.n_examples: 500
 
 
 NoamScheduler.warmup: 500
 
 batch_size: 7
 num_workers: 7
-save_iters: [100000, 200000, 300000, 4000000, 500000]
+save_iters: [10000, 20000, 30000, 40000, 50000]
+sample_freq: 1000
+val_freq: 500
 
 AdamW.lr: 0.0001
 

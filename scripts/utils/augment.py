@@ -5,34 +5,19 @@ from audiotools import AudioSignal
 
 import argbind
 import tqdm
+import torch
 
 
-from pedalboard import (
-   Compressor, Gain, Chorus, LadderFilter, Phaser, Convolution, Reverb, Pedalboard 
-)
-from pedalboard.io import AudioFile 
+from torch_pitch_shift import pitch_shift, get_fast_shifts
+from torch_time_stretch import time_stretch, get_fast_stretches
 
-# Read in a whole file, resampling to our desired sample rate:
-samplerate = 44100.0
-with AudioFile('guitar-input.wav').resampled_to(samplerate) as f:
-  audio = f.read(f.frames)
-
-# Make a pretty interesting sounding guitar pedalboard:
-board = Pedalboard([
-    Compressor(threshold_db=-50, ratio=25),
-    Gain(gain_db=30),
-    Chorus(),
-    LadderFilter(mode=LadderFilter.Mode.HPF12, cutoff_hz=900),
-    Phaser(),
-    Convolution("./guitar_amp.wav", 1.0),
-    Reverb(room_size=0.25),
-])
+from audiotools.core.util import sample_from_dist
 
 
 @argbind.bind(without_prefix=True)
 def augment(
-    audio_folder: Path,
-    dest_folder: Path,
+    audio_folder: Path = None,
+    dest_folder: Path = None,
     n_augmentations: int = 10,
 ):
     """ 
@@ -41,7 +26,8 @@ def augment(
         The dest foler will contain a folder for each of the clean dataset's files. 
         Under each of these folders, there will be a clean file and many augmented files.
     """
-
+    assert audio_folder is not None
+    assert dest_folder is not None
     audio_files = at.util.find_audio(audio_folder)
 
     for audio_file in tqdm.tqdm(audio_files):
@@ -49,5 +35,33 @@ def augment(
         subdir = subtree / audio_file.stem
         subdir.mkdir(parents=True, exist_ok=True)
 
-        # apply pedalboard transforms
-        for i in range(n_augmentations):
+        src = AudioSignal(audio_file).to("cuda" if torch.cuda.is_available() else "cpu")
+
+        
+        for i, chunk in tqdm.tqdm(enumerate(src.windows(10, 10))):
+            # apply pedalboard transforms
+            for j in range(n_augmentations):
+                # pitch shift between -7 and 7 semitones
+                import random
+                dst = chunk.clone()
+                dst.samples = pitch_shift(
+                    dst.samples, 
+                    shift=random.choice(get_fast_shifts(src.sample_rate, 
+                            condition=lambda x: x >= 0.25 and x <= 1.0)), 
+                    sample_rate=src.sample_rate
+                )
+                dst.samples = time_stretch(
+                    dst.samples,
+                    stretch=random.choice(get_fast_stretches(src.sample_rate, 
+                                          condition=lambda x: x >= 0.667 and x <= 1.5, )),
+                    sample_rate=src.sample_rate, 
+                )
+
+                dst.cpu().write(subdir / f"{i}-{j}.wav")
+
+
+if __name__ == "__main__":
+    args = argbind.parse_args()
+
+    with argbind.scope(args):
+        augment()
