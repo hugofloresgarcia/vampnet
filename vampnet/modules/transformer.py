@@ -367,15 +367,6 @@ class TransformerLayer(nn.Module):
 
         return x, position_bias, encoder_decoder_position_bias
 
-def t_schedule(n_steps, max_temp=1.0, min_temp=0.0, k=1.0):
-    x = np.linspace(0, 1, n_steps)
-    a = (0.5 - min_temp) / (max_temp - min_temp)
-
-    x = (x * 12) - 6
-    x0 = np.log((1 / a - 1) + 1e-5) / k
-    y = (1 / (1 + np.exp(- k *(x-x0))))[::-1]
-
-    return y
 
 class TransformerStack(nn.Module):
     def __init__(
@@ -598,7 +589,7 @@ class VampNet(at.ml.BaseModel):
         top_p=None,
         return_signal=True,
         seed: int = None, 
-        sample_cutoff: float = 0.5
+        sample_cutoff: float = 0.5,
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -651,7 +642,6 @@ class VampNet(at.ml.BaseModel):
         #################
         # begin sampling #
         #################
-        t_sched = t_schedule(sampling_steps, max_temp=sampling_temperature)
 
         for i in range(sampling_steps):
             logging.debug(f"step {i} of {sampling_steps}")
@@ -680,7 +670,7 @@ class VampNet(at.ml.BaseModel):
                 logits, sample=(
                    (i / sampling_steps) <= sample_cutoff
                 ), 
-                temperature=t_sched[i],
+                temperature=sampling_temperature,
                 typical_filtering=typical_filtering, typical_mass=typical_mass,
                 typical_min_tokens=typical_min_tokens,
                 top_k=None, top_p=top_p, return_probs=True,
@@ -843,7 +833,11 @@ def sample_from_logits(
     
 
 
-def mask_by_random_topk(num_to_mask: int, probs: torch.Tensor, temperature: float = 1.0):
+def mask_by_random_topk(
+        num_to_mask: int, 
+        probs: torch.Tensor, 
+        temperature: float = 1.0, 
+    ):
     """
     Args:
         num_to_mask (int): number of tokens to mask
@@ -856,7 +850,8 @@ def mask_by_random_topk(num_to_mask: int, probs: torch.Tensor, temperature: floa
     logging.debug(f"temperature: {temperature}")
     logging.debug("")
 
-    confidence = torch.log(probs) + temperature * gumbel_noise_like(probs)
+    noise = gumbel_noise_like(probs)
+    confidence = torch.log(probs) + temperature * noise
     logging.debug(f"confidence shape: {confidence.shape}")
 
     sorted_confidence, sorted_idx = confidence.sort(dim=-1)

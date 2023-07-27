@@ -18,6 +18,16 @@ Interface = argbind.bind(Interface)
 
 conf = argbind.parse_args()
 
+
+from torch_pitch_shift import pitch_shift, get_fast_shifts
+def shift_pitch(signal, interval: int):
+    signal.samples = pitch_shift(
+        signal.samples, 
+        shift=interval, 
+        sample_rate=signal.sample_rate
+    )
+    return signal
+
 def load_interface():
     with argbind.scope(conf):
         interface = Interface()
@@ -95,6 +105,10 @@ def _vamp(data, return_mask=False):
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
+    sig = interface.preprocess(sig)
+
+    if data[pitch_shift_amt] != 0:
+        sig = shift_pitch(sig, data[pitch_shift_amt])
 
     z = interface.encode(sig)
 
@@ -134,7 +148,27 @@ def _vamp(data, return_mask=False):
     mask = pmask.codebook_unmask(mask, ncc)
 
 
-    print(data)
+    print(f"dropout {data[dropout]}")
+    print(f"masktemp {data[masktemp]}")
+    print(f"sampletemp {data[sampletemp]}")
+    print(f"top_p {data[top_p]}")
+    print(f"prefix_s {data[prefix_s]}")
+    print(f"suffix_s {data[suffix_s]}")
+    print(f"rand_mask_intensity {data[rand_mask_intensity]}")
+    print(f"num_steps {data[num_steps]}")
+    print(f"periodic_p {data[periodic_p]}")
+    print(f"periodic_w {data[periodic_w]}")
+    print(f"n_conditioning_codebooks {data[n_conditioning_codebooks]}")
+    print(f"use_coarse2fine {data[use_coarse2fine]}")
+    print(f"onset_mask_width {data[onset_mask_width]}")
+    print(f"beat_mask_width {data[beat_mask_width]}")
+    print(f"beat_mask_downbeats {data[beat_mask_downbeats]}")
+    print(f"stretch_factor {data[stretch_factor]}")
+    print(f"seed {data[seed]}")
+    print(f"pitch_shift_amt {data[pitch_shift_amt]}")
+    print(f"sample_cutoff {data[sample_cutoff]}")
+    
+    
     _top_p = data[top_p] if data[top_p] > 0 else None
     # save the mask as a txt file
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
@@ -153,6 +187,7 @@ def _vamp(data, return_mask=False):
         top_p=_top_p,
         gen_fn=interface.coarse.generate,
         seed=_seed,
+        sample_cutoff=data[sample_cutoff],
     )
 
     if use_coarse2fine: 
@@ -356,7 +391,7 @@ with gr.Blocks() as demo:
                 onset_mask_width = gr.Slider(
                     label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) ",
                     minimum=0,
-                    maximum=20,
+                    maximum=100,
                     step=1,
                     value=5,
                 )
@@ -374,6 +409,14 @@ with gr.Blocks() as demo:
 
 
                 with gr.Accordion("extras ", open=False):
+                    pitch_shift_amt = gr.Slider(
+                        label="pitch shift amount (semitones)",
+                        minimum=-12,
+                        maximum=12,
+                        step=1,
+                        value=0,
+                    )
+
                     rand_mask_intensity = gr.Slider(
                         label="random mask intensity. (If this is less than 1, scatters prompts throughout the audio, should be between 0.9 and 1.0)",
                         minimum=0.0,
@@ -436,14 +479,15 @@ with gr.Blocks() as demo:
             masktemp = gr.Slider(
                 label="mask temperature",
                 minimum=0.0,
-                maximum=10.0,
+                maximum=100.0,
                 value=1.5
             )
             sampletemp = gr.Slider(
                 label="sample temperature",
                 minimum=0.1,
-                maximum=2.0,
-                value=1.0
+                maximum=10.0,
+                value=1.0, 
+                step=0.001
             )
         
 
@@ -459,7 +503,7 @@ with gr.Blocks() as demo:
                     label="typical filtering ",
                     value=False
                 )
-                typical_mass = gr.Slider(
+                typical_mass = gr.Slider( 
                     label="typical mass (should probably stay between 0.1 and 0.5)",
                     minimum=0.01,
                     maximum=0.99,
@@ -471,6 +515,13 @@ with gr.Blocks() as demo:
                     maximum=256,
                     step=1,
                     value=64
+                )
+                sample_cutoff = gr.Slider(
+                    label="sample cutoff",
+                    minimum=0.0,
+                    maximum=1.0,
+                    value=0.5, 
+                    step=0.01
                 )
 
             use_coarse2fine = gr.Checkbox(
@@ -495,10 +546,6 @@ with gr.Blocks() as demo:
                 value=0.0
             )
 
-            use_new_trick = gr.Checkbox(
-                label="new trick",
-                value=False
-            )
 
             seed = gr.Number(
                 label="seed (0 for random)",
@@ -560,6 +607,8 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             lora_choice,
+            pitch_shift_amt, 
+            sample_cutoff
         }
   
     # connect widgets
@@ -589,4 +638,4 @@ with gr.Blocks() as demo:
         outputs=[thank_you, download_file]
     )
 
-demo.launch(share=True, enable_queue=False, debug=True)
+demo.launch(share=True, enable_queue=True, debug=True)
