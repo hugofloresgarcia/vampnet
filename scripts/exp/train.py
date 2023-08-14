@@ -29,6 +29,9 @@ from audiotools.ml.decorators import (
 
 import loralib as lora
 
+import torch._dynamo
+torch._dynamo.config.verbose=True
+
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
@@ -510,14 +513,14 @@ def load(
 
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = torch.compile(
+        model = (
             VampNet.load(location=Path(fine_tune_checkpoint), 
                          map_location="cpu", 
             )
         )
 
 
-    model = torch.compile(VampNet()) if model is None else model
+    model = VampNet() if model is None else model
     model = accel.prepare_model(model)
 
     # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
@@ -601,7 +604,7 @@ def train(
         accel=accel, 
         tracker=tracker, 
         save_path=save_path)
-
+    print("initialized state.")
 
     train_dataloader = accel.prepare_dataloader(
         state.train_data,
@@ -616,13 +619,15 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.val_data.collate,
-        persistent_workers=True,
+        persistent_workers=num_workers > 0,
     )
+    print("initialized dataloader.")
 
     
 
     if fine_tune:
         lora.mark_only_lora_as_trainable(state.model)
+        print("marked only lora as trainable.")
 
     # Wrap the functions so that they neatly track in TensorBoard + progress bars
     # and only run when specific conditions are met.
@@ -637,6 +642,7 @@ def train(
     save_samples = when(lambda: accel.local_rank == 0)(save_samples)
     checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
 
+    print("starting training loop.")
     with tracker.live:
         for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
             train_loop(state, batch, accel)
