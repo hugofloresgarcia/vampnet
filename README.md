@@ -88,7 +88,7 @@ python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml
 
 launch the interface: 
 ```bash
-python  demo.py --args.load conf/generated/<fine_tune_name>/interface.yml 
+python  app.py --args.load conf/generated/<fine_tune_name>/interface.yml 
 ```
 
 
