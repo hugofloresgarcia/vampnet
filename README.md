@@ -7,7 +7,15 @@ you can try vampnet in a co-creative looper called unloop. see this link: https:
 
 # Setting up
 
-Requires Python 3.9 or later. 
+**Requires Python 3.9**. 
+
+you'll need a Python 3.9 environment to run VampNet. This is due to a [known issue with madmom](https://github.com/hugofloresgarcia/vampnet/issues/15). 
+
+(for example, using conda)
+```bash
+conda create -n vampnet python=3.9
+conda activate vampnet
+```
 
 
 install VampNet
