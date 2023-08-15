@@ -36,37 +36,12 @@ def load_interface():
         return interface
 
 
-LORA_NONE = "None"
-def load_loras():
-    loras = {}
-    # find confs under conf/generated
-    for conf_file in Path("conf/generated").glob("**/interface.yml"):
-        name = conf_file.parent.name
-        with open(conf_file) as f:
-            loras[name] = yaml.safe_load(f)
-    loras[LORA_NONE] = None
-    return loras
+
 
 interface = load_interface()
-loras = load_loras()
-cur_lora = LORA_NONE
 
-def load_lora(name):
-    global interface
-    global cur_lora
-    if name == cur_lora:
-        return
-    if name != LORA_NONE:
-        interface.lora_load(
-            coarse_ckpt=loras[name]["Interface.coarse_lora_ckpt"],
-            c2f_ckpt=loras[name]["Interface.coarse2fine_lora_ckpt"],
-            full_ckpts=False
-        )
-        cur_lora = name
 
-    else: 
-        interface = load_interface()
-        cur_lora = LORA_NONE
+
 
 # dataset = at.data.datasets.AudioDataset(
 #     loader,
@@ -100,7 +75,6 @@ def load_example_audio():
 
 
 def _vamp(data, return_mask=False):
-    load_lora(data[lora_choice])
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
@@ -247,7 +221,6 @@ def save_vamp(data):
         "stretch_factor": data[stretch_factor],
         "seed": data[seed],
         "samplecutoff": data[sample_cutoff],
-        "lora": data[lora_choice],
     }
 
     # save with yaml
@@ -560,12 +533,12 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
-            lora_choice = gr.Dropdown(
-                label="lora choice", 
-                choices=list(loras.keys()),
-                value=LORA_NONE, 
-                visible=False
-            )
+            # lora_choice = gr.Dropdown(
+            #     label="lora choice", 
+            #     choices=list(loras.keys()),
+            #     value=LORA_NONE, 
+            #     visible=False
+            # )
 
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
@@ -609,7 +582,7 @@ with gr.Blocks() as demo:
             beat_mask_width,
             beat_mask_downbeats,
             seed, 
-            lora_choice,
+            # lora_choice,
             pitch_shift_amt, 
             sample_cutoff
         }
