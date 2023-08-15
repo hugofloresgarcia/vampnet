@@ -231,7 +231,47 @@ def onset_mask(
     
     return mask
 
+def audio_file_mask(
+    sig: AudioSignal, 
+    z: torch.Tensor,
+    interface, 
+):
+    """
+    create a mask from an audio file. 
+    
+    where muted sections (where samples == 0 on a given hop length) equal 1s, in the mask, 
+    and nonmuted sections equal to 0s in the mask. 
+    """
+
+    # get the number of samples in a hop
+    hop_length = interface.codec.hop_length
+
+    # get the number of timesteps in the z array
+    n_steps = z.shape[-1]
+
+    # create a mask, set muted sections to 1
+    mask = torch.zeros_like(z)
+
+    for i in range(n_steps):
+        # get the start and end indices for the hop
+        start = i * hop_length
+        end = (i + 1) * hop_length
+
+        # if all samples in the hop are 0, then we have a muted section
+        # checking the first channel only!
+        if torch.all(sig.samples[0, 0, start:end] == 0):
+            mask[:, :, i] = 1
+
+    return mask
 
 
 if __name__ == "__main__":
-    pass
+    sig = AudioSignal("mask.wav")
+
+    interface: Interface # initialize an interface here
+    sig = interface.preprocess(sig)
+    z = interface.encode(sig)
+
+    mask = audio_file_mask(sig, z, interface=interface)
+
+
