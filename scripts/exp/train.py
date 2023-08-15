@@ -14,7 +14,7 @@ from audiotools.data import transforms
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 import vampnet
 from vampnet.modules.transformer import VampNet

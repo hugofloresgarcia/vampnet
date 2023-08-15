@@ -33,7 +33,6 @@ setup(
         "lac @ git+https://github.com/hugofloresgarcia/lac.git",
         "descript-audiotools @ git+https://github.com/descriptinc/audiotools.git@0.7.2",
         "gradio", 
-        "tensorboardX",
         "loralib",
         "torch_pitch_shift",
         "madmom",
