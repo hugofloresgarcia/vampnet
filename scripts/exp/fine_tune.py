@@ -49,10 +49,8 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
 
     interface_conf = {
         "Interface.coarse_ckpt": f"./runs/{name}/coarse/latest/vampnet/weights.pth",
-        "Interface.coarse_lora_ckpt": f"./runs/{name}/coarse/latest/lora.pth",
 
         "Interface.coarse2fine_ckpt": f"./runs/{name}/c2f/latest/vampnet/weights.pth",
-        "Interface.coarse2fine_lora_ckpt": f"./runs/{name}/c2f/latest/lora.pth",
         "Interface.wavebeat_ckpt": "./models/wavebeat.pth",
 
         "Interface.codec_ckpt": "./models/vampnet/codec.pth",
