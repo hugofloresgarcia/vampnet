@@ -456,7 +456,7 @@ class VampNet(at.ml.BaseModel):
         self,
         n_heads: int = 20,
         n_layers: int = 16,
-        r_cond_dim: int = 64,
+        r_cond_dim: int = 0,
         n_codebooks: int = 9,
         n_conditioning_codebooks: int = 0,
         latent_dim: int = 8,
@@ -467,6 +467,7 @@ class VampNet(at.ml.BaseModel):
         dropout: float = 0.1
     ):
         super().__init__()
+        assert r_cond_dim == 0, f"r_cond_dim must be 0 (not supported), but got {r_cond_dim}"
         self.n_heads = n_heads
         self.n_layers = n_layers
         self.r_cond_dim = r_cond_dim
@@ -513,17 +514,15 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x, cond):
+    def forward(self, x):
         x = self.embedding(x)
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
 
-        cond = self.r_embed(cond)
-
         x = rearrange(x, "b d n -> b n d")
-        out = self.transformer(x=x, x_mask=x_mask, cond=cond)
+        out = self.transformer(x=x, x_mask=x_mask)
         out = rearrange(out, "b n d -> b d n")
 
-        out = self.classifier(out, cond)
+        out = self.classifier(out, None) # no cond here!
 
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
 
@@ -660,7 +659,7 @@ class VampNet(at.ml.BaseModel):
 
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
-            logits = self.forward(latents, r) # b, prob, seq
+            logits = self.forward(latents) # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
             b = logits.shape[0]
 
@@ -921,7 +920,7 @@ if __name__ == "__main__":
         z_mask_latent = torch.rand(
             batch_size, model.latent_dim * model.n_codebooks, seq_len
         ).to(device)
-        z_hat = model(z_mask_latent, r)
+        z_hat = model(z_mask_latent)
 
         pred = z_hat.argmax(dim=1)
         pred = model.embedding.unflatten(pred, n_codebooks=model.n_predict_codebooks)

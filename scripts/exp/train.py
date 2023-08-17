@@ -224,7 +224,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
         dtype = torch.bfloat16 if accel.amp else None
         with accel.autocast(dtype=dtype):
-            z_hat = state.model(z_mask_latent, r)
+            z_hat = state.model(z_mask_latent)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -289,7 +289,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent, r)
+    z_hat = state.model(z_mask_latent)
 
     target = codebook_flatten(
         z[:, vn.n_conditioning_codebooks :, :],
@@ -450,7 +450,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent, r)
+    z_hat = state.model(z_mask_latent)
 
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
