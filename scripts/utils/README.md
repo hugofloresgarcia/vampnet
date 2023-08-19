@@ -1,5 +1,19 @@
 # Scripts
 
+# Downloading datasets
+
+first, download
+```
+python scripts/utils/download/fma.py --dest <download_destination> --size full
+```
+
+then, create a split
+```
+python scripts/utils/split.py --folder /media/CHONK/hugo/fma/fma_full --test_size 0.1 --pattern '**/*.mp3'
+```
+
+
+
 ## process_zip.py
 
 Some requirements that may not be installed in the docker image:

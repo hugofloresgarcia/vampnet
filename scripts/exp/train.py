@@ -31,6 +31,11 @@ from audiotools.ml.decorators import (
 
 import loralib as lora
 
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
@@ -58,7 +63,6 @@ tfm = argbind.bind_module(transforms, "train", "val", filter_fn=filter_fn)
 
 # model
 VampNet = argbind.bind(VampNet)
-
 
 # data
 AudioLoader = argbind.bind(at.datasets.AudioLoader)
@@ -588,9 +592,9 @@ def train(
         writer = SummaryWriter(log_dir=f"{save_path}/logs/")
         argbind.dump_args(args, f"{save_path}/args.yml")
 
-        tracker = Tracker(
-            writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
-        )
+    tracker = Tracker(
+        writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
+    )
 
     # load the codec model
     state: State = load(
@@ -598,6 +602,10 @@ def train(
         accel=accel, 
         tracker=tracker, 
         save_path=save_path)
+    
+    # god pls forgive me for my sins
+    state.train_data._tracker = tracker
+    state.val_data._tracker = tracker
 
 
     train_dataloader = accel.prepare_dataloader(
