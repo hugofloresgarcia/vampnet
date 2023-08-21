@@ -32,7 +32,7 @@ VampNet.n_heads: 20
 VampNet.flash_attn: false
 VampNet.dropout: 0.1
 
-AudioLoader.relative_path: /data/
+AudioLoader.relative_path: ""
 AudioDataset.loudness_cutoff: -30.0
 AudioDataset.without_replacement: true
 AudioLoader.shuffle: true
