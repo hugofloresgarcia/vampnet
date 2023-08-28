@@ -182,3 +182,5 @@ models.zip
 .git-old
 conf/generated/*
 runs*/
+
+data/

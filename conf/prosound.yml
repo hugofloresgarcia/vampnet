@@ -1,0 +1,12 @@
+$include:
+  - conf/base.yml
+
+AudioDataset.duration: 12.0
+
+train/AudioDataset.n_examples: 10000000
+train/AudioLoader.sources:
+  - data/prosound_core_complete/train
+
+val/AudioDataset.n_examples: 10000
+val/AudioLoader.sources:
+  - data/prosound_core_complete/val
