@@ -408,19 +408,19 @@ def save_imputation(state, z, val_idx, writer):
 
     for i in range(len(val_idx)):
         imputed_noisy[i].cpu().write_audio_to_tb(
-            f"imputed_noisy/{i}",
+            f"inpainted_prompt/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
         )
         imputed[i].cpu().write_audio_to_tb(
-            f"imputed/{i}",
+            f"inpainted_middle/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
         )
         imputed_true[i].cpu().write_audio_to_tb(
-            f"imputed_true/{i}",
+            f"reconstructed/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
@@ -469,7 +469,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
         }
         for k, v in audio_dict.items():
             v.cpu().write_audio_to_tb(
-                f"samples/_{i}.r={r[i]:0.2f}/{k}",
+                f"onestep/_{i}.r={r[i]:0.2f}/{k}",
                 writer,
                 step=state.tracker.step,
                 plot_fn=None,

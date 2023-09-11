@@ -9,9 +9,9 @@ val/AudioDataset.n_examples: 500
 
 NoamScheduler.warmup: 500
 
-batch_size: 7
+batch_size: 6
 num_workers: 7
-save_iters: [10000, 20000, 30000, 40000, 50000]
+save_iters: [10000, 20000, 30000, 40000, 50000, 100000]
 sample_freq: 1000
 val_freq: 500
 
