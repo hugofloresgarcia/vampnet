@@ -1,7 +1,9 @@
 $include:
   - conf/base.yml
 
-AudioDataset.duration: 12.0
+batch_size: 64
+val_batch_size: 64
+num_workers: 18
 
 train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:

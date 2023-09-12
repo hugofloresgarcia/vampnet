@@ -4,10 +4,12 @@ import warnings
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+import math
+import time
+from typing import List, Dict, Union
 
 import argbind
 import audiotools as at
-import dac
 import torch
 import torch.nn as nn
 from audiotools import AudioSignal
@@ -24,6 +26,7 @@ from vampnet import mask as pmask
 from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_flatten
 from vampnet.util import codebook_unflatten
+from vampnet.data import DACDataset
 
 from audiotools.ml.decorators import (
     timer, Tracker, when
@@ -37,7 +40,8 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-
+torch._dynamo.config.log_level = logging.DEBUG
+torch.autograd.set_detect_anomaly(True)
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
@@ -76,9 +80,10 @@ IGNORE_INDEX = -100
 @argbind.bind("train", "val", without_prefix=True)
 def build_transform():
     transform = transforms.Compose(
+        tfm.Identity(),
         # tfm.VolumeNorm(("const", -24)),
         # tfm.PitchShift(),
-        tfm.RescaleAudio(),
+        # tfm.RescaleAudio(),
     )
     return transform
 
@@ -92,14 +97,47 @@ def apply_transform(transform_fn, batch):
     return sig
 
 
-def build_datasets(args, sample_rate: int):
-    with argbind.scope(args, "train"):
-        train_data = AudioDataset(
-            AudioLoader(), sample_rate, transform=build_transform()
+def build_datasets(
+        args, sample_rate: int, dac_files_path: str, 
+        seq_len: int, hop_length: int
+    ):
+    duration = (seq_len * hop_length) / sample_rate
+
+    if dac_files_path is not None:
+        print(f"Loading DAC files from {dac_files_path}")
+        print(f"WARNING: This means that all other information passed to AudioDataset will be ignored")
+        base_path = Path(dac_files_path)
+        train_data = DACDataset(
+            base_path / "train", 
+            seq_len, 
+            seed=args["seed"]
         )
+    else:
+        print(f"FIXING AudioDataset duration to {duration}")
+        with argbind.scope(args, "train"):
+            train_data = AudioDataset(
+                AudioLoader(), 
+                sample_rate, 
+                duration=duration,
+                transform=build_transform()
+            )
+
     with argbind.scope(args, "val"):
-        val_data = AudioDataset(AudioLoader(), sample_rate, transform=build_transform())
-    return train_data, val_data
+        val_data = AudioDataset(
+            AudioLoader(), 
+            sample_rate, 
+            duration=duration, 
+            transform=build_transform()
+        )
+
+        sample_data = AudioDataset(
+            AudioLoader(),
+            sample_rate,
+            duration=duration,
+            transform=build_transform(),
+        )
+
+    return train_data, val_data, sample_data
 
 
 def rand_float(shape, low, high, rng):
@@ -154,6 +192,7 @@ def accuracy(
 
     return accuracy
 
+
 def _metrics(z_hat, r, target, flat_mask, output):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
         unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
@@ -198,25 +237,76 @@ class State:
 
     rng: torch.quasirandom.SobolEngine
 
-    train_data: AudioDataset
+    has_dac_data: bool
+    train_data: Union[AudioDataset, DACDataset]
     val_data: AudioDataset
+    sample_data: AudioDataset
 
     tracker: Tracker
+
+
+def build_context_mask(batch, state: State):
+    padding_s = batch['padding_s'] # will be a tensor of shape (batch_size, )
+
+    codec_hop = state.codec.hop_length
+    codec_sr = state.codec.sample_rate
+    tgt_duration = state.train_data.duration
+
+    # compute the number of frames in the target duration
+    tgt_frames = math.ceil(tgt_duration * codec_sr / codec_hop)
+
+    # compute the number of frames in the padding duratio
+    padding_frames = (padding_s * codec_sr / codec_hop).long()
+
+    # make a mask of shape (batch_size, tgt_frames)
+    mask = torch.ones((batch['signal'].shape[0], tgt_frames)).long()
+
+    # set the padding frames to False
+    # Iterate over each sample and mask the padding frames
+    for i, pad_frame in enumerate(padding_frames):
+        if pad_frame < tgt_frames and pad_frame > 0:
+            mask[i, -pad_frame:] = 0 # Set the last padding frames to 0 (or False)
+
+    assert not mask.sum() == 0
+    return mask.to(batch['signal'].device)
+
+
+def encode(state, signal):
+    vn = accel.unwrap(state.model)
+    with torch.inference_mode():
+        state.codec.to(accel.device)
+        z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+        z = z[:, : vn.n_codebooks, :]
+    return z
+
+
+def preprocess(state: State, batch: dict, stage: str):
+    dataset = state.train_data if stage == "train" else state.val_data
+
+    if isinstance(dataset, DACDataset):
+        z = batch["codes"]
+        ctx_mask = batch["ctx_mask"]
+    elif isinstance(dataset, AudioDataset):
+        signal = apply_transform(dataset.transform, batch)
+        ctx_mask = build_context_mask(batch, state)
+        with accel.autocast():
+            z = encode(state, signal)
+    else:
+        raise ValueError(f"Unknown dataset type {type(dataset)}")
+
+    return z, ctx_mask
 
 
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
     state.model.train()
     batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.train_data.transform, batch)
+
+    z, ctx_mask = preprocess(state, batch, "train")
 
     output = {}
     vn = accel.unwrap(state.model)
     with accel.autocast():
-        with torch.inference_mode():
-            state.codec.to(accel.device)
-            z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-            z = z[:, : vn.n_codebooks, :]
 
         n_batch = z.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
@@ -229,25 +319,29 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
         dtype = torch.bfloat16 if accel.amp else None
         with accel.autocast(dtype=dtype):
-            z_hat = state.model(z_mask_latent)
+            z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
         )
 
-        flat_mask = codebook_flatten(
-            mask[:, vn.n_conditioning_codebooks :, :],
+        ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
+        loss_mask = codebook_flatten(
+            torch.logical_or(
+                ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                ctx_mask == 0,
+            )
         )
 
         # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
         output["loss"] = state.criterion(z_hat, t_masked)
 
         _metrics(
             r=r,
             z_hat=z_hat,
             target=target,
-            flat_mask=flat_mask,
+            flat_mask=loss_mask,
             output=output,
         )
 
@@ -278,12 +372,13 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 def val_loop(state: State, batch: dict, accel: Accelerator):
     state.model.eval()
     state.codec.eval()
+
     batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.val_data.transform, batch)
+    z, ctx_mask = preprocess(state, batch, "val")
 
     vn = accel.unwrap(state.model)
-    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-    z = z[:, : vn.n_codebooks, :]
+    
+    output = {}
 
     n_batch = z.shape[0]
     r = state.rng.draw(n_batch)[:, 0].to(accel.device)
@@ -294,26 +389,30 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent)
+    z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
     target = codebook_flatten(
         z[:, vn.n_conditioning_codebooks :, :],
     )
 
-    flat_mask = codebook_flatten(
-        mask[:, vn.n_conditioning_codebooks :, :]
+    # repeat the ctx for the number of codebooks
+    ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
+    loss_mask = codebook_flatten(
+        torch.logical_or(
+            ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
+            ctx_mask == 0,
+        )
     )
 
-    output = {}
     # replace target with ignore index for masked tokens
-    t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+    t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
     output["loss"] = state.criterion(z_hat, t_masked)
 
     _metrics(
         r=r,
         z_hat=z_hat,
         target=target,
-        flat_mask=flat_mask,
+        flat_mask=loss_mask,
         output=output,
     )
 
@@ -438,10 +537,10 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     state.codec.eval()
     vn = accel.unwrap(state.model)
 
-    batch = [state.val_data[i] for i in val_idx]
-    batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
+    batch = [state.sample_data[i] for i in val_idx]
+    batch = at.util.prepare_batch(state.sample_data.collate(batch), accel.device)
 
-    signal = apply_transform(state.val_data.transform, batch)
+    signal = apply_transform(state.sample_data.transform, batch)
 
     z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
     z = z[:, : vn.n_codebooks, :]
@@ -494,7 +593,9 @@ def load(
     tag: str = "latest",
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
-    dac_path: str = "./models/",
+    dac_path: str = "./models/dac/weights.pth",
+    dac_cache: str = None,
+    compile: bool = False, 
 ) -> State:
     codec = load_dac(load_path=dac_path)
     codec.eval()
@@ -518,14 +619,12 @@ def load(
 
     if args["fine_tune"]:
         assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = torch.compile(
-            VampNet.load(location=Path(fine_tune_checkpoint), 
-                         map_location="cpu", 
-            )
-        )
+        model = VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu")
 
-
-    model = torch.compile(VampNet()) if model is None else model
+    model = VampNet() if model is None else model
+    if compile: 
+        model = torch.compile(model)
     model = accel.prepare_model(model)
 
     # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
@@ -555,7 +654,12 @@ def load(
             f.write(repr(accel.unwrap(model)))
 
     # load the datasets
-    train_data, val_data = build_datasets(args, sample_rate)
+    train_data, val_data, sample_data = build_datasets(
+        args, sample_rate, dac_cache, 
+        seq_len=accel.unwrap(model).max_seq_len,
+        hop_length=codec.hop_length
+    )
+    has_dac_data = isinstance(train_data, DACDataset)
 
     return State(
         tracker=tracker,
@@ -565,8 +669,10 @@ def load(
         scheduler=scheduler,
         criterion=criterion,
         rng=rng,
+        has_dac_data=has_dac_data,
         train_data=train_data,
         val_data=val_data,
+        sample_data=sample_data,
         grad_clip_val=grad_clip_val,
     )
 
@@ -575,22 +681,30 @@ def load(
 def train(
     args,
     accel: at.ml.Accelerator,
-    seed: int = 0,
-    save_path: str = "ckpt",
+    seed: int = None,
+    save_path: str = "runs/default",
     num_iters: int = int(1000e6),
     save_iters: list = [10000, 50000, 100000, 300000, 500000,],
-    sample_freq: int = 10000, 
+    sample_freq: int = 5000, 
     val_freq: int = 1000,
     batch_size: int = 12,
+    val_batch_size: int = 16,
     val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     num_workers: int = 10,
     fine_tune: bool = False, 
 ):
+    if seed is None:
+        seed = time.time_ns() % 2**32
+
+    print(f"seed: {seed}")
     seed = seed + accel.local_rank
     at.util.seed(seed)
     writer = None
 
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+
     if accel.local_rank == 0:
+        args["seed"] = seed
         writer = SummaryWriter(log_dir=f"{save_path}/logs/")
         argbind.dump_args(args, f"{save_path}/args.yml")
 
@@ -612,14 +726,16 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.train_data.collate,
+        prefetch_factor=8,
     )
     val_dataloader = accel.prepare_dataloader(
         state.val_data,
         start_idx=0,
         num_workers=num_workers,
-        batch_size=batch_size,
+        batch_size=val_batch_size,
         collate_fn=state.val_data.collate,
         persistent_workers=num_workers > 0,
+        prefetch_factor=8,
     )
     print("initialized dataloader.")
 
@@ -648,6 +764,9 @@ def train(
             last_iter = (
                 tracker.step == num_iters - 1 if num_iters is not None else False
             )
+
+            if tracker.step == 0: 
+                continue
 
             if tracker.step % sample_freq == 0 or last_iter:
                 save_samples(state, val_idx, writer)

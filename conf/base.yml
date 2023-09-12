@@ -9,13 +9,13 @@ sample_freq: 10000
 val_freq: 1000
 
 batch_size: 16
+val_batch_size: 24
 num_workers: 16
 
 # Optimization
 amp: false
 
-CrossEntropyLoss.label_smoothing: 0.1
-
+# CrossEntropyLoss.label_smoothing: 0.0
 AdamW.lr: 0.001
 
 NoamScheduler.factor: 2.0
@@ -28,12 +28,14 @@ VampNet.embedding_dim: 1280
 VampNet.n_layers: 10
 VampNet.n_heads: 10
 VampNet.dropout: 0.05
+VampNet.max_seq_len: 1024
 
 AudioDataset.loudness_cutoff: -30.0
 AudioDataset.without_replacement: true
 AudioLoader.shuffle: true
 AudioDataset.num_channels: 1
-AudioDataset.duration: 10.0
+
+dac_cache: null
 
 train/AudioDataset.n_examples: 10000000
-val/AudioDataset.n_examples: 2000
+val/AudioDataset.n_examples: 2500

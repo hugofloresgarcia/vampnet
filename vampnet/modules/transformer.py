@@ -43,11 +43,11 @@ class VampNet(at.ml.BaseModel):
         embedding_dim: int = 1280,
         vocab_size: int = 1024,
         dropout: float = 0.1,
+        cross_attend: bool = False, 
         # chroma_dim: int = 0,
         max_seq_len: int = 1024,
     ):
         super().__init__()
-        assert r_cond_dim == 0, f"r_cond_dim must be 0 (not supported), but got {r_cond_dim}"
         self.n_heads = n_heads
         self.n_layers = n_layers
         self.n_codebooks = n_codebooks
@@ -56,6 +56,7 @@ class VampNet(at.ml.BaseModel):
         self.vocab_size = vocab_size
         self.latent_dim = latent_dim
         self.max_seq_len = max_seq_len
+        self.cross_attend = cross_attend
 
         # self.chroma_dim = chroma_dim
 
@@ -77,7 +78,8 @@ class VampNet(at.ml.BaseModel):
                 attn_flash=True,
                 rotary_pos_emb=True,
                 ff_glu=True, 
-                use_rmsnorm=True
+                use_rmsnorm=True, 
+                cross_attend=cross_attend
             ),
             emb_dropout=dropout,
         )
@@ -94,24 +96,18 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-        # if self.chroma_dim > 0:
-        #     self.chroma_embedding = nn.Embedding(self.chroma_dim, self.embedding_dim)
-
-    def forward(self, x, chroma=None, chroma_dropout: float = 0.2):
+    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None):
         x = self.embedding(x)
-        # if self.chroma_dim > 0:
-        #     assert chroma is not None
-        #     chroma = self.chroma_embedding(chroma)
 
-        #     # apply a chroma mask on the batch dimension
-        #     chroma_mask = torch.rand(chroma.shape[0]) > chroma_dropout
-        #     chroma_mask = chroma_mask.unsqueeze(-1).unsqueeze(-1).to(chroma.device)
-        #     chroma = chroma * chroma_mask
-
-        #     x = x + chroma
+        pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
 
         x = rearrange(x, "b d n -> b n d")
-        out = self.lm(x, return_mems=False)
+        out = self.lm(
+            x, return_mems=False, 
+            mask=pad_mask, 
+            context=cross_x, 
+            context_mask=cross_pad_mask
+        )
         out = rearrange(out, "b n d -> b d n")
 
         out = self.classifier(out)
