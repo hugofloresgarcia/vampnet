@@ -43,9 +43,9 @@ class DACDataset(torch.utils.data.Dataset):
         return self.length
     
     def __getitem__(self, idx):
-        if (time.time() - self.last_refresh_time) > self.refresh_time:
-            print("Refreshing dataset")
-            self._refresh()
+        # if (time.time() - self.last_refresh_time) > self.refresh_time:
+        #     print("Refreshing dataset")
+        #     self._refresh()
 
         # grab a random file
         file = self.files[idx % len(self.files)]

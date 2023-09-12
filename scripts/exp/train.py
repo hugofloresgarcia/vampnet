@@ -19,7 +19,10 @@ from dac.utils import load_model as load_dac
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
+
 from torch.utils.tensorboard import SummaryWriter
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 import vampnet
 from vampnet import mask as pmask
@@ -50,8 +53,8 @@ torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
 
 # Install to make things look nice
 warnings.filterwarnings("ignore", category=UserWarning)
-pretty.install()
-install()
+# pretty.install()
+# install()
 
 # optim
 Accelerator = argbind.bind(at.ml.Accelerator, without_prefix=True)
@@ -708,7 +711,7 @@ def train(
         argbind.dump_args(args, f"{save_path}/args.yml")
 
     tracker = Tracker(
-        writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
+        writer=writer, rank=accel.local_rank
     )
 
     # load the codec model
@@ -755,36 +758,58 @@ def train(
     save_samples = when(lambda: accel.local_rank == 0)(save_samples)
     checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
 
+    def trace_handler(p):
+        output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=10)
+        tracker.print(output)
+        p.export_chrome_trace(str(Path(save_path) / (f"trace_{p.step_num}.json")))
+
     print("starting training loop.")
     with tracker.live:
-        for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
-            train_loop(state, batch, accel)
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                wait=10,
+                warmup=1,
+                active=10, 
+                repeat=2,
+            ),
+            on_trace_ready=trace_handler
+        ) as prof:
+            for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
+                with record_function("train"):
+                    train_loop(state, batch, accel)
 
-            last_iter = (
-                tracker.step == num_iters - 1 if num_iters is not None else False
-            )
+                last_iter = (
+                    tracker.step == num_iters - 1 if num_iters is not None else False
+                )
 
-            # if tracker.step == 0: 
-            #     continue
+                if tracker.step == 1: 
+                    continue
 
-            if tracker.step % sample_freq == 0 or last_iter:
-                print(f"Saving samples at iteration {tracker.step}")
-                save_samples(state, val_idx, writer)
+                if tracker.step % sample_freq == 1 or last_iter:
+                    tracker.print(f"Saving samples at iteration {tracker.step}")
+                    with record_function("save_samples"):
+                        save_samples(state, val_idx, writer)
 
-            if tracker.step % val_freq == 0 or last_iter:
-                print(f"Validating at iteration {tracker.step}")
-                validate(state, val_dataloader, accel)
-                checkpoint(
-                    state=state, 
-                    save_iters=save_iters, 
-                    save_path=save_path, 
-                    fine_tune=fine_tune)
+                if tracker.step % val_freq == 1 or last_iter:
+                    tracker.print(f"Validating at iteration {tracker.step}")
+                    with record_function("validate"):
+                        validate(state, val_dataloader, accel)
 
-                # Reset validation progress bar, print summary since last validation.
-                tracker.done("val", f"Iteration {tracker.step}")
+                    checkpoint(
+                        state=state, 
+                        save_iters=save_iters, 
+                        save_path=save_path, 
+                        fine_tune=fine_tune)
 
-            if last_iter:
-                break
+                    # Reset validation progress bar, print summary since last validation.
+                    tracker.done("val", f"Iteration {tracker.step}")
+
+                if last_iter:
+                    break
+
+                prof.step()
 
 
 if __name__ == "__main__":
