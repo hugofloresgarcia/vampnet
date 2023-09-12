@@ -122,10 +122,9 @@ class VampNet(at.ml.BaseModel):
         """
         assert z.ndim == 3
 
+        _z = codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
         signal = at.AudioSignal(
-            codec.decode(
-                codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
-            )["audio"],
+            codec.decode(_z), 
             codec.sample_rate,
         )
 

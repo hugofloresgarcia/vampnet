@@ -250,10 +250,9 @@ def build_context_mask(batch, state: State):
 
     codec_hop = state.codec.hop_length
     codec_sr = state.codec.sample_rate
-    tgt_duration = state.train_data.duration
 
     # compute the number of frames in the target duration
-    tgt_frames = math.ceil(tgt_duration * codec_sr / codec_hop)
+    tgt_frames = accel.unwrap(state.model).max_seq_len
 
     # compute the number of frames in the padding duratio
     padding_frames = (padding_s * codec_sr / codec_hop).long()
@@ -765,13 +764,15 @@ def train(
                 tracker.step == num_iters - 1 if num_iters is not None else False
             )
 
-            if tracker.step == 0: 
-                continue
+            # if tracker.step == 0: 
+            #     continue
 
             if tracker.step % sample_freq == 0 or last_iter:
+                print(f"Saving samples at iteration {tracker.step}")
                 save_samples(state, val_idx, writer)
 
             if tracker.step % val_freq == 0 or last_iter:
+                print(f"Validating at iteration {tracker.step}")
                 validate(state, val_dataloader, accel)
                 checkpoint(
                     state=state, 

@@ -4,12 +4,8 @@ $include:
 
 train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:
-  - /media/CHONK/hugo/mtt-train
-  - /media/CHONK/hugo/fma/fma_full-train
-  - /media/CHONK/hugo/mtg-jamendo-train
-
+  - ./data/fma_full/train
 val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
-  - /media/CHONK/hugo/mtt-test
-  - /media/CHONK/hugo/fma/fma_full-test
-  - /media/CHONK/hugo/mtg-jamendo-test
+  - ./data/fma_full/val
+
