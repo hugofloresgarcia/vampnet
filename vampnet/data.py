@@ -61,7 +61,7 @@ class DACDataset(torch.utils.data.Dataset):
         codes = codes[batch_idx, :, :].unsqueeze(0)
 
         # get a seq_len chunk out of it
-        if nt < self.seq_len:
+        if nt <= self.seq_len:
             start_idx = 0
         else:
             start_idx = torch.randint(0, nt - self.seq_len, (1,)).item()
