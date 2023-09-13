@@ -19,12 +19,12 @@ amp: false
 AdamW.lr: 0.001
 
 NoamScheduler.factor: 2.0
-NoamScheduler.warmup: 10000
+NoamScheduler.warmup: 3000
 
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
-VampNet.embedding_dim: 1280
+VampNet.embedding_dim: 768
 VampNet.n_layers: 10
 VampNet.n_heads: 10
 VampNet.dropout: 0.05
