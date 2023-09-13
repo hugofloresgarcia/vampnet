@@ -210,7 +210,7 @@ def _metrics(z_hat, r, target, flat_mask, output):
         r_masked_target = masked_target[r_idx]
         r_z_hat = z_hat[r_idx]
 
-        for topk in (1, 25):
+        for topk in (25,):
             s, e = r_range
             tag = f"accuracy-{s}-{e}/top{topk}"
 
@@ -327,18 +327,21 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
             z[:, vn.n_conditioning_codebooks :, :],
         )
 
+        # ctx mask is 1 where there is real data, 0 where there is padding
+        # mask is 1 where there is generated data, 0 where there is real data
+        # we want the loss mask to be 1 where we infer and 0 where we condition
+        # loss mask = ctx_mask & mask
         ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
         loss_mask = codebook_flatten(
-            torch.logical_or(
-                ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
-                ctx_mask == 0,
+            torch.logical_and(
+                mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                ctx_mask,
             )
         )
 
         # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
+        t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
         output["loss"] = state.criterion(z_hat, t_masked)
-
         _metrics(
             r=r,
             z_hat=z_hat,
@@ -497,12 +500,12 @@ def save_imputation(state, z, val_idx, writer):
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
-    imputed_noisy = vn.to_signal(z_mask, state.codec)
-    imputed_true = vn.to_signal(z, state.codec)
+    inpainted_prompt = vn.to_signal(z_mask, state.codec)
+    inpainted_gnd_truth = vn.to_signal(z, state.codec)
 
-    imputed = []
+    inpainted = []
     for i in range(len(z)):
-        imputed.append(
+        inpainted.append(
             vn.generate(
                 codec=state.codec,
                 time_steps=z.shape[-1],
@@ -510,23 +513,23 @@ def save_imputation(state, z, val_idx, writer):
                 mask=mask[i][None, ...],
             )   
         )   
-    imputed = AudioSignal.batch(imputed)
+    inpainted = AudioSignal.batch(inpainted)
 
     for i in range(len(val_idx)):
-        imputed_noisy[i].cpu().write_audio_to_tb(
-            f"imputed_noisy/{i}",
+        inpainted_prompt[i].cpu().write_audio_to_tb(
+            f"inpainted_prompt/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
         )
-        imputed[i].cpu().write_audio_to_tb(
-            f"imputed/{i}",
+        inpainted[i].cpu().write_audio_to_tb(
+            f"inpainted/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
         )
-        imputed_true[i].cpu().write_audio_to_tb(
-            f"imputed_true/{i}",
+        inpainted_gnd_truth[i].cpu().write_audio_to_tb(
+            f"inpainted_gnd_truth/{i}",
             writer,
             step=state.tracker.step,
             plot_fn=None,
@@ -560,10 +563,11 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
     z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
+    z_pred = z_pred.masked_fill(~mask.bool(), z_mask)
 
     generated = vn.to_signal(z_pred, state.codec)
     reconstructed = vn.to_signal(z, state.codec)
-    masked = vn.to_signal(z_mask.squeeze(1), state.codec)
+    masked = vn.to_signal(z_mask, state.codec, silence_mask=False)
 
     for i in range(generated.batch_size):
         audio_dict = {
@@ -728,7 +732,7 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.train_data.collate,
-        prefetch_factor=8,
+        prefetch_factor=8 if num_workers > 0 else None,
     )
     val_dataloader = accel.prepare_dataloader(
         state.val_data,
@@ -737,7 +741,7 @@ def train(
         batch_size=val_batch_size,
         collate_fn=state.val_data.collate,
         persistent_workers=num_workers > 0,
-        prefetch_factor=8,
+        prefetch_factor=8 if num_workers > 0 else None,
     )
     print("initialized dataloader.")
 
@@ -784,15 +788,15 @@ def train(
                     tracker.step == num_iters - 1 if num_iters is not None else False
                 )
 
-                if tracker.step == 1: 
+                if tracker.step == 0:
                     continue
 
-                if tracker.step % sample_freq == 1 or last_iter:
+                if tracker.step % sample_freq == 0 or last_iter:
                     tracker.print(f"Saving samples at iteration {tracker.step}")
                     with record_function("save_samples"):
                         save_samples(state, val_idx, writer)
 
-                if tracker.step % val_freq == 1 or last_iter:
+                if tracker.step % val_freq == 0 or last_iter:
                     tracker.print(f"Validating at iteration {tracker.step}")
                     with record_function("validate"):
                         validate(state, val_dataloader, accel)
