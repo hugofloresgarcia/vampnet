@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from audiotools import AudioSignal
@@ -28,16 +28,21 @@ def empty_mask(x: torch.Tensor):
 def apply_mask(
         x: torch.Tensor, 
         mask: torch.Tensor, 
-        mask_token: int
+        mask_fill: Union[int, torch.Tensor]
     ):
     assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq), but got {mask.ndim}"
     assert mask.shape == x.shape, f"mask must be same shape as x, but got {mask.shape} and {x.shape}" 
-    assert mask.dtype == torch.long, "mask must be long dtype, but got {mask.dtype}"
+    assert mask.dtype == torch.long, f"mask must be long dtype, but got {mask.dtype}"
     assert ~torch.any(mask > 1), "mask must be binary"
     assert ~torch.any(mask < 0), "mask must be binary"
 
-    fill_x = torch.full_like(x, mask_token)
-    x = x * (1 - mask) + fill_x * mask
+    if not isinstance(mask_fill, torch.Tensor):
+        mask_fill = scalar_to_batch_tensor(mask_fill, 1).to(x.device).long()
+    elif mask_fill.shape != mask.shape:
+        mask_fill = torch.full_like(x, mask_fill)
+
+    
+    x = x * (1 - mask) + mask_fill * mask
 
     return x, mask
 
