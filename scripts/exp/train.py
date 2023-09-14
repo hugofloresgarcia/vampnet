@@ -500,7 +500,7 @@ def save_imputation(state, z, val_idx, writer):
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
-    inpainted_prompt = vn.to_signal(z_mask, state.codec)
+    inpainted_prompt = vn.to_signal(z_mask, state.codec, silence_mask=False)
     inpainted_gnd_truth = vn.to_signal(z, state.codec)
 
     inpainted = []
@@ -563,7 +563,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
     z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
-    z_pred = z_pred.masked_fill(~mask.bool(), z_mask)
+    z_pred, _ = pmask.apply_mask(z_pred, (~mask.bool()).long(), z_mask)
 
     generated = vn.to_signal(z_pred, state.codec)
     reconstructed = vn.to_signal(z, state.codec)
