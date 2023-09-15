@@ -1,11 +1,7 @@
 """
 TODO: train a linear probe
 usage:
-    (python gtzan_embeddings.py  
-        --path_to_gtzan /path/to/gtzan/genres_original 
-        --cache_dir /path/to/cache 
-        --output_dir /path/to/output
-    )
+   python gtzan_embeddings.py --args.load conf/interface.yml --Interface.device cuda --path_to_gtzan /path/to/gtzan/genres_original  --output_dir /path/to/output
 """
 from pathlib import Path
 from typing import List
