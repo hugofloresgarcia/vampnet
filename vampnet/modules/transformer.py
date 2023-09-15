@@ -410,7 +410,9 @@ class TransformerStack(nn.Module):
     def subsequent_mask(self, size):
         return torch.ones(1, size, size).tril().bool()
 
-    def forward(self, x, x_mask, cond=None, src=None, src_mask=None):
+    def forward(self, x, x_mask, cond=None, src=None, src_mask=None,
+                return_activations: bool = False
+        ):
         """Computes a full transformer stack
         Parameters
         ----------
@@ -437,6 +439,8 @@ class TransformerStack(nn.Module):
         encoder_decoder_position_bias = None
 
         # Compute transformer layers
+        if return_activations:
+            activations = []
         for layer in self.layers:
             x, position_bias, encoder_decoder_position_bias = layer(
                 x=x,
@@ -447,8 +451,15 @@ class TransformerStack(nn.Module):
                 position_bias=position_bias,
                 encoder_decoder_position_bias=encoder_decoder_position_bias,
             )
+            if return_activations:
+                activations.append(x.detach())
 
-        return self.norm(x) if self.norm is not None else x
+    
+        out = self.norm(x) if self.norm is not None else x
+        if return_activations:
+            return out, torch.stack(activations)
+        else:
+            return out
 
 
 class VampNet(at.ml.BaseModel):
@@ -514,19 +525,25 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x):
+    def forward(self, x, return_activations: bool = False):
         x = self.embedding(x)
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
 
         x = rearrange(x, "b d n -> b n d")
-        out = self.transformer(x=x, x_mask=x_mask)
+        out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
+        if return_activations:
+            out, activations = out
+
         out = rearrange(out, "b n d -> b d n")
 
         out = self.classifier(out, None) # no cond here!
 
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
 
-        return out
+        if return_activations:
+            return out, activations
+        else:
+            return out
     
     def r_embed(self, r, max_positions=10000):
         if self.r_cond_dim > 0:
@@ -588,7 +605,7 @@ class VampNet(at.ml.BaseModel):
         top_p=None,
         return_signal=True,
         seed: int = None, 
-        sample_cutoff: float = 0.5,
+        sample_cutoff: float = 1.0,
     ):
         if seed is not None:
             at.util.seed(seed)

@@ -182,3 +182,7 @@ models.zip
 .git-old
 conf/generated/*
 runs*/
+
+
+gtzan.zip
+.gtzan_emb_cache
