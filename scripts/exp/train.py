@@ -101,19 +101,23 @@ def apply_transform(transform_fn, batch):
 
 
 def build_datasets(
-        args, sample_rate: int, dac_files_path: str, 
+        args, sample_rate: int, dac_paths: List[str], 
         seq_len: int, hop_length: int
     ):
     duration = (seq_len * hop_length) / sample_rate
 
-    if dac_files_path is not None:
-        print(f"Loading DAC files from {dac_files_path}")
+    if dac_paths is not None:
+        print(f"Loading DAC files from {dac_paths}")
         print(f"WARNING: This means that all other information passed to AudioDataset will be ignored")
-        base_path = Path(dac_files_path)
+
         train_data = DACDataset(
-            base_path / "train", 
+            [Path(base_path) / "train" for base_path in dac_paths],
             seq_len, 
-            seed=args["seed"]
+        )
+
+        val_data = DACDataset(
+            [Path(base_path) / "val" for base_path in dac_paths],
+            seq_len, 
         )
     else:
         print(f"FIXING AudioDataset duration to {duration}")
@@ -125,20 +129,23 @@ def build_datasets(
                 transform=build_transform()
             )
 
-    with argbind.scope(args, "val"):
-        val_data = AudioDataset(
-            AudioLoader(), 
-            sample_rate, 
-            duration=duration, 
-            transform=build_transform()
-        )
+        with argbind.scope(args, "val"):
+            val_data = AudioDataset(
+                AudioLoader(), 
+                sample_rate, 
+                duration=duration, 
+                transform=build_transform()
+            )
 
+    with argbind.scope(args, "sample"):
+        print(f"creating sample dataset with duration {duration}")
         sample_data = AudioDataset(
             AudioLoader(),
             sample_rate,
             duration=duration,
             transform=build_transform(),
         )
+        print(f"done")
 
     return train_data, val_data, sample_data
 
@@ -600,7 +607,7 @@ def load(
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
     dac_path: str = "./models/dac/weights.pth",
-    dac_cache: str = None,
+    dac_cache: List[str] = None,
     compile: bool = False, 
 ) -> State:
     codec = load_dac(load_path=dac_path)
@@ -780,40 +787,44 @@ def train(
             ),
             on_trace_ready=trace_handler
         ) as prof:
-            for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
-                with record_function("train"):
-                    train_loop(state, batch, accel)
+            done = False
+            while not done:
+                for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
+                    with record_function("train"):
+                        train_loop(state, batch, accel)
 
-                last_iter = (
-                    tracker.step == num_iters - 1 if num_iters is not None else False
-                )
+                    last_iter = (
+                        tracker.step == num_iters - 1 if num_iters is not None else False
+                    )
 
-                if tracker.step == 0:
-                    continue
+                    if tracker.step == 0:
+                        continue
 
-                if tracker.step % sample_freq == 0 or last_iter:
-                    tracker.print(f"Saving samples at iteration {tracker.step}")
-                    with record_function("save_samples"):
-                        save_samples(state, val_idx, writer)
+                    if tracker.step % sample_freq == 0 or last_iter:
+                        tracker.print(f"Saving samples at iteration {tracker.step}")
+                        with record_function("save_samples"):
+                            save_samples(state, val_idx, writer)
 
-                if tracker.step % val_freq == 0 or last_iter:
-                    tracker.print(f"Validating at iteration {tracker.step}")
-                    with record_function("validate"):
-                        validate(state, val_dataloader, accel)
+                    if tracker.step % val_freq == 0 or last_iter:
+                        tracker.print(f"Validating at iteration {tracker.step}")
+                        with record_function("validate"):
+                            validate(state, val_dataloader, accel)
 
-                    checkpoint(
-                        state=state, 
-                        save_iters=save_iters, 
-                        save_path=save_path, 
-                        fine_tune=fine_tune)
+                        checkpoint(
+                            state=state, 
+                            save_iters=save_iters, 
+                            save_path=save_path, 
+                            fine_tune=fine_tune)
 
-                    # Reset validation progress bar, print summary since last validation.
-                    tracker.done("val", f"Iteration {tracker.step}")
+                        # Reset validation progress bar, print summary since last validation.
+                        tracker.done("val", f"Iteration {tracker.step}")
 
-                if last_iter:
-                    break
+                    if last_iter:
+                        print(f"Finished training at iteration {tracker.step}")
+                        done = True
+                        break
 
-                prof.step()
+                    prof.step()
 
 
 if __name__ == "__main__":

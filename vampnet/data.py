@@ -1,3 +1,4 @@
+from typing import List
 from pathlib import Path
 import torch
 import random
@@ -10,43 +11,22 @@ from dac.utils import load_model as load_dac
 class DACDataset(torch.utils.data.Dataset):
 
     def __init__(self, 
-        path: str, 
+        paths: List[str], 
         seq_len: int = 1024, 
-        length: int = None,
-        seed: int = 42,
     ):
-        self.path = Path(path)
+        self.paths = [Path(p) for p in paths]
         self.seq_len = seq_len
 
-        self.files = []
-        self.seen_files = set()  # Maintain a set of seen files
-        self._refresh()
-        self.length = int(1e12) if length is None else length
-
-        self.refresh_time = 60*60  # Refresh every 1hr
-
-    def _refresh(self,):
-        all_files = set(self.path.glob("**/*.dac"))
-        new_files = list(all_files - self.seen_files)  # Find the new files
-        print(f"Found {len(all_files)} total files")
-        print(f"Found {len(new_files)} new files")
-
-        assert len(all_files) > 0, f"no .dac files found in {self.path}"
-        random.shuffle(new_files)  # Shuffle only the new files
-
-        self.files.extend(new_files)  # Extend the self.files list with new files
-        self.seen_files.update(new_files)  # Update the set of seen files
-
-        self.last_refresh_time = time.time()
+        self.files = list()
+        for path in self.paths:
+            self.files.extend(list(path.glob("**/*.dac")))
+        
+        print(f"Found {len(self.files)} files in {paths}.")
 
     def __len__(self):
-        return self.length
+        return len(self.files)
     
     def __getitem__(self, idx):
-        # if (time.time() - self.last_refresh_time) > self.refresh_time:
-        #     print("Refreshing dataset")
-        #     self._refresh()
-
         # grab a random file
         file = self.files[idx % len(self.files)]
 

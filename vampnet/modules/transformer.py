@@ -154,7 +154,7 @@ class VampNet(at.ml.BaseModel):
         top_p=None,
         return_signal=True,
         seed: int = None, 
-        sample_cutoff: float = 0.5,
+        sample_cutoff: float = 1.0,
     ):
         if seed is not None:
             at.util.seed(seed)

@@ -9,3 +9,7 @@ val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
   - ./data/fma_full/val
 
+sample/AudioDataset.n_examples: 2000
+sample/AudioLoader.sources:
+  - ./data/fma_full/val
+

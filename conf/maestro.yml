@@ -10,3 +10,8 @@ train/AudioLoader.sources:
 val/AudioDataset.n_examples: 2000
 val/AudioLoader.sources:
   - /media/CHONK/hugo/maestro-v3.0.0-split/validation
+# val/AudioDataset.n_examples: 2000
+
+sample/AudioDataset.n_examples: 2000
+sample/AudioLoader.sources:
+  - /media/CHONK/hugo/maestro-v3.0.0-split/validation
