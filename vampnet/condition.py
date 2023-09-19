@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from torch import Tensor
 
 import tensorflow as tf
+
+
 import tensorflow_hub as hub
 import numpy as np
 
@@ -56,11 +58,6 @@ class WaveformConditioner:
 
     def embed(self, sig: AudioSignal) -> Tensor:
         """Gets as input a wav and returns a dense vector of conditions."""
-        raise NotImplementedError()
-
-    @property
-    def hop(self):
-        """Returns the downsampling factor of the embedding model."""
         raise NotImplementedError()
 
 
@@ -119,8 +116,8 @@ class ChromaExtractor(nn.Module):
 class ChromaStemConditioner(WaveformConditioner):
 
     def __init__(self, 
-            sample_rate: int, 
-            n_chroma: int, 
+            sample_rate: int = 44100, 
+            n_chroma: int = 36, 
             radix2_exp: int=12,
             hop: int=512,
             device: str = "cuda",
@@ -211,13 +208,6 @@ class YamnetConditioner(WaveformConditioner):
 
         self.confidence_threshold = confidence_threshold
 
-        print(f"found {len(self.class_names)} classes")
-
-
-    @property
-    def _hop(self,):
-        return self.chunk_size
-    
     @property
     def class_names(self):
         return self._class_names

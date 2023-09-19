@@ -60,14 +60,14 @@ class Interface(torch.nn.Module):
         coarse_lora_ckpt: str = None,
         coarse2fine_ckpt: str = None,
         coarse2fine_lora_ckpt: str = None,
-        dac_version: str = DAC_VERSION,
+        codec_ckpt: str = None,
         wavebeat_ckpt: str = None,
         device: str = "cpu",
-        coarse_chunk_size_s: int = 10,
+        coarse_chunk_size_s: int = 10, # TODO: don't need this anymore, vampnet has max seq len
         coarse2fine_chunk_size_s: int = 3,
     ):
         super().__init__()
-        self.codec: DAC = load_dac(dac_version)
+        self.codec: DAC = DAC.load(codec_ckpt)
         self.codec.eval()
         self.codec.to(device)
 
