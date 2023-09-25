@@ -24,35 +24,6 @@ def signal_concat(
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
 
-def _load_model(
-    ckpt: str,
-    lora_ckpt: str = None,
-    device: str = "cpu",
-    chunk_size_s: int = 10,
-):
-    # we need to set strict to False if the model has lora weights to add later
-    model = VampNet.load(location=Path(ckpt), map_location="cpu", strict=False)
-
-    # load lora weights if needed
-    if lora_ckpt is not None:
-        if not Path(lora_ckpt).exists():
-            should_cont = input(
-                f"lora checkpoint {lora_ckpt} does not exist. continue? (y/n) "
-            )
-            if should_cont != "y":
-                raise Exception("aborting")
-        else:
-            model.load_state_dict(
-                torch.load(lora_ckpt, map_location="cpu"), strict=False
-            )
-
-    model.to(device)
-    model.eval()
-    model.chunk_size_s = chunk_size_s
-    return model
-
-DAC_VERSION = dac.__model_version__
-
 class Interface(torch.nn.Module):
     def __init__(
         self,
@@ -60,32 +31,28 @@ class Interface(torch.nn.Module):
         coarse_lora_ckpt: str = None,
         coarse2fine_ckpt: str = None,
         coarse2fine_lora_ckpt: str = None,
-        codec_ckpt: str = None,
+        dac_path: str = None,
         wavebeat_ckpt: str = None,
         device: str = "cpu",
-        coarse_chunk_size_s: int = 10, # TODO: don't need this anymore, vampnet has max seq len
-        coarse2fine_chunk_size_s: int = 3,
     ):
         super().__init__()
-        self.codec: DAC = DAC.load(codec_ckpt)
+        self.codec: DAC = load_dac(load_path=dac_path)
         self.codec.eval()
         self.codec.to(device)
 
         assert coarse_ckpt is not None, "must provide a coarse checkpoint"
-        self.coarse = _load_model(
+        self.coarse = self._load_model(
             ckpt=coarse_ckpt,
             lora_ckpt=coarse_lora_ckpt,
             device=device,
-            chunk_size_s=coarse_chunk_size_s,
         )
 
         # check if we have a coarse2fine ckpt
         if coarse2fine_ckpt is not None:
-            self.c2f = _load_model(
+            self.c2f = self._load_model(
                 ckpt=coarse2fine_ckpt,
                 lora_ckpt=coarse2fine_lora_ckpt,
                 device=device,
-                chunk_size_s=coarse2fine_chunk_size_s,
             )
         else:
             self.c2f = None
@@ -99,6 +66,33 @@ class Interface(torch.nn.Module):
 
         self.device = device
 
+    def _load_model(
+        self, 
+        ckpt: str,
+        lora_ckpt: str = None,
+        device: str = "cpu",
+    ):
+        # we need to set strict to False if the model has lora weights to add later
+        model = VampNet.load(location=Path(ckpt), map_location="cpu", strict=False)
+
+        # load lora weights if needed
+        if lora_ckpt is not None:
+            if not Path(lora_ckpt).exists():
+                should_cont = input(
+                    f"lora checkpoint {lora_ckpt} does not exist. continue? (y/n) "
+                )
+                if should_cont != "y":
+                    raise Exception("aborting")
+            else:
+                model.load_state_dict(
+                    torch.load(lora_ckpt, map_location="cpu"), strict=False
+                )
+
+        model.to(device)
+        model.eval()
+        model.chunk_size_s = self.t2s(model.max_seq_len)
+        return model
+
     def lora_load(
         self,
         coarse_ckpt: str = None,
@@ -107,16 +101,14 @@ class Interface(torch.nn.Module):
     ):
         if full_ckpts:
             if coarse_ckpt is not None:
-                self.coarse = _load_model(
+                self.coarse = self._load_model(
                     ckpt=coarse_ckpt,
                     device=self.device,
-                    chunk_size_s=self.coarse.chunk_size_s,
                 )
             if c2f_ckpt is not None:
-                self.c2f = _load_model(
+                self.c2f = self._load_model(
                     ckpt=c2f_ckpt,
                     device=self.device,
-                    chunk_size_s=self.c2f.chunk_size_s,
                 )
         else:
             if coarse_ckpt is not None:

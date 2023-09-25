@@ -20,7 +20,7 @@ Interface = argbind.bind(Interface)
 conf = argbind.parse_args()
 
 
-from torch_pitch_shift import pitch_shift, get_fast_shifts
+# from torch_pitch_shift import pitch_shift, get_fast_shifts
 def shift_pitch(signal, interval: int):
     signal.samples = pitch_shift(
         signal.samples, 
@@ -157,7 +157,7 @@ def _vamp(data, return_mask=False):
         sample_cutoff=data[sample_cutoff],
     )
 
-    if use_coarse2fine: 
+    if use_coarse2fine and interface.c2f is not None: 
         zv = interface.coarse_to_fine(
             zv, 
             mask_temperature=data[masktemp]*10, 
@@ -181,15 +181,9 @@ def _vamp(data, return_mask=False):
         return sig.path_to_file
 
 
-def generate(data):
-    audio = at.AudioSignal.zeros(interface.coarse.chunk_size_s, interface.codec.sample_rate)
-    return _vamp(data, return_mask=True, audio=audio)
 
 def vamp(data):
-    if data[unconditional_gen]:
-        return generate(data)
-    else:
-        return _vamp(data, return_mask=True)
+    return _vamp(data, return_mask=True)
 
 
 def api_vamp(data):
@@ -517,9 +511,9 @@ with gr.Blocks() as demo:
                 value=36,
             )
 
-                dropout = gr.Slider(
-                    label="mask dropout", minimum=0.0, maximum=1.0, step=0.01, value=0.0
-                )
+            dropout = gr.Slider(
+                label="mask dropout", minimum=0.0, maximum=1.0, step=0.01, value=0.0
+            )
 
             seed = gr.Number(
                 label="seed (0 for random)",
