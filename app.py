@@ -13,6 +13,8 @@ import gradio as gr
 from vampnet.interface import Interface
 from vampnet import mask as pmask
 
+from pyharp import ModelCard, build_endpoint
+
 Interface = argbind.bind(Interface)
 # AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
@@ -40,16 +42,6 @@ def load_interface():
 
 interface = load_interface()
 
-
-
-
-# dataset = at.data.datasets.AudioDataset(
-#     loader,
-#     sample_rate=interface.codec.sample_rate,
-#     duration=interface.coarse.chunk_size_s,
-#     n_examples=5000,
-#     without_replacement=True,
-# )
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -236,6 +228,46 @@ def save_vamp(data):
     return f"saved! your save code is {out_dir.stem}", zip_path
 
 
+def harp_vamp(_input_audio, _beat_mask_width, _sampletemp):
+
+    out_dir = OUT_DIR / str(uuid.uuid4())
+    out_dir.mkdir()
+    sig = at.AudioSignal(_input_audio)
+    sig = interface.preprocess(sig)
+
+    z = interface.encode(sig)
+
+    # build the mask
+    mask = pmask.linear_random(z, 1.0)
+    if _beat_mask_width > 0:
+        beat_mask = interface.make_beat_mask(
+            sig,
+            after_beat_s=(_beat_mask_width/1000), 
+        )
+        mask = pmask.mask_and(mask, beat_mask)
+
+    # save the mask as a txt file
+    zv, mask_z = interface.coarse_vamp(
+        z, 
+        mask=mask,
+        sampling_temperature=_sampletemp,
+        return_mask=True, 
+        gen_fn=interface.coarse.generate,
+    )
+
+
+    zv = interface.coarse_to_fine(
+        zv, 
+        sampling_temperature=_sampletemp,
+        mask=mask,
+    )
+
+    sig = interface.to_signal(zv).cpu()
+    print("done")
+
+    sig.write(out_dir / "output.wav")
+
+    return sig.path_to_file
 
 with gr.Blocks() as demo:
 
@@ -372,7 +404,7 @@ with gr.Blocks() as demo:
                 )
 
                 beat_mask_width = gr.Slider(
-                    label="beat mask width (in milliseconds)",
+                    label="beat prompt (ms)",
                     minimum=0,
                     maximum=200,
                     value=0,
@@ -612,6 +644,26 @@ with gr.Blocks() as demo:
         fn=save_vamp,
         inputs=_inputs | {notes_text, output_audio},
         outputs=[thank_you, download_file]
+    )
+
+    # harp stuff
+    harp_inputs = [
+        input_audio, 
+        beat_mask_width,
+        sampletemp,
+    ]
+    
+    build_endpoint(
+        inputs=harp_inputs,  
+        output=output_audio, 
+        process_fn=harp_vamp,
+        card=ModelCard(
+            name="vampnet", 
+            description="Generate variations on music input, based on small prompts around the beat.", 
+            author="Hugo Flores García", 
+            tags=["music", "generative"]
+        ), 
+        visible=False
     )
 
 demo.launch(share=True, enable_queue=True, debug=True)
