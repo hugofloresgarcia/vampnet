@@ -86,7 +86,6 @@ def _vamp(data, return_mask=False):
 
     z = interface.encode(sig)
 
-    ncc = data[n_conditioning_codebooks]
 
     # build the mask
     mask = pmask.linear_random(z, data[rand_mask_intensity])
@@ -112,29 +111,9 @@ def _vamp(data, return_mask=False):
 
     # these should be the last two mask ops
     mask = pmask.dropout(mask, data[dropout])
-    mask = pmask.codebook_unmask(mask, ncc)
+    mask = pmask.codebook_mask(mask, int(data[n_mask_codebooks]))
 
 
-    print(f"dropout {data[dropout]}")
-    print(f"masktemp {data[masktemp]}")
-    print(f"sampletemp {data[sampletemp]}")
-    print(f"top_p {data[top_p]}")
-    print(f"prefix_s {data[prefix_s]}")
-    print(f"suffix_s {data[suffix_s]}")
-    print(f"rand_mask_intensity {data[rand_mask_intensity]}")
-    print(f"num_steps {data[num_steps]}")
-    print(f"periodic_p {data[periodic_p]}")
-    print(f"periodic_w {data[periodic_w]}")
-    print(f"n_conditioning_codebooks {data[n_conditioning_codebooks]}")
-    print(f"use_coarse2fine {data[use_coarse2fine]}")
-    print(f"onset_mask_width {data[onset_mask_width]}")
-    print(f"beat_mask_width {data[beat_mask_width]}")
-    print(f"beat_mask_downbeats {data[beat_mask_downbeats]}")
-    print(f"stretch_factor {data[stretch_factor]}")
-    print(f"seed {data[seed]}")
-    print(f"pitch_shift_amt {data[pitch_shift_amt]}")
-    print(f"sample_cutoff {data[sample_cutoff]}")
-    
     
     _top_p = data[top_p] if data[top_p] > 0 else None
     # save the mask as a txt file
@@ -373,6 +352,10 @@ with gr.Blocks() as demo:
                     value=False
                 )
 
+                n_mask_codebooks = gr.Number(
+                    label="first upper codebook level to mask (4 or 3 is good)",
+                    value=4,
+                )
 
                 with gr.Accordion("extras ", open=False):
                     pitch_shift_amt = gr.Slider(
@@ -572,6 +555,7 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             # lora_choice,
+            n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff
         }

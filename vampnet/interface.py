@@ -152,7 +152,7 @@ class Interface(torch.nn.Module):
         return self
 
     def to_signal(self, z: torch.Tensor):
-        return self.coarse.to_signal(z, self.codec)
+        return self.coarse.to_signal(z, self.codec, silence_mask=False)
 
     def preprocess(self, signal: AudioSignal):
         signal = (

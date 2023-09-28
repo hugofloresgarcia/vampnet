@@ -101,22 +101,26 @@ def apply_transform(transform_fn, batch):
 
 
 def build_datasets(
-        args, sample_rate: int, dac_paths: List[str], 
+        args, sample_rate: int, 
+        train_dac_paths: List[str], 
+        val_dac_paths: List[str], 
         seq_len: int, hop_length: int
     ):
     duration = (seq_len * hop_length) / sample_rate
 
-    if dac_paths is not None:
-        print(f"Loading DAC files from {dac_paths}")
+    if train_dac_paths is not None:
+        assert val_dac_paths is not None
+
+        print(f"Loading DAC files from {train_dac_paths}")
         print(f"WARNING: This means that all other information passed to AudioDataset will be ignored")
 
         train_data = DACDataset(
-            [Path(base_path) / "train" for base_path in dac_paths],
+            [Path(path)  for path in train_dac_paths],
             seq_len, 
         )
 
         val_data = DACDataset(
-            [Path(base_path) / "val" for base_path in dac_paths],
+            [Path(path)  for path in val_dac_paths],
             seq_len, 
         )
     else:
@@ -137,17 +141,17 @@ def build_datasets(
                 transform=build_transform()
             )
 
-    with argbind.scope(args, "sample"):
-        print(f"creating sample dataset with duration {duration}")
-        sample_data = AudioDataset(
-            AudioLoader(),
-            sample_rate,
-            duration=duration,
-            transform=build_transform(),
-        )
-        print(f"done")
+    # with argbind.scope(args, "sample"):
+    #     print(f"creating sample dataset with duration {duration}")
+    #     sample_data = AudioDataset(
+    #         AudioLoader(),
+    #         sample_rate,
+    #         duration=duration,
+    #         transform=build_transform(),
+    #     )
+    #     print(f"done")
 
-    return train_data, val_data, sample_data
+    return train_data, val_data, val_data
 
 
 def rand_float(shape, low, high, rng):
@@ -392,41 +396,42 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     
     output = {}
 
-    n_batch = z.shape[0]
-    r = state.rng.draw(n_batch)[:, 0].to(accel.device)
+    with accel.autocast():
+        n_batch = z.shape[0]
+        r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-    mask = pmask.random(z, r)
-    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        mask = pmask.random(z, r)
+        mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
-    z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
+        z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
+        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
-    target = codebook_flatten(
-        z[:, vn.n_conditioning_codebooks :, :],
-    )
-
-    # repeat the ctx for the number of codebooks
-    ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
-    loss_mask = codebook_flatten(
-        torch.logical_or(
-            ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
-            ctx_mask == 0,
+        target = codebook_flatten(
+            z[:, vn.n_conditioning_codebooks :, :],
         )
-    )
 
-    # replace target with ignore index for masked tokens
-    t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
-    output["loss"] = state.criterion(z_hat, t_masked)
+        # repeat the ctx for the number of codebooks
+        ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
+        loss_mask = codebook_flatten(
+            torch.logical_or(
+                ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                ctx_mask == 0,
+            )
+        )
 
-    _metrics(
-        r=r,
-        z_hat=z_hat,
-        target=target,
-        flat_mask=loss_mask,
-        output=output,
-    )
+        # replace target with ignore index for masked tokens
+        t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
+        output["loss"] = state.criterion(z_hat, t_masked)
+
+        _metrics(
+            r=r,
+            z_hat=z_hat,
+            target=target,
+            flat_mask=loss_mask,
+            output=output,
+        )
 
     return output
 
@@ -549,12 +554,13 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     state.codec.eval()
     vn = accel.unwrap(state.model)
 
-    batch = [state.sample_data[i] for i in val_idx]
-    batch = at.util.prepare_batch(state.sample_data.collate(batch), accel.device)
+    batch = [state.val_data[i] for i in val_idx]
+    batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
 
-    signal = apply_transform(state.sample_data.transform, batch)
+    # signal = apply_transform(state.sample_data.transform, batch)
 
-    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+    # z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
+    z, ctx_mask = preprocess(state, batch, "sample")
     z = z[:, : vn.n_codebooks, :]
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
@@ -578,7 +584,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     for i in range(generated.batch_size):
         audio_dict = {
-            "original": signal[i],
+            # "original": signal[i],
             "masked": masked[i],
             "generated": generated[i],
             "reconstructed": reconstructed[i],
@@ -607,7 +613,8 @@ def load(
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
     dac_path: str = "./models/dac/weights.pth",
-    dac_cache: List[str] = None,
+    train_dac_cache: List[str] = None,
+    val_dac_cache: List[str] = None,
     compile: bool = False, 
 ) -> State:
     codec = load_dac(load_path=dac_path)
@@ -668,7 +675,8 @@ def load(
 
     # load the datasets
     train_data, val_data, sample_data = build_datasets(
-        args, sample_rate, dac_cache, 
+        args, sample_rate, train_dac_paths=train_dac_cache,
+        val_dac_paths=val_dac_cache, 
         seq_len=accel.unwrap(model).max_seq_len,
         hop_length=codec.hop_length
     )
