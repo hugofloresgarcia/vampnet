@@ -484,7 +484,7 @@ if __name__ == "__main__":
         z_hat = model(z_mask_latent)
 
         pred = z_hat.argmax(dim=1)
-        pred = model.embedding.unflatten(pred, n_codebooks=model.n_predict_codebooks)
+        pred = codebook_unflatten(pred, n_c=model.n_predict_codebooks)
 
         print(f"model has {num_params(model)/1e6:<.3f}M parameters")
         print(f"prediction has shape {pred.shape}")

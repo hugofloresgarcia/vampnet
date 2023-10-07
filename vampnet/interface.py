@@ -322,7 +322,7 @@ class Interface(torch.nn.Module):
 
         mask = mask[:, : self.coarse.n_codebooks, :]
 
-        cz_masked, mask = apply_mask(cz, mask, self.coarse.mask_token)
+        cz_masked, mask = apply_mask(cz, mask, self.coarse.special_tokens["MASK"])
         cz_masked = cz_masked[:, : self.coarse.n_codebooks, :]
 
         gen_fn = gen_fn or self.coarse.generate

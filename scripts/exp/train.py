@@ -326,7 +326,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -402,7 +402,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
 
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -510,7 +510,7 @@ def save_imputation(state, z, val_idx, writer):
 
     mask = pmask.inpaint(z, n_prefix, n_suffix)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+    z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
 
     inpainted_prompt = vn.to_signal(z_mask, state.codec, silence_mask=False)
     inpainted_gnd_truth = vn.to_signal(z, state.codec)
@@ -567,7 +567,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     mask = pmask.random(z, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+    z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
