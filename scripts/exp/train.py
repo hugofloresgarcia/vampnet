@@ -645,7 +645,7 @@ def load(
     model = VampNet() if model is None else model
     if compile: 
         model = torch.compile(model)
-    model = accel.prepare_model(model)
+    model = accel.prepare_model(model, find_unused_parameters=True if fine_tune_checkpoint is not None else False)
 
     # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
     assert accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size

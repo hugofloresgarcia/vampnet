@@ -353,8 +353,8 @@ with gr.Blocks() as demo:
                 )
 
                 n_mask_codebooks = gr.Number(
-                    label="first upper codebook level to mask (4 or 3 is good)",
-                    value=4,
+                    label="first upper codebook level to mask",
+                    value=9,
                 )
 
                 with gr.Accordion("extras ", open=False):
