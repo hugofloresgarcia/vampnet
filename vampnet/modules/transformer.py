@@ -46,6 +46,7 @@ class VampNet(at.ml.BaseModel):
         cross_attend: bool = False, 
         # chroma_dim: int = 0,
         max_seq_len: int = 1024,
+        num_memory_tokens: int = 0,
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -66,11 +67,13 @@ class VampNet(at.ml.BaseModel):
             vocab_size=vocab_size,
             emb_dim=embedding_dim,
             special_tokens=["MASK"],
+            memory_tokens=num_memory_tokens,
         )
         self.mask_token = self.embedding.special_idxs["MASK"]
 
         self.lm = ContinuousTransformerWrapper(
             max_seq_len=max_seq_len,
+            num_memory_tokens = num_memory_tokens, # 20 memory tokens
             attn_layers=Encoder(
                 dim=self.embedding_dim,
                 depth=self.n_layers,
@@ -79,7 +82,8 @@ class VampNet(at.ml.BaseModel):
                 rotary_pos_emb=True,
                 ff_glu=True, 
                 use_rmsnorm=True, 
-                cross_attend=cross_attend
+                cross_attend=cross_attend, 
+
             ),
             emb_dropout=dropout,
         )
@@ -143,7 +147,7 @@ class VampNet(at.ml.BaseModel):
         self,
         codec,
         time_steps: int = 300,
-        sampling_steps: int = 36,
+        sampling_steps: int = 72,
         start_tokens: Optional[torch.Tensor] = None,
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,

@@ -61,6 +61,7 @@ class CodebookEmbedding(nn.Module):
         n_codebooks: int,
         emb_dim: int,
         special_tokens: Optional[Tuple[str]] = None,
+        memory_tokens: int = 0,
     ):
         super().__init__()
         self.n_codebooks = n_codebooks
@@ -68,17 +69,24 @@ class CodebookEmbedding(nn.Module):
         self.latent_dim = latent_dim
         self.vocab_size = vocab_size
 
-        if special_tokens is not None:
-            for tkn in special_tokens:
-                self.special = nn.ParameterDict(
-                    {
-                        tkn: nn.Parameter(torch.randn(n_codebooks, self.latent_dim))
-                        for tkn in special_tokens
-                    }
-                )
-                self.special_idxs = {
-                    tkn: i + vocab_size for i, tkn in enumerate(special_tokens)
-                }
+
+        if special_tokens is None:
+            special_tokens = []
+
+        # add memory tokens to special tokens
+        if memory_tokens > 0:
+            special_tokens += [f"<MEMORY_{i}>" for i in range(memory_tokens)]
+        
+
+        self.special = nn.ParameterDict(
+            {
+                tkn: nn.Parameter(torch.randn(n_codebooks, self.latent_dim))
+                for tkn in special_tokens
+            }
+        )
+        self.special_idxs = {
+            tkn: i + vocab_size for i, tkn in enumerate(special_tokens)
+        }
 
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
 
