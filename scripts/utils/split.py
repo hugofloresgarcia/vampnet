@@ -15,12 +15,13 @@ def train_test_val_split(
     folder: str = ".",
     test_size: float = 0.2,
     val_size: float = 0.1,  # New validation size argument
+    pattern: str = "**/*.wav",
     seed: int = 42,
     out_dir: str = ".",
 ):
     print(f"finding audio")
     audio_folder: Path = Path(folder)
-    audio_files = util.find_audio(folder)
+    audio_files = list(audio_folder.glob(pattern))
     print(f"found {len(audio_files)} audio files")
 
     # split according to test_size and val_size

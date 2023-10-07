@@ -1,5 +1,5 @@
 import typing as tp
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 import csv
 
 import torchaudio
@@ -56,7 +56,11 @@ def resample_embeddings(
 
 class WaveformConditioner:
 
-    def embed(self, sig: AudioSignal) -> Tensor:
+    @property
+    def keys(self) -> List[str]:
+        return NotImplementedError()
+
+    def condition(self, sig: AudioSignal) -> Dict[str, Tensor]:
         """Gets as input a wav and returns a dense vector of conditions."""
         raise NotImplementedError()
 
@@ -177,7 +181,11 @@ class ChromaStemConditioner(WaveformConditioner):
         stems = self._get_filtered_wav(wav)
         chroma = self.chroma(stems)
 
-        return chroma
+        return {"chroma": chroma}
+
+    @property
+    def keys(self,):
+        return ["chroma"]
     
 
 # Find the name of the class with the top score when mean-aggregated across frames.
@@ -222,26 +230,25 @@ class YamnetConditioner(WaveformConditioner):
     @torch.inference_mode()
     def condition(self, sig: AudioSignal):
         # have to resample to 16k
-        sig = sig.resample(self.yamnet_sample_rate)
+        sig = sig.resample(self.yamnet_sample_rate).to_mono()
         audio = sig.samples
 
         # Run the model, check the output.
         scores, embeddings, spectrogram = self.model(audio[0][0])
 
         scores = scores.numpy()
+        embeddings = embeddings.numpy()
         # spectrogram = spectrogram.numpy()
         # infered_class = self.class_names[scores.mean(axis=0).argmax()]
 
-        # top_classes = np.argsort(scores.mean(axis=0))[::-1]
-        # print(top_classes)
-
-        # zero out any scores below threshold
-        if self.confidence_threshold is not None:
-            scores[scores < self.confidence_threshold] = 0.0
-
         scores = torch.from_numpy(scores).float()
+        embeddings = torch.from_numpy(embeddings).float()
 
-        return scores
+        return {"scores": scores, "embeddings": embeddings}
+
+    @property
+    def keys(self,):
+        return ["scores", "embeddings"]
 
 
 class ConditionEmbedder(nn.Module):
@@ -267,7 +274,7 @@ from dataclasses import dataclass, fields
 @dataclass
 class ConditionFeatures:
     audio_path: str
-    features: np.ndarray
+    features: Dict[str, np.array]
     metadata: dict
 
     def save(self, path):
@@ -275,11 +282,13 @@ class ConditionFeatures:
         with zipfile.ZipFile(path, 'w') as archive:
             
             # Save numpy array
-            with archive.open('features.npy', 'w') as f:
-                np.save(f, self.features)
+            for key, array in self.features.items():
+                with archive.open(f'{key}.npy', 'w') as f:
+                    np.save(f, array)
 
             # Save non-numpy data as json
             non_numpy_data = {f.name: getattr(self, f.name) for f in fields(self) if f.name != 'features'}
+            non_numpy_data["_keys"] = list(self.features.keys())
             with archive.open('data.json', 'w') as f:
                 f.write(json.dumps(non_numpy_data).encode('utf-8'))
 
@@ -287,16 +296,19 @@ class ConditionFeatures:
     def load(cls, path):
         """Load the Embedding object from a given zip path."""
         with zipfile.ZipFile(path, 'r') as archive:
-            
-            # Load numpy array
-            with archive.open('embedding.npy') as f:
-                embedding = np.load(f)
-
-            # Load non-numpy data from json
+        
+            # load keys
             with archive.open('data.json') as f:
                 data = json.loads(f.read().decode('utf-8'))
+                keys = data.pop("_keys")
+            
+            # Load numpy array
+            features = {}
+            for key in keys:
+                with archive.open(f'{key}.npy') as f:
+                    features[key] = np.load(f)
 
-        return cls(embedding=embedding, **data)
+        return cls(features=features, **data)
 
 # class OnsetConditioner(WaveformConditioner):
 
