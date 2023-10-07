@@ -1,3 +1,3 @@
-Interface.coarse_ckpt: ./models/vampnet.pth
+Interface.coarse_ckpt: ./runs/b64s512/latest/vampnet/weights.pth
 Interface.codec_ckpt: ./models/dac/weights.pth
 # Interface.wavebeat_ckpt: ./models/wavebeat.pth

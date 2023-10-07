@@ -1,0 +1,4 @@
+Interface.coarse_ckpt: "runs/confluyo/machines/latest/vampnet/weights.pth"
+# Interface.coarse_lora_ckpt: "runs/confluyo/machines/10k/vampnet/weights.pth"
+Interface.device: cuda
+Interface.dac_path: models/dac/weights.pth

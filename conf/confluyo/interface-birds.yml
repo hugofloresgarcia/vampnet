@@ -1,0 +1,3 @@
+Interface.coarse_ckpt: "runs/confluyo/birds/latest/vampnet/weights.pth"
+# Interface.coarse_lora_ckpt: 
+Interface.device: cuda

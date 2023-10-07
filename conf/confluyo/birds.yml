@@ -1,0 +1,25 @@
+$include:
+  - ./conf/base.yml
+
+fine_tune: True
+fine_tune_checkpoint: ./runs/b64s512/latest/vampnet/weights.pth
+
+save_path: ./runs/confluyo/birds
+train_dac_cache: [./data/codes/confluyo/birds, ]
+val_dac_cache: [./data/codes/confluyo/birds, ]
+
+VampNet.max_seq_len: 512
+NoamScheduler.warmup: 500
+
+batch_size: 36
+num_workers: 12
+save_iters: [500, 1000, 5000, 10000, 20000, 30000, 40000, 50000, 100000]
+sample_freq: 500
+val_freq: 500
+
+AdamW.lr: 0.0001
+VampNet.max_seq_len: 512
+
+# let's us organize sound classes into folders and choose from those sound classes uniformly
+num_iters: 500000
+
