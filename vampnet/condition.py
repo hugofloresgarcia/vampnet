@@ -251,6 +251,11 @@ class YamnetConditioner(WaveformConditioner):
         return ["scores", "embeddings"]
 
 
+class MFCCConditioner(WaveformConditioner):
+    
+    pass
+
+
 class ConditionEmbedder(nn.Module):
 
     def __init__(self, 

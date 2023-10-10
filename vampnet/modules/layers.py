@@ -90,7 +90,7 @@ class CodebookEmbedding(nn.Module):
 
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
 
-    def from_codes(self, codes: torch.Tensor, codec):
+    def from_codes(self, codes: torch.Tensor, codec=None):
         """
         get a sequence of continuous embeddings from a sequence of discrete codes.
         unlike it's counterpart in the original VQ-VAE, this function adds for any special tokens
@@ -101,15 +101,25 @@ class CodebookEmbedding(nn.Module):
         for i in range(n_codebooks):
             c = codes[:, i, :]
 
-            lookup_table = codec.quantizer.quantizers[i].codebook.weight
-            if hasattr(self, "special"):
+            if torch.any(codes < self.vocab_size):
+                assert codec is not None, f"Codec must be provided for codec tokens"
+                lookup_table = codec.quantizer.quantizers[i].codebook.weight
+                if hasattr(self, "special"):
+                    special_lookup = torch.cat(
+                        [self.special[tkn][i : i + 1] for tkn in self.special], dim=0
+                    )
+                    lookup_table = torch.cat([lookup_table, special_lookup], dim=0)
+
+                l = F.embedding(c, lookup_table).transpose(1, 2)
+                latent.append(l)
+            else:
+                c = c - self.vocab_size
+                assert hasattr(self, "special"), f"Special tokens must be provided"
                 special_lookup = torch.cat(
                     [self.special[tkn][i : i + 1] for tkn in self.special], dim=0
                 )
-                lookup_table = torch.cat([lookup_table, special_lookup], dim=0)
-
-            l = F.embedding(c, lookup_table).transpose(1, 2)
-            latent.append(l)
+                l = F.embedding(c, special_lookup).transpose(1, 2)
+                latent.append(l) 
 
         latent = torch.cat(latent, dim=1)
         return latent

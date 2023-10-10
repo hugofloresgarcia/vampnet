@@ -1,12 +1,12 @@
 $include:
   - conf/base.yml
 
-batch_size: 112
-val_batch_size: 112
+batch_size: 88
+val_batch_size: 88
 num_workers: 18
 
 VampNet.max_seq_len: 512
-VampNet.num_memory_tokens: 20
+VampNet.embedding_dim: 1024
 
 train/AudioDataset.n_examples: 10000000
 train/AudioLoader.sources:
@@ -17,18 +17,18 @@ train/AudioLoader.sources:
 val/AudioDataset.n_examples: 10000
 val/AudioLoader.sources:
   - data/prosound_core_complete/val
-  - data/fma_full/val
+  # - data/fma_full/val
 
 
 sample/AudioDataset.n_examples: 10000
 sample/AudioLoader.sources:
   - data/prosound_core_complete/test
-  - data/fma_full/test
+  # - data/fma_full/test
 
 train_dac_cache:
-- data/codes/fma_full/train
+# - data/codes/fma_full/train
 - data/codes/prosound/train
 
 val_dac_cache:
-- data/codes/fma_full/val
+# - data/codes/fma_full/val
 - data/codes/prosound/val

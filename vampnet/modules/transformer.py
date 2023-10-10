@@ -46,7 +46,7 @@ class VampNet(at.ml.BaseModel):
         cross_attend: bool = False, 
         # chroma_dim: int = 0,
         max_seq_len: int = 1024,
-        num_memory_tokens: int = 0,
+        num_reg_tokens: int = 0,
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -58,22 +58,22 @@ class VampNet(at.ml.BaseModel):
         self.latent_dim = latent_dim
         self.max_seq_len = max_seq_len
         self.cross_attend = cross_attend
+        self.num_reg_tokens = num_reg_tokens
 
         # self.chroma_dim = chroma_dim
 
+        reg_tokens = [f"REG_{i}" for i in range(num_reg_tokens)]
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
             n_codebooks=n_codebooks,
             vocab_size=vocab_size,
             emb_dim=embedding_dim,
-            special_tokens=["MASK"],
-            memory_tokens=num_memory_tokens,
+            special_tokens=["MASK"] + reg_tokens,
         )
-        self.mask_token = self.embedding.special_idxs["MASK"]
+        self.special_tokens = self.embedding.special_idxs
 
         self.lm = ContinuousTransformerWrapper(
             max_seq_len=max_seq_len,
-            num_memory_tokens = num_memory_tokens, # 20 memory tokens
             attn_layers=Encoder(
                 dim=self.embedding_dim,
                 depth=self.n_layers,
@@ -101,9 +101,32 @@ class VampNet(at.ml.BaseModel):
         )
 
     def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None):
-        x = self.embedding(x)
 
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
+
+        if self.num_reg_tokens > 0:
+            # make our reg_tokens
+            reg_tokens = torch.ones(
+                x.shape[0], self.n_codebooks, self.num_reg_tokens, device=x.device
+            ).int() 
+            for i in range(self.num_reg_tokens):
+                reg_tokens[:, :, i] = self.special_tokens[f"REG_{i}"]
+
+            reg_embeddings = self.embedding.from_codes(reg_tokens)
+            reg_embeddings = self.embedding(reg_embeddings)
+
+
+            x = self.embedding(x)
+            x = torch.cat((reg_embeddings, x), dim=-1)
+        else: 
+            x = self.embedding(x)
+
+        # add register tokens to the pad mask
+        if pad_mask is not None:
+            reg_pad = torch.ones(
+                x.shape[0], self.num_reg_tokens, device=x.device
+            ).bool()
+            pad_mask = torch.cat((reg_pad, pad_mask), dim=-1)
 
         x = rearrange(x, "b d n -> b n d")
         out = self.lm(
@@ -113,6 +136,10 @@ class VampNet(at.ml.BaseModel):
             context_mask=cross_pad_mask
         )
         out = rearrange(out, "b n d -> b d n")
+
+        # drop out reg tokens
+        if self.num_reg_tokens > 0:
+            out = out[:, :, self.num_reg_tokens:]
 
         out = self.classifier(out)
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
@@ -135,7 +162,7 @@ class VampNet(at.ml.BaseModel):
         if silence_mask:
             # find where the mask token is and replace it with silence in the audio
             for tstep in range(z.shape[-1]):
-                if torch.any(z[:, :, tstep] == self.mask_token):
+                if torch.any(z[:, :, tstep] == self.special_tokens["MASK"]):
                     sample_idx_0 = tstep * codec.hop_length
                     sample_idx_1 = sample_idx_0 + codec.hop_length
                     signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
@@ -171,7 +198,7 @@ class VampNet(at.ml.BaseModel):
         z = start_tokens
 
         if z is None:
-            z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
+            z = torch.full((1, self.n_codebooks, time_steps), self.special_tokens["MASK"]).to(
                 self.device
             )
 
@@ -192,11 +219,11 @@ class VampNet(at.ml.BaseModel):
         # set up #
         ##########
         # apply the mask to z
-        z_masked = z.masked_fill(mask.bool(), self.mask_token)
+        z_masked = z.masked_fill(mask.bool(), self.special_tokens["MASK"])
         # logging.debug(f"z_masked: {z_masked}")
 
         # how many mask tokens to begin with?
-        num_mask_tokens_at_start = (z_masked == self.mask_token).sum()
+        num_mask_tokens_at_start = (z_masked == self.special_tokens["MASK"]).sum()
         logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
         # how many codebooks are we inferring vs conditioning on?
@@ -246,7 +273,7 @@ class VampNet(at.ml.BaseModel):
             # remove conditioning codebooks, we'll add them back at the end
             z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])           
 
-            mask = (z_masked == self.mask_token).int()
+            mask = (z_masked == self.special_tokens["MASK"]).int()
             
             # update the mask, remove conditioning codebooks from the mask
             logging.debug(f"updated mask with shape: {mask.shape}")
@@ -281,7 +308,7 @@ class VampNet(at.ml.BaseModel):
 
             # update the mask
             z_masked = torch.where(
-                mask.bool(), self.mask_token, sampled_z
+                mask.bool(), self.special_tokens["MASK"], sampled_z
             )
             logging.debug(f"updated z_masked with shape: {z_masked.shape}")
 
@@ -461,7 +488,7 @@ def typical_filter(
 
 
 if __name__ == "__main__":
-    # import argbind
+    import argbind
     from .layers import num_params
 
     VampNet = argbind.bind(VampNet)

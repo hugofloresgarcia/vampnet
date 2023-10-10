@@ -19,6 +19,7 @@ from dac.utils import load_model as load_dac
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
+from torch.distributed.elastic.multiprocessing.errors import record
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.profiler import profile, record_function, ProfilerActivity
@@ -701,6 +702,7 @@ def load(
     )
 
 
+@record
 @argbind.bind(without_prefix=True)
 def train(
     args,
