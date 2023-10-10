@@ -416,7 +416,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
         loss_mask = codebook_flatten(
             torch.logical_or(
-                ~mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                mask[:, vn.n_conditioning_codebooks :, :].bool(),
                 ctx_mask == 0,
             )
         )
