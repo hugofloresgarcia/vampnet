@@ -209,8 +209,8 @@ def accuracy(
 
 def _metrics(z_hat, r, target, flat_mask, output):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
-        unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
-        masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        unmasked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        masked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
 
         assert target.shape[0] == r.shape[0]
         # grab the indices of the r values that are in the range
@@ -412,12 +412,15 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
             z[:, vn.n_conditioning_codebooks :, :],
         )
 
-        # repeat the ctx for the number of codebooks
+        # ctx mask is 1 where there is real data, 0 where there is padding
+        # mask is 1 where there is generated data, 0 where there is real data
+        # we want the loss mask to be 1 where we infer and 0 where we condition
+        # loss mask = ctx_mask & mask
         ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
         loss_mask = codebook_flatten(
-            torch.logical_or(
+            torch.logical_and(
                 mask[:, vn.n_conditioning_codebooks :, :].bool(),
-                ctx_mask == 0,
+                ctx_mask,
             )
         )
 
