@@ -210,8 +210,8 @@ def accuracy(
 
 def _metrics(z_hat, r, target, flat_mask, output):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
-        unmasked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-        masked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
+        unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
+        masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
 
         assert target.shape[0] == r.shape[0]
         # grab the indices of the r values that are in the range
