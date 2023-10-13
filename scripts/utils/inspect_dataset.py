@@ -64,6 +64,9 @@ def yamnet_tag(sig: at.AudioSignal, data_dir: None, cache_dir: None) -> List[str
     return top_5, embeddings
 
 def plot_cumulative_duration(df: pd.DataFrame, output_dir: str):
+    if 'tags' not in df.columns:
+        print("No tags found in the dataset. Skipping cumulative duration plot.")
+        return
     tags_df = df.explode("tags")
     cumulative_duration = tags_df.groupby('tags')['duration'].sum().sort_values(ascending=False)
     
@@ -123,36 +126,46 @@ def copy_representative_files(df: pd.DataFrame, output_dir: Path, max_files: int
     Copies a representative sample of files based on the tags to the output directory,
     grouped by their respective tags.
     """
-    tags_df = df.explode("tags")
-    tag_counts = tags_df['tags'].value_counts()
-    total_tags = tag_counts.sum()
-    
-    copied_files_count = 0
+    if 'tags' not in df.columns:
+        # If there are no tags, just copy the first max_files files 
+        # (shuffled)
+        sample_files = df.sample(max_files)
 
-    # For each tag, calculate the proportional count of files to copy.
-    for tag, count in tag_counts.items():
-        num_files_for_tag = min(int((count / total_tags) * max_files), max_files - copied_files_count)
+        for _, row in sample_files.iterrows():
+            destination = output_dir / row['name']
+            shutil.copy(row['filename'], destination)
+
+    else:
+        tags_df = df.explode("tags")
+        tag_counts = tags_df['tags'].value_counts()
+        total_tags = tag_counts.sum()
         
-        sample_files = tags_df[tags_df['tags'] == tag].sample(num_files_for_tag)
+        copied_files_count = 0
 
-        if not sample_files.empty:
-            # Create a directory for the tag only if there are files for that tag
-            tag_dir = output_dir / tag
-            tag_dir.mkdir(parents=True, exist_ok=True)
+        # For each tag, calculate the proportional count of files to copy.
+        for tag, count in tag_counts.items():
+            num_files_for_tag = min(int((count / total_tags) * max_files), max_files - copied_files_count)
+            
+            sample_files = tags_df[tags_df['tags'] == tag].sample(num_files_for_tag)
 
-            for _, row in sample_files.iterrows():
-                destination = tag_dir / row['name']
-                shutil.copy(row['filename'], destination)
-        
-        copied_files_count += num_files_for_tag
+            if not sample_files.empty:
+                # Create a directory for the tag only if there are files for that tag
+                tag_dir = output_dir / tag
+                tag_dir.mkdir(parents=True, exist_ok=True)
 
-        if copied_files_count >= max_files:
-            break
+                for _, row in sample_files.iterrows():
+                    destination = tag_dir / row['name']
+                    shutil.copy(row['filename'], destination)
+            
+            copied_files_count += num_files_for_tag
+
+            if copied_files_count >= max_files:
+                break
 
 @argbind.bind(without_prefix=True)
 def inspect_dataset(
     folder: str = None, 
-    sample_files: int = 100, 
+    sample_files: int = 50, 
     collect_tags: bool = False,
     name: str = None
 ):
@@ -193,7 +206,7 @@ def inspect_dataset(
     # Copy the representative files
     sample_output_dir = output_dir /  "samples"
     sample_output_dir.mkdir(parents=True, exist_ok=True)
-    # copy_representative_files(df, sample_output_dir, max_files=sample_files)
+    copy_representative_files(df, sample_output_dir, max_files=sample_files)
 
 if __name__ == "__main__":
     args = argbind.parse_args()
