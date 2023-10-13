@@ -13,6 +13,7 @@ class DACDataset(torch.utils.data.Dataset):
     def __init__(self, 
         paths: List[str], 
         seq_len: int = 1024, 
+        shuffle: bool = True
     ):
         self.paths = [Path(p) for p in paths]
         self.seq_len = seq_len
@@ -21,7 +22,8 @@ class DACDataset(torch.utils.data.Dataset):
         for path in self.paths:
             self.files.extend(list(path.glob("**/*.dac")))
 
-        random.shuffle(self.files)
+        if shuffle:
+            random.shuffle(self.files)
         
         print(f"Found {len(self.files)} files in {paths}.")
 

@@ -117,11 +117,19 @@ def build_datasets(
         train_data = DACDataset(
             [Path(path)  for path in train_dac_paths],
             seq_len, 
+            shuffle=True,
         )
 
         val_data = DACDataset(
             [Path(path)  for path in val_dac_paths],
             seq_len, 
+            shuffle=False
+        )
+
+        sample_data = DACDataset(
+            [Path(path)  for path in val_dac_paths],
+            seq_len, 
+            shuffle=True
         )
     else:
         print(f"FIXING AudioDataset duration to {duration}")
@@ -140,6 +148,7 @@ def build_datasets(
                 duration=duration, 
                 transform=build_transform()
             )
+            sample_data = val_data
 
     # with argbind.scope(args, "sample"):
     #     print(f"creating sample dataset with duration {duration}")
@@ -151,7 +160,7 @@ def build_datasets(
     #     )
     #     print(f"done")
 
-    return train_data, val_data, val_data
+    return train_data, val_data, sample_data
 
 
 def rand_float(shape, low, high, rng):
