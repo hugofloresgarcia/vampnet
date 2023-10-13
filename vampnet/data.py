@@ -75,7 +75,7 @@ class DACDataset(torch.utils.data.Dataset):
 
 
 def test():
-    dataset = DACDataset(Path("./data/codes/fma_full"))
+    dataset = DACDataset([Path("./data/codes-mono/prosound")])
     dac = load_dac(load_path="./models/dac/weights.pth")
 
     # Load a sample
