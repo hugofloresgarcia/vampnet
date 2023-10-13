@@ -8,7 +8,7 @@ get_absolute_paths() {
 }
 
 # Use the find command to locate directories with the specified names/patterns
-dirs_to_delete=$(find . -type d \( -name "*B-format*" -o -name "*51*" -o -name "*MS*" -o -name "*B-Format*" -o -name "*5-1*" -o -name "*Surround*" \) | get_absolute_paths)
+dirs_to_delete=$(find . -type d \( -name "*B-format*" -o -name "*51*" -o -name "*MS*" -o -name "*B-Format*" -o -name "*5-1*" -o -name "*Surround*" -o -name "*Soundmorph*" \) | get_absolute_paths)
 
 # Check if any directories were found
 if [ -z "$dirs_to_delete" ]; then

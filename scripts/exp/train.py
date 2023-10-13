@@ -44,7 +44,6 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-torch._dynamo.config.log_level = logging.DEBUG
 torch.autograd.set_detect_anomaly(True)
 
 # Enable cudnn autotuner to speed up training

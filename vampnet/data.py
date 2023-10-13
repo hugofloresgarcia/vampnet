@@ -20,6 +20,8 @@ class DACDataset(torch.utils.data.Dataset):
         self.files = list()
         for path in self.paths:
             self.files.extend(list(path.glob("**/*.dac")))
+
+        random.shuffle(self.files)
         
         print(f"Found {len(self.files)} files in {paths}.")
 

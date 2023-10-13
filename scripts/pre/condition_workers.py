@@ -13,7 +13,8 @@ class DACProcessor:
     def __init__(self, 
                  dac_path="./models/dac/weights.pth", 
                  verbose: bool = False,
-                 batch_size: int = 200):
+                 batch_size: int = 10, 
+                 win_duration: float = 10.0):
         import torch
         from dac.utils import load_model as load_dac
         self.codec = load_dac(load_path=dac_path)
@@ -22,12 +23,14 @@ class DACProcessor:
 
         self.verbose = verbose
         self.batch_size = batch_size
+        self.win_duration = win_duration
 
     def process(self, sig: AudioSignal):
         sig = sig.to_mono()
         artifact = self.codec.compress(
             sig, 
-            verbose=self.verbose, 
+            verbose=self.verbose,
+            win_duration=self.win_duration,
             win_batch_size=self.batch_size
         )
         artifact.codes.cpu()
@@ -76,12 +79,14 @@ def condition_and_save(
     audio_folder: str = None,
     output_folder: str= None,
     conditioner_name: str = "yamnet",
-    processes: int = cpu_count()*2
+    processes: int = cpu_count()
 ):
     assert audio_folder is not None, "audio_folder must be specified"
     assert output_folder is not None, "output_folder must be specified"
 
     audio_files = list(at.util.find_audio(Path(audio_folder)))
+    import random
+    random.shuffle(audio_files)
 
     if conditioner_name == "dac":
         conditioner = DACProcessor()
@@ -100,7 +105,7 @@ def condition_and_save(
             output_path = kwargs['output_path']
 
             if sig is None:
-                print(f"skipping {audio_file.name}")
+                # print(f"skipping {audio_file.name}")
                 continue
             sig.path_to_file = audio_file.relative_to(audio_folder)
             process_fn = process_dac if conditioner_name == "dac" else process_audio

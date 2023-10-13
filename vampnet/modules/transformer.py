@@ -61,14 +61,12 @@ class VampNet(at.ml.BaseModel):
         self.num_reg_tokens = num_reg_tokens
 
         # self.chroma_dim = chroma_dim
-
-        reg_tokens = [f"REG_{i}" for i in range(num_reg_tokens)]
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
             n_codebooks=n_codebooks,
             vocab_size=vocab_size,
             emb_dim=embedding_dim,
-            special_tokens=["MASK"] + reg_tokens,
+            special_tokens=["MASK"],
         )
         self.special_tokens = self.embedding.special_idxs
 
@@ -83,9 +81,9 @@ class VampNet(at.ml.BaseModel):
                 ff_glu=True, 
                 use_rmsnorm=True, 
                 cross_attend=cross_attend, 
-
             ),
             emb_dropout=dropout,
+            num_memory_tokens=num_reg_tokens,
         )
 
         # Add final conv layer
@@ -101,32 +99,9 @@ class VampNet(at.ml.BaseModel):
         )
 
     def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None):
-
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
-
-        if self.num_reg_tokens > 0:
-            # make our reg_tokens
-            reg_tokens = torch.ones(
-                x.shape[0], self.n_codebooks, self.num_reg_tokens, device=x.device
-            ).int() 
-            for i in range(self.num_reg_tokens):
-                reg_tokens[:, :, i] = self.special_tokens[f"REG_{i}"]
-
-            reg_embeddings = self.embedding.from_codes(reg_tokens)
-            reg_embeddings = self.embedding(reg_embeddings)
-
-
-            x = self.embedding(x)
-            x = torch.cat((reg_embeddings, x), dim=-1)
-        else: 
-            x = self.embedding(x)
-
-        # add register tokens to the pad mask
-        if pad_mask is not None:
-            reg_pad = torch.ones(
-                x.shape[0], self.num_reg_tokens, device=x.device
-            ).bool()
-            pad_mask = torch.cat((reg_pad, pad_mask), dim=-1)
+        x = self.embedding(x)
+        
 
         x = rearrange(x, "b d n -> b n d")
         out = self.lm(
@@ -136,10 +111,6 @@ class VampNet(at.ml.BaseModel):
             context_mask=cross_pad_mask
         )
         out = rearrange(out, "b n d -> b d n")
-
-        # drop out reg tokens
-        if self.num_reg_tokens > 0:
-            out = out[:, :, self.num_reg_tokens:]
 
         out = self.classifier(out)
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
