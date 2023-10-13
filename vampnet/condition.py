@@ -8,10 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-import tensorflow as tf
-
-
-import tensorflow_hub as hub
 import numpy as np
 
 from audiotools import AudioSignal
@@ -205,6 +201,9 @@ class YamnetConditioner(WaveformConditioner):
     def __init__(self,
         confidence_threshold: Optional[float] = None, 
     ):
+        import tensorflow as tf
+        import tensorflow_hub as hub
+        
         # Load the model.
         self.model = hub.load('https://tfhub.dev/google/yamnet/1')
 
