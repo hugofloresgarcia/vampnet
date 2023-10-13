@@ -101,12 +101,19 @@ class VampNet(at.ml.BaseModel):
     def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None):
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
         x = self.embedding(x)
-        
 
+        def reg_pad(_pad_mask):
+            if _pad_mask is not None and self.num_reg_tokens > 0:
+                _pad_mask = torch.cat(
+                    [torch.ones(_pad_mask.shape[0], self.num_reg_tokens).to(x.device),
+                      _pad_mask], dim=-1
+                ).bool()
+            return _pad_mask
+        
         x = rearrange(x, "b d n -> b n d")
         out = self.lm(
             x, return_mems=False, 
-            mask=pad_mask, 
+            mask=reg_pad(pad_mask), 
             context=cross_x, 
             context_mask=cross_pad_mask
         )
