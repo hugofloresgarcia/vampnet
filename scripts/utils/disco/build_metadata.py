@@ -14,24 +14,22 @@ def main(
     dac_root: str = None, 
     output_path: str = "disco-metadata.csv"
 ):
-    audio_path = Path(audio_root)
     dac_path = Path(dac_root)
 
-    # find all the audio files
-    audio_files = at.util.find_audio(audio_path)
-    print(f"found {len(audio_files)} audio files")
+    dac_paths = list(dac_path.glob("**/*.dac"))
+    print(f"found {len(dac_paths)} dac files")
 
     def get_split(filename):
-        split =  str(filename).split("/")[2]
+        split =  str(filename).split("/")[3]
         assert split in ("train", "val", "test")
         return split
 
     metadata = []
-    for filename in tqdm.tqdm(audio_files):
+    for filename in tqdm.tqdm(dac_paths):
         metadata.append({
-            "filename": filename, 
+            # "filename": filename.with_suffix(".mp3"), 
             "family": "Music", 
-            "dac_path": str(dac_path / str(Path(filename).relative_to(audio_path)).replace(".mp3", ".dac")), 
+            "dac_path": filename,
             "split": get_split(filename)
         })
     

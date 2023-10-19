@@ -74,6 +74,7 @@ def process_dac(conditioner, sig):
     return artifact
 
 
+# TODO: update to work with csv metadata
 @argbind.bind(without_prefix=True)
 def condition_and_save(
     audio_folder: str = None,

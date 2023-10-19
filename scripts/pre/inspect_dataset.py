@@ -213,14 +213,16 @@ def inspect_dataset(
 
     df = pd.DataFrame(metadata)
 
-    plot_cumulative_duration(df, output_dir)
-    plot_sample_rate_histogram(df, output_dir)
-    plot_duration_boxplot(df, output_dir)
-    plot_num_channels_histogram(df, output_dir)
+    artifacts_dir = output_dir / "artifacts"
+
+    plot_cumulative_duration(df, artifacts_dir)
+    plot_sample_rate_histogram(df, artifacts_dir)
+    plot_duration_boxplot(df, artifacts_dir)
+    plot_num_channels_histogram(df, artifacts_dir)
     df.to_csv(output_dir / f"metadata.csv", index=False)
 
     # Copy the representative files
-    sample_output_dir = output_dir /  "samples"
+    sample_output_dir = artifacts_dir /  "samples"
     sample_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Copying {sample_files} representative files to {sample_output_dir}...")
     copy_representative_files(df, sample_output_dir, max_files=sample_files)
