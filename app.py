@@ -73,6 +73,9 @@ def _vamp(data, return_mask=False):
     sig = at.AudioSignal(data[input_audio])
     sig = interface.preprocess(sig)
 
+    loudness = sig.loudness()
+    print(f"input loudness is {loudness}")
+
     if data[pitch_shift_amt] != 0:
         sig = shift_pitch(sig, data[pitch_shift_amt])
 
@@ -112,6 +115,8 @@ def _vamp(data, return_mask=False):
     # these should be the last two mask ops
     mask = pmask.dropout(mask, data[dropout])
     mask = pmask.codebook_unmask(mask, ncc)
+    mask = pmask.codebook_mask(mask, int(data[n_mask_codebooks]))
+
 
 
     print(f"dropout {data[dropout]}")
@@ -170,7 +175,9 @@ def _vamp(data, return_mask=False):
     sig = interface.to_signal(zv).cpu()
     print("done")
 
-    
+    print(f"output loudness is {sig.loudness()}")
+    sig = sig.normalize(loudness)    
+    print(f"normalized loudness is {sig.loudness()}")
 
     sig.write(out_dir / "output.wav")
 
@@ -414,6 +421,11 @@ with gr.Blocks() as demo:
                     value=False
                 )
 
+                n_mask_codebooks = gr.Number(
+                    label="first upper codebook level to mask",
+                    value=9,
+                )
+
 
                 with gr.Accordion("extras ", open=False):
                     pitch_shift_amt = gr.Slider(
@@ -615,6 +627,7 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             # lora_choice,
+            n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff
         }

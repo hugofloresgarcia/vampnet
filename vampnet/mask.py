@@ -140,6 +140,11 @@ def codebook_unmask(
     mask[:, :n_conditioning_codebooks, :] = 0
     return mask
 
+def codebook_mask(mask: torch.Tensor, start: int):
+    mask = mask.clone()
+    mask[:, start:, :] = 1
+    return mask
+
 def mask_and(
     mask1: torch.Tensor, 
     mask2: torch.Tensor
