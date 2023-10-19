@@ -6,53 +6,54 @@ import argbind
 import tqdm
 import pandas as pd
 import plotly.express as px
-
+import numpy as np
 import csv
 import shutil  # For copying files
 
 from vampnet.condition import ConditionFeatures
 
-
-model, class_names = None, None
 def load_model():
     import tensorflow_hub as hub
     import tensorflow as tf
-    global model, class_names
-    if model is None:
-        import io
-        model = hub.load('https://tfhub.dev/google/yamnet/1')
-        class_map_path = model.class_map_path().numpy()
-        class_map_csv_text = tf.io.read_file(class_map_path).numpy().decode('utf-8')
-        class_map_csv = io.StringIO(class_map_csv_text)
-        class_names = [display_name for (class_index, mid, display_name) in csv.reader(class_map_csv)]
-        class_names = class_names[1:]  # Skip CSV header
+    import io
+    model = hub.load('https://tfhub.dev/google/yamnet/1')
+    class_map_path = model.class_map_path().numpy()
+    class_map_csv_text = tf.io.read_file(class_map_path).numpy().decode('utf-8')
+    class_map_csv = io.StringIO(class_map_csv_text)
+    class_names = [display_name for (class_index, mid, display_name) in csv.reader(class_map_csv)]
+    class_names = class_names[1:]  # Skip CSV header
 
-# model, class_names = load_model()
+    return model, class_names
 
+model, class_names = load_model()
 
 def yamnet_tag(sig: at.AudioSignal, data_dir: None, cache_dir: None) -> List[str]:
-    if cache_dir is None:
-        load_model()
-
     # helper to get the top 5 classes from the scores
     def top5(_scores):
+        if not isinstance(_scores, np.ndarray):
+            _scores = _scores.numpy()
+
         # Get the indices of the top 3 scores
-        top_5_indices = _scores.numpy().mean(axis=0).argsort()[-5:][::-1]
-        top_5 = [class_names[i] for i in top_5_indices]
+        _top_5_indices = _scores.mean(axis=0).argsort()[-5:][::-1]
+        _top_5 = [class_names[i] for i in _top_5_indices]
+        return _top_5
 
     # check if we have it in cache? 
     cached_feats = {}
     if cache_dir is not None:
         assert data_dir is not None, "data_dir must be specified if cache_dir is specified"
-        for feat in  ('scores', 'embeddings'):
-            cache_path = Path(cache_dir) / Path(sig.path_to_file).relative_to(data_dir).with_suffix(".emb")
+        cache_path = Path(cache_dir) / Path(sig.path_to_file).relative_to(data_dir).with_suffix(".emb")
             
-            if not cache_path.exists():
-                print(f"cache path {cache_path} does not exist!!! recomputing yamnet metadata")
-                return yamnet_tag(sig, data_dir=None, cache_dir=None)
-            else:
-                # load from cache
-                cached_feats[feat] = ConditionFeatures.load(cache_path)
+        if not cache_path.exists():
+            print(f"cache path {cache_path} does not exist!!! recomputing yamnet metadata")
+            return yamnet_tag(sig, data_dir=None, cache_dir=None)
+        else:
+            # load from cache
+            cached_feats = ConditionFeatures.load(cache_path)
+                
+            scores = cached_feats.features["scores"]
+            embeddings = cached_feats.features["embeddings"]
+
     else:
         # don't load from cache, compute on the fly
         sig = sig.resample(16000).to_mono()
@@ -82,7 +83,6 @@ def plot_sample_rate_histogram(df: pd.DataFrame, output_dir: str):
     fig = px.histogram(df, x="sample_rate", title='Sample Rate Histogram')
     fig.write_image(str(output_dir / "sample_rate_histogram.png"))
     fig.write_html(str(output_dir / "sample_rate_histogram.html"))
-
 
 def plot_duration_boxplot(df: pd.DataFrame, output_dir: str):
     """
@@ -167,6 +167,7 @@ def inspect_dataset(
     folder: str = None, 
     sample_files: int = 50, 
     collect_tags: bool = False,
+    yamnet_cache_dir: str = None,
     name: str = None
 ):
     assert folder is not None, "folder must be specified"
@@ -181,7 +182,12 @@ def inspect_dataset(
     print(f"found {len(audio_files)} audio files")
     metadata = []
     for file in tqdm.tqdm(audio_files):
-        info = at.util.info(file)
+        try:
+            info = at.util.info(file)
+        except:
+            print(f"Error reading {file}")
+            continue
+
         meta = {
             "duration": info.duration, 
             "sample_rate": info.sample_rate,
@@ -191,8 +197,18 @@ def inspect_dataset(
         }
         if collect_tags:
             sig = at.AudioSignal(file)
-            tags, embeddings = yamnet_tag(sig)
-            meta["tags"] = tags
+            try: 
+                tags, embeddings = yamnet_tag(sig, 
+                    data_dir=folder,
+                    cache_dir=yamnet_cache_dir
+                )
+
+                meta["tags"] = tags
+            except Exception as e: 
+                print(f"Error getting tags for {file}. skipping")
+                print(e)
+                continue
+
         metadata.append(meta)
 
     df = pd.DataFrame(metadata)
@@ -206,7 +222,9 @@ def inspect_dataset(
     # Copy the representative files
     sample_output_dir = output_dir /  "samples"
     sample_output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Copying {sample_files} representative files to {sample_output_dir}...")
     copy_representative_files(df, sample_output_dir, max_files=sample_files)
+    print("Done!")
 
 if __name__ == "__main__":
     args = argbind.parse_args()

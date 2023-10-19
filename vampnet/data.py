@@ -4,37 +4,71 @@ import torch
 import random
 import time
 
+import pandas as pd
+from audiotools import util
+
 from audiotools import AudioSignal
 from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
 
+
+SALAD_BOWL_WEIGHTS = {
+    "Sounds of things": 1,
+    "Channel, environment and background": 0.1, 
+    "Natural sounds": 1.2, 
+    "Human sounds": 1, 
+    "Music": 1.5,
+    "Animal": 1, 
+    "Source-ambiguous sounds": 0.8,
+}
+
 class DACDataset(torch.utils.data.Dataset):
 
     def __init__(self, 
-        paths: List[str], 
-        seq_len: int = 1024, 
-        shuffle: bool = True
+        metadata_csvs: List[str],
+        seq_len: int = 1024,
+        split = "train"
     ):
-        self.paths = [Path(p) for p in paths]
+        
+        # load the metadata csvs
+        metadata = []
+        for csv in metadata_csvs:
+            metadata.append(pd.read_csv(csv))
+        
+        metadata = pd.concat(metadata)
+
+        # filter by split
+        self.metadata = metadata[metadata.split == split]
+
+        # make a dict of family -> list of files
+        self.families = metadata.family.unique()
+        self.family_to_files = {f: [] for f in self.families}
+        for _, row in metadata.iterrows():
+            self.family_to_files[row.family].append(row.dac_path)
+
+        # print stats
+        print(f"Found {len(metadata)} files in {metadata_csvs}.")
+        for f, files in self.family_to_files.items():
+            print(f"{f}: {len(files)}")
+
         self.seq_len = seq_len
 
-        self.files = list()
-        for path in self.paths:
-            self.files.extend(list(path.glob("**/*.dac")))
-
-        if shuffle:
-            random.shuffle(self.files)
-        
-        print(f"Found {len(self.files)} files in {paths}.")
-
     def __len__(self):
-        return len(self.files)
+        return sum([len(files) for files in self.family_to_files.values()])
     
     def __getitem__(self, idx):
-        # grab a random file
-        file = self.files[idx % len(self.files)]
+        util.seed(idx)
+        # grab a random family
+        family = random.choices(self.families, weights=[SALAD_BOWL_WEIGHTS[f] for f in self.families], k=1)[0]
 
-        artifact = DACFile.load(file)
+        # grab a file from that family
+        file = random.choice(self.family_to_files[family])
+
+        try:
+            artifact = DACFile.load(file)
+        except:
+            print(f"Error loading {file}")
+            return self.__getitem__(idx + random.randint(1, 100))
 
         # shape (channels, num_chunks, seq_len)
         codes = artifact.codes

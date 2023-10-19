@@ -1,18 +1,13 @@
 $include:
   - conf/base.yml
 
-batch_size: 112
-val_batch_size: 112
+batch_size: 88
+val_batch_size: 88
 num_workers: 18
 
 VampNet.max_seq_len: 512
 VampNet.embedding_dim: 1024
 
-
-train_dac_cache:
-# - data/codes/fma_full/train
-- data/codes-mono-win=10/prosound/train
-
-val_dac_cache:
-# - data/codes/fma_full/val
-- data/codes-mono-win=10/prosound/val
+metadata_paths:
+- data/metadata/prosound_redacted/metadata.csv
+- data/metadata/disco-300k/metadata.csv

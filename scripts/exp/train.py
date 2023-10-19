@@ -102,63 +102,26 @@ def apply_transform(transform_fn, batch):
 
 def build_datasets(
         args, sample_rate: int, 
-        train_dac_paths: List[str], 
-        val_dac_paths: List[str], 
+        metadata_paths: List[str], 
         seq_len: int, hop_length: int
     ):
-    duration = (seq_len * hop_length) / sample_rate
+    train_data = DACDataset(
+        metadata_paths,
+        seq_len,
+        split="train"
+    )
 
-    if train_dac_paths is not None:
-        assert val_dac_paths is not None
+    val_data = DACDataset(
+        metadata_paths,
+        seq_len,
+        split="val"
+    )
 
-        print(f"Loading DAC files from {train_dac_paths}")
-        print(f"WARNING: This means that all other information passed to AudioDataset will be ignored")
-
-        train_data = DACDataset(
-            [Path(path)  for path in train_dac_paths],
-            seq_len, 
-            shuffle=True,
-        )
-
-        val_data = DACDataset(
-            [Path(path)  for path in val_dac_paths],
-            seq_len, 
-            shuffle=False
-        )
-
-        sample_data = DACDataset(
-            [Path(path)  for path in val_dac_paths],
-            seq_len, 
-            shuffle=True
-        )
-    else:
-        print(f"FIXING AudioDataset duration to {duration}")
-        with argbind.scope(args, "train"):
-            train_data = AudioDataset(
-                AudioLoader(), 
-                sample_rate, 
-                duration=duration,
-                transform=build_transform()
-            )
-
-        with argbind.scope(args, "val"):
-            val_data = AudioDataset(
-                AudioLoader(), 
-                sample_rate, 
-                duration=duration, 
-                transform=build_transform()
-            )
-            sample_data = val_data
-
-    # with argbind.scope(args, "sample"):
-    #     print(f"creating sample dataset with duration {duration}")
-    #     sample_data = AudioDataset(
-    #         AudioLoader(),
-    #         sample_rate,
-    #         duration=duration,
-    #         transform=build_transform(),
-    #     )
-    #     print(f"done")
+    sample_data = DACDataset(
+        metadata_paths,
+        seq_len,
+        split="val"
+    )
 
     return train_data, val_data, sample_data
 
@@ -625,8 +588,7 @@ def load(
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
     dac_path: str = "./models/dac/weights.pth",
-    train_dac_cache: List[str] = None,
-    val_dac_cache: List[str] = None,
+    metadata_paths: List[str] = None,
     compile: bool = False, 
 ) -> State:
     codec = load_dac(load_path=dac_path)
@@ -687,8 +649,8 @@ def load(
 
     # load the datasets
     train_data, val_data, sample_data = build_datasets(
-        args, sample_rate, train_dac_paths=train_dac_cache,
-        val_dac_paths=val_dac_cache, 
+        args, sample_rate,
+        metadata_paths=metadata_paths, 
         seq_len=accel.unwrap(model).max_seq_len,
         hop_length=codec.hop_length
     )
