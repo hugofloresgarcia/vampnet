@@ -56,7 +56,7 @@ class DACDataset(torch.utils.data.Dataset):
     def __len__(self):
         return sum([len(files) for files in self.family_to_files.values()])
     
-    def __getitem__(self, idx):
+    def __getitem__(self, idx, attempt=0):
         util.seed(idx)
         # grab a random family
         family = random.choices(self.families, weights=[SALAD_BOWL_WEIGHTS[f] for f in self.families], k=1)[0]
@@ -68,7 +68,9 @@ class DACDataset(torch.utils.data.Dataset):
             artifact = DACFile.load(file)
         except:
             print(f"Error loading {file}")
-            return self.__getitem__(idx + random.randint(1, 100))
+            if attempt > 50:
+                raise Exception(f"Error loading {file} after {attempt} attempts.")
+            return self.__getitem__(idx + random.randint(1, len(self)*10), attempt=attempt+1)
 
         # shape (channels, num_chunks, seq_len)
         codes = artifact.codes
