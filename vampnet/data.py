@@ -31,23 +31,23 @@ class DACDataset(torch.utils.data.Dataset):
     ):
         
         # load the metadata csvs
-        metadata = []
+        self.metadata = []
         for csv in metadata_csvs:
-            metadata.append(pd.read_csv(csv))
+            self.metadata.append(pd.read_csv(csv))
         
-        metadata = pd.concat(metadata)
+        self.metadata = pd.concat(self.metadata)
 
         # filter by split
-        self.metadata = metadata[metadata.split == split]
+        self.metadata = self.metadata[self.metadata.split == split]
 
         # make a dict of family -> list of files
-        self.families = metadata.family.unique()
+        self.families = self.metadata.family.unique()
         self.family_to_files = {f: [] for f in self.families}
-        for _, row in metadata.iterrows():
+        for _, row in self.metadata.iterrows():
             self.family_to_files[row.family].append(row.dac_path)
 
         # print stats
-        print(f"Found {len(metadata)} files in {metadata_csvs}.")
+        print(f"Found {len(self.metadata)} files in {metadata_csvs}.")
         for f, files in self.family_to_files.items():
             print(f"{f}: {len(files)}")
 

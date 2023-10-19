@@ -780,9 +780,6 @@ def train(
                         tracker.step == num_iters - 1 if num_iters is not None else False
                     )
 
-                    if tracker.step == 0:
-                        continue
-
                     if tracker.step % sample_freq == 0 or last_iter:
                         tracker.print(f"Saving samples at iteration {tracker.step}")
                         with record_function("save_samples"):

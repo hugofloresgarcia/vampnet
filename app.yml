@@ -1,0 +1,4 @@
+# runs/base-bowl-disco-resume
+Interface.coarse_ckpt: ./runs/base-bowl-disco-resume/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/dac/weights.pth
+# Interface.wavebeat_ckpt: ./models/wavebeat.pth
