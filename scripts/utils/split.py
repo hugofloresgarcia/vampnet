@@ -10,6 +10,7 @@ from tqdm.contrib.concurrent import thread_map
 
 from audiotools.core import util
 
+# TODO: make this so that it operates on a metadata csv instead of a folder
 @argbind.bind(without_prefix=True)
 def train_test_val_split(
     folder: str = ".",

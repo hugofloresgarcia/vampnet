@@ -14,10 +14,10 @@ from dac.utils import load_model as load_dac
 
 SALAD_BOWL_WEIGHTS = {
     "Sounds of things": 1,
-    "Channel, environment and background": 0.1, 
+    "Channel, environment and background": 0.01, 
     "Natural sounds": 1.2, 
     "Human sounds": 1, 
-    "Music": 1.5,
+    "Music": 1.75,
     "Animal": 1, 
     "Source-ambiguous sounds": 0.8,
 }
