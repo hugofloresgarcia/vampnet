@@ -3,6 +3,7 @@ from typing import Tuple, Dict, Optional, List
 import csv
 
 import torchaudio
+from torchaudio.transforms import MFCC
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -252,9 +253,43 @@ class YamnetConditioner(WaveformConditioner):
 
 class MFCCConditioner(WaveformConditioner):
     
-    pass
-
-
+    def __init__(self, 
+                 n_mfcc: int = 7, 
+                 window_size: int = 8192, 
+                 hop_size: int = 8192):
+        
+        self.n_mfcc = n_mfcc
+        self.window_size = window_size
+        self.hop_size = hop_size
+    
+    @torch.inference_mode()
+    def condition(self, sig: AudioSignal):
+        waveform = sig.samples
+        sample_rate = sig.sample_rate
+        
+        transform = MFCC(
+            sample_rate=sample_rate,
+            n_mfcc=self.n_mfcc,
+            melkwargs={
+                "n_fft": self.window_size, 
+                "hop_length": self.hop_size, 
+                "n_mels": 23, 
+                "center": False
+            },
+        )
+        
+        mfcc = transform(waveform)
+        
+        # For your specification, if you want only the first 5-7 MFCCs:
+        breakpoint()
+        
+        return {"mfcc": mfcc}
+    
+    @property
+    def keys(self):
+        return ["mfcc"]
+    
+    
 class ConditionEmbedder(nn.Module):
 
     def __init__(self, 
