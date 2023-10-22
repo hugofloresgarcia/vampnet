@@ -5,14 +5,16 @@ sample_freq: 3000
 fine_tune: True
 fine_tune_checkpoint: ./runs/salad_bowl/salad_base/latest/vampnet/weights.pth
 
-batch_size: 88
-val_batch_size: 88
+batch_size: 64
+val_batch_size: 64
 num_workers: 18
+amp: True
 
 VampNet.max_seq_len: 512
 VampNet.embedding_dim: 1024
 sample_freq: 1000
 save_iters: [1000, 2000, 4000, 8000, 10000, 12000, 50000, 100000]
+
 
 DACDataset.seq_len: 512
 DACDataset.metadata_csvs:
