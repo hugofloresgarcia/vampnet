@@ -22,6 +22,7 @@ class DACDataset(torch.utils.data.Dataset):
         classlist: list = None,
         class_key: str = "label",
         class_weights: dict = None, 
+        length: int = 1000000000
     ):
         assert metadata_csvs is not None, "Must provide metadata_csvs"
         assert split is not None, f"split must be provided but got {split}"
@@ -67,9 +68,10 @@ class DACDataset(torch.utils.data.Dataset):
         print(f"resolved class weights: {self.class_weights}")
     
         self.seq_len = seq_len
+        self.length = length
 
     def __len__(self):
-        return len(self.metadata)
+        return self.length
     
     def __getitem__(self, idx, attempt=0):
         util.seed(idx)
