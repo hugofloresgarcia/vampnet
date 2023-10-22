@@ -26,3 +26,6 @@ DACDataset.class_key: "label"
 train/DACDataset.split: "all"
 val/DACDataset.split: "all"
 sample/DACDataset.split: "all"
+
+val/DACDataset.length: 1000
+sample/DACDataset.length: 1000
