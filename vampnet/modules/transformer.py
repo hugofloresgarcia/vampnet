@@ -3,6 +3,7 @@ import math
 from typing import Optional
 from typing import Tuple
 from typing import Union
+from typing import List
 
 import audiotools as at
 import loralib as lora
@@ -47,6 +48,7 @@ class VampNet(at.ml.BaseModel):
         # chroma_dim: int = 0,
         max_seq_len: int = 1024,
         num_reg_tokens: int = 0,
+        # classes = [], 
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -59,6 +61,7 @@ class VampNet(at.ml.BaseModel):
         self.max_seq_len = max_seq_len
         self.cross_attend = cross_attend
         self.num_reg_tokens = num_reg_tokens
+        # self.classes = classes
 
         # self.chroma_dim = chroma_dim
         self.embedding = CodebookEmbedding(
@@ -98,26 +101,53 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None):
+    #     self._register_class_tokens(classes)
+        
+
+    # def _register_class_tokens(self, classes: List[str]):
+    #     self.classlist = classes
+    #     if "null" not in self.classlist:
+    #         self.classlist += ["null"]
+    #     self.class_embedding = nn.Embedding(len(self.classlist), self.embedding_dim)
+        
+
+    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None, 
+                # class_ids=None, class_dropout: float = 0.0
+                ):
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
         x = self.embedding(x)
 
-        def reg_pad(_pad_mask):
-            if _pad_mask is not None and self.num_reg_tokens > 0:
-                _pad_mask = torch.cat(
-                    [torch.ones(_pad_mask.shape[0], self.num_reg_tokens).to(x.device),
-                      _pad_mask], dim=-1
-                ).bool()
-            return _pad_mask
-        
+        # if class_ids is not None:
+        #     assert class_ids.ndim == 1, f"should be shape (batch,), got {class_ids.shape}"
+        #     # dropout class_ids with "null" token
+        #     if class_dropout > 0.0:
+        #         mask = torch.bernoulli(class_ids) < class_dropout
+        #         class_ids = torch.where(
+        #             mask, 
+        #             torch.full_like(self.classlist.index("null"), class_ids), 
+        #             class_ids
+        #         )
+
+        #     class_emb = self.class_embedding(class_ids) # should be shape (batch, emb_dim)
+        #     class_emb = rearrange(class_emb, "b d -> b d 1")
+        #     x = torch.cat((x, class_emb), dim=-1)
+            
+        #     if pad_mask is not None:
+        #         ds = torch.ones_like(pad_mask[:, :, :1])
+        #         pad_mask = torch.cat((pad_mask, ds), dim=-1)
+
         x = rearrange(x, "b d n -> b n d")
         out = self.lm(
             x, return_mems=False, 
-            mask=reg_pad(pad_mask), 
+            mask=pad_mask, 
             context=cross_x, 
             context_mask=cross_pad_mask
         )
         out = rearrange(out, "b n d -> b d n")
+        
+        # remove the class embedding
+        # if class_ids is not None:
+        #     out = out[:, :, :-1]
 
         out = self.classifier(out)
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
@@ -164,6 +194,7 @@ class VampNet(at.ml.BaseModel):
         return_signal=True,
         seed: int = None, 
         sample_cutoff: float = 1.0,
+        classname: str = None,
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -226,11 +257,18 @@ class VampNet(at.ml.BaseModel):
             latents = self.embedding.from_codes(z_masked, codec)
             logging.debug(f"computed latents with shape: {latents.shape}")
 
+            # # get class ids if we have a class
+            # class_ids = self.classlist.index(classname) if classname is not None else None
+            # if class_ids is not None:
+            #     class_ids = scalar_to_batch_tensor(class_ids, z.shape[0]).to(z.device)
+
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
-            logits = self.forward(latents)  # b, prob, seq
+            logits = self.forward(
+                latents, 
+                # class_ids=class_ids
+            )  # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
-            b = logits.shape[0]
 
             logging.debug(f"permuted logits with shape: {logits.shape}")
 
@@ -313,6 +351,7 @@ class VampNet(at.ml.BaseModel):
             return self.to_signal(sampled_z, codec)
         else:
             return sampled_z
+
 
 def sample_from_logits(
         logits, 
@@ -398,7 +437,6 @@ def sample_from_logits(
     else:
         return token
     
-
 
 def mask_by_random_topk(
         num_to_mask: int, 

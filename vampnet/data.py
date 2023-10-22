@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 import random
 import time
+import yaml
 
 import pandas as pd
 from audiotools import util
@@ -12,23 +13,18 @@ from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
 
 
-SALAD_BOWL_WEIGHTS = {
-    "Sounds of things": 1,
-    "Channel, environment and background": 0.01, 
-    "Natural sounds": 1.2, 
-    "Human sounds": 1, 
-    "Music": 1.75,
-    "Animal": 1, 
-    "Source-ambiguous sounds": 0.8,
-}
-
 class DACDataset(torch.utils.data.Dataset):
 
     def __init__(self, 
-        metadata_csvs: List[str],
+        metadata_csvs: List[str] = None,
         seq_len: int = 1024,
-        split = "train"
+        split: str = None, 
+        classlist: list = None,
+        class_key: str = "label",
+        class_weights: dict = None, 
     ):
+        assert metadata_csvs is not None, "Must provide metadata_csvs"
+        assert split is not None, f"split must be provided but got {split}"
         
         # load the metadata csvs
         self.metadata = []
@@ -36,33 +32,65 @@ class DACDataset(torch.utils.data.Dataset):
             self.metadata.append(pd.read_csv(csv))
         
         self.metadata = pd.concat(self.metadata)
+        print(f"loaded metadata with {len(self.metadata)} rows")
 
         # filter by split
-        self.metadata = self.metadata[self.metadata.split == split]
+        if split != "all":
+            self.metadata = self.metadata[self.metadata['split'] == split]
+        print(f"resolved split: {split}")
 
-        # make a dict of family -> list of files
-        self.families = self.metadata.family.unique()
-        self.family_to_files = {f: [] for f in self.families}
-        for _, row in self.metadata.iterrows():
-            self.family_to_files[row.family].append(row.dac_path)
+        self.class_key = class_key
+        assert class_key in self.metadata.columns, f"Class key {class_key} not in metadata columns {self.metadata.columns}"
 
-        # print stats
-        print(f"Found {len(self.metadata)} files in {metadata_csvs}.")
-        for f, files in self.family_to_files.items():
-            print(f"{f}: {len(files)}")
+        # resolve classlist
+        if classlist is not None:
+            self.classlist = classlist
+            for _cls in classlist:
+                tru_classlist = self.metadata[self.class_key].unique().tolist()
+                assert _cls in tru_classlist, f"Class {_cls} not in metadata classlist {tru_classlist}"
 
+            # filter the metadata by the classlist
+            self.metadata = self.metadata[self.metadata[self.class_key].isin(classlist)]
+        else:
+            self.classlist = self.metadata[class_key].unique().tolist()
+        print(f"resolved classlist: {self.classlist}")
+        print(f'metadata now has {len(self.metadata)} rows')
+
+
+        # load the class weights for sampling if any
+        # resolve class weights
+        if class_weights is not None:
+            assert class_weights.keys() == self.classlist, f"Class weights keys {class_weights.keys()} do not match classlist {self.classlist}"
+            self.class_weights = class_weights
+        else:
+            self.class_weights = None
+        print(f"resolved class weights: {self.class_weights}")
+    
         self.seq_len = seq_len
 
     def __len__(self):
-        return sum([len(files) for files in self.family_to_files.values()])
+        return len(self.metadata)
     
     def __getitem__(self, idx, attempt=0):
         util.seed(idx)
-        # grab a random family
-        family = random.choices(self.families, weights=[SALAD_BOWL_WEIGHTS[f] for f in self.families], k=1)[0]
+        data = {}
 
-        # grab a file from that family
-        file = random.choice(self.family_to_files[family])
+        # 1. Sample a class according to the weights if class_cond_weights is provided
+        if self.class_weights is not None:
+            selected_class = random.choices(self.classlist, weights=list(self.class_weights.values()), k=1)[0]
+            
+            # 2. Pick a file from that class, add the classname to the data{}
+            class_files = self.metadata[self.metadata[self.class_key] == selected_class]
+            if class_files.empty:
+                raise ValueError(f"No files found for class: {selected_class}")
+            
+            file = random.choice(class_files['dac_path'].tolist())  
+        else:
+            smpld = self.metadata.sample(1)
+            file = smpld['dac_path'].tolist()[0] 
+
+            selected_class = smpld[self.class_key].tolist()[0]
+            data['label'] = torch.tensor(self.classlist.index(selected_class), dtype=torch.long)
 
         try:
             artifact = DACFile.load(file)
@@ -94,12 +122,13 @@ class DACDataset(torch.utils.data.Dataset):
             codes = torch.nn.functional.pad(codes, (0, pad_len))
             pad_mask[:, -pad_len:] = 0
 
-
-        return {
+        data.update({
             "codes": codes,
             "file": file,
             "pad_mask": pad_mask,
-        }
+        })
+
+        return data
 
     @staticmethod
     def collate(batch):

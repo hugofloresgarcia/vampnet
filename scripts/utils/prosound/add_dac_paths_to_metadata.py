@@ -39,4 +39,4 @@ if __name__ == "__main__":
     args = argbind.parse_args()
 
     with argbind.scope(args):
-        main()
+        main() 

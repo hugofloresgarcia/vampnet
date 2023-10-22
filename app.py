@@ -38,7 +38,6 @@ def load_interface():
 
 
 
-
 interface = load_interface()
 
 
@@ -74,12 +73,30 @@ def load_example_audio():
     return "./assets/example.wav"
 
 
+dac_path = "./models/dac/weights.pt"
+MODELS = {
+    "default": "./runs/prosound-full/latest/vampnet/weights.pth", 
+    "piano": "./runs/salad_bowl/piano/latest/vampnet/weights.pth"
+}
+
+def load_model(model_key):
+    global interface
+    coarse_path = MODELS[model_key]
+    interface = Interface(
+        coarse_ckpt=coarse_path
+    )
+    return interface
+
 def _vamp(data, return_mask=False):
+
+    interface = load_model(data[model_choice])
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
     sig = interface.preprocess(sig)
+
+    loudness = sig.loudness()
 
     if data[pitch_shift_amt] != 0:
         sig = shift_pitch(sig, data[pitch_shift_amt])
@@ -149,6 +166,8 @@ def _vamp(data, return_mask=False):
 
     sig = interface.to_signal(zv).cpu()
     print("done")
+
+    sig = sig.normalize(loudness)
 
     sig.write(out_dir / "output.wav")
 
@@ -469,14 +488,7 @@ with gr.Blocks() as demo:
                     label="sample cutoff",
                     minimum=0.0,
                     maximum=1.0,
-                    value=0.5, 
-                    step=0.01
-                )
-                sample_cutoff = gr.Slider(
-                    label="sample cutoff",
-                    minimum=0.0,
-                    maximum=1.0,
-                    value=0.5, 
+                    value=1.0, 
                     step=0.01
                 )
 
@@ -504,8 +516,6 @@ with gr.Blocks() as demo:
                 precision=0,
             )
 
-
-        # mask settings
         with gr.Column():
 
             # lora_choice = gr.Dropdown(
@@ -514,6 +524,12 @@ with gr.Blocks() as demo:
             #     value=LORA_NONE, 
             #     visible=False
             # )
+
+            model_choice = gr.Dropdown(
+                label="model choice", 
+                choices=list(MODELS.keys()),
+                value="vampnet", 
+            )
 
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
@@ -555,9 +571,10 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             # lora_choice,
+            model_choice,
             n_mask_codebooks,
             pitch_shift_amt, 
-            sample_cutoff
+            sample_cutoff, 
         }
   
     # connect widgets

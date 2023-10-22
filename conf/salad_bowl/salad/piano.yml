@@ -1,0 +1,7 @@
+$include:
+  - conf/salad_bowl/salad/salad-base.yml
+
+DACDataset.classlist: 
+- "piano"
+
+save_path: runs/salad_bowl/piano

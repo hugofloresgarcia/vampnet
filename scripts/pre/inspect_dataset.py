@@ -164,24 +164,17 @@ def copy_representative_files(df: pd.DataFrame, output_dir: Path, max_files: int
 
 @argbind.bind(without_prefix=True)
 def inspect_dataset(
-    folder: str = None, 
+    metadata_path: str = None,
     sample_files: int = 50, 
     collect_tags: bool = False,
     yamnet_cache_dir: str = None,
-    name: str = None
+    output_dir: str = None,
 ):
-    assert folder is not None, "folder must be specified"
+    df = pd.read_csv(metadata_path)
+    print(f"Loaded metadata with {len(df)} rows")
 
-    name = Path(folder).name if name is None else name
-    output_dir = Path("data") / "metadata" / name
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"finding audio...")
-    audio_files = at.util.find_audio(folder)
-    print(f"found {len(audio_files)} audio files")
     metadata = []
-    for file in tqdm.tqdm(audio_files):
+    for file in tqdm.tqdm(df['audio_path'].to_list()):
         try:
             info = at.util.info(file)
         except:
@@ -191,7 +184,7 @@ def inspect_dataset(
         meta = {
             "duration": info.duration, 
             "sample_rate": info.sample_rate,
-            "filename": file,
+            "audio_path": file,
             "name": Path(file).name,
             "num_channels": info.num_channels,
         }
@@ -199,7 +192,7 @@ def inspect_dataset(
             sig = at.AudioSignal(file)
             try: 
                 tags, embeddings = yamnet_tag(sig, 
-                    data_dir=folder,
+                    data_dir=df['audio_root'].iloc[0],
                     cache_dir=yamnet_cache_dir
                 )
 
@@ -211,7 +204,9 @@ def inspect_dataset(
 
         metadata.append(meta)
 
-    df = pd.DataFrame(metadata)
+    # add the mtadata to the dataframe
+    metadata = pd.DataFrame(metadata)
+    df = pd.concat([df, metadata], axis=1)
 
     artifacts_dir = output_dir / "artifacts"
 

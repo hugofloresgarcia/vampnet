@@ -316,10 +316,6 @@ class Interface(torch.nn.Module):
     def coarse_vamp(self, z, mask, return_mask=False, gen_fn=None, **kwargs):
         # coarse z
         cz = z[:, : self.coarse.n_codebooks, :].clone()
-        assert cz.shape[-1] <= self.s2t(
-            self.coarse.chunk_size_s
-        ), f"the sequence of tokens provided must match the one specified in the coarse chunk size, but got {cz.shape[-1]} and {self.s2t(self.coarse.chunk_size_s)}"
-
         mask = mask[:, : self.coarse.n_codebooks, :]
 
         cz_masked, mask = apply_mask(cz, mask, self.coarse.special_tokens["MASK"])

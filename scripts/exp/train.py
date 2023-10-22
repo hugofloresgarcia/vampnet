@@ -53,8 +53,8 @@ torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
 
 # Install to make things look nice
 warnings.filterwarnings("ignore", category=UserWarning)
-# pretty.install()
-# install()
+pretty.install()
+install()
 
 # optim
 Accelerator = argbind.bind(at.ml.Accelerator, without_prefix=True)
@@ -62,66 +62,22 @@ CrossEntropyLoss = argbind.bind(nn.CrossEntropyLoss)
 AdamW = argbind.bind(torch.optim.AdamW)
 NoamScheduler = argbind.bind(vampnet.scheduler.NoamScheduler)
 
-# transforms
-filter_fn = lambda fn: hasattr(fn, "transform") and fn.__qualname__ not in [
-    "BaseTransform",
-    "Compose",
-    "Choose",
-]
-tfm = argbind.bind_module(transforms, "train", "val", filter_fn=filter_fn)
-
 # model
 VampNet = argbind.bind(VampNet)
 
 # data
-AudioLoader = argbind.bind(at.datasets.AudioLoader)
-AudioDataset = argbind.bind(at.datasets.AudioDataset, "train", "val")
+DACDataset = argbind.bind(DACDataset, "train", "val", "sample")
 
 IGNORE_INDEX = -100
 
 
-@argbind.bind("train", "val", without_prefix=True)
-def build_transform():
-    transform = transforms.Compose(
-        tfm.Identity(),
-        # tfm.VolumeNorm(("const", -24)),
-        # tfm.PitchShift(),
-        # tfm.RescaleAudio(),
-    )
-    return transform
-
-
-@torch.no_grad()
-def apply_transform(transform_fn, batch):
-    sig: AudioSignal = batch["signal"]
-    kwargs = batch["transform_args"]
-
-    sig: AudioSignal = transform_fn(sig.clone(), **kwargs)
-    return sig
-
-
-def build_datasets(
-        args, sample_rate: int, 
-        metadata_paths: List[str], 
-        seq_len: int, hop_length: int
-    ):
-    train_data = DACDataset(
-        metadata_paths,
-        seq_len,
-        split="train"
-    )
-
-    val_data = DACDataset(
-        metadata_paths,
-        seq_len,
-        split="val"
-    )
-
-    sample_data = DACDataset(
-        metadata_paths,
-        seq_len,
-        split="val"
-    )
+def build_datasets(args):
+    with argbind.scope(args, "train"):
+        train_data = DACDataset()
+    with argbind.scope(args, "val"):
+        val_data = DACDataset()
+    with argbind.scope(args, "test"):
+        sample_data = DACDataset()
 
     return train_data, val_data, sample_data
 
@@ -223,37 +179,12 @@ class State:
 
     rng: torch.quasirandom.SobolEngine
 
-    has_dac_data: bool
-    train_data: Union[AudioDataset, DACDataset]
-    val_data: AudioDataset
-    sample_data: AudioDataset
+    train_data: DACDataset
+    val_data: DACDataset
+    sample_data: DACDataset
 
     tracker: Tracker
 
-
-def build_context_mask(batch, state: State):
-    padding_s = batch['padding_s'] # will be a tensor of shape (batch_size, )
-
-    codec_hop = state.codec.hop_length
-    codec_sr = state.codec.sample_rate
-
-    # compute the number of frames in the target duration
-    tgt_frames = accel.unwrap(state.model).max_seq_len
-
-    # compute the number of frames in the padding duratio
-    padding_frames = (padding_s * codec_sr / codec_hop).long()
-
-    # make a mask of shape (batch_size, tgt_frames)
-    mask = torch.ones((batch['signal'].shape[0], tgt_frames)).long()
-
-    # set the padding frames to False
-    # Iterate over each sample and mask the padding frames
-    for i, pad_frame in enumerate(padding_frames):
-        if pad_frame < tgt_frames and pad_frame > 0:
-            mask[i, -pad_frame:] = 0 # Set the last padding frames to 0 (or False)
-
-    assert not mask.sum() == 0
-    return mask.to(batch['signal'].device)
 
 
 def encode(state, signal):
@@ -266,21 +197,9 @@ def encode(state, signal):
 
 
 def preprocess(state: State, batch: dict, stage: str):
-    dataset = state.train_data if stage == "train" else state.val_data
-
-    if isinstance(dataset, DACDataset):
-        z = batch["codes"]
-        ctx_mask = batch["ctx_mask"]
-    elif isinstance(dataset, AudioDataset):
-        signal = apply_transform(dataset.transform, batch)
-        ctx_mask = build_context_mask(batch, state)
-        with accel.autocast():
-            z = encode(state, signal)
-    else:
-        raise ValueError(f"Unknown dataset type {type(dataset)}")
-
+    z = batch["codes"]
+    ctx_mask = batch["ctx_mask"]
     return z, ctx_mask
-
 
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
@@ -477,7 +396,7 @@ def save_sampled(state, z, writer):
         )
 
 
-def save_imputation(state, z, val_idx, writer):
+def save_inpainting(state, z, val_idx, writer):
     n_prefix = int(z.shape[-1] * 0.25)
     n_suffix = int(z.shape[-1] *  0.25)
 
@@ -573,8 +492,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
             )
 
     save_sampled(state=state, z=z, writer=writer)
-    save_imputation(state=state, z=z, val_idx=val_idx, writer=writer)
-
+    save_inpainting(state=state, z=z, val_idx=val_idx, writer=writer)
 
 
 @argbind.bind(without_prefix=True)
@@ -588,14 +506,25 @@ def load(
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
     dac_path: str = "./models/dac/weights.pth",
-    metadata_paths: List[str] = None,
     compile: bool = False, 
 ) -> State:
+    
+    # load the datasets
+    train_data, val_data, sample_data = build_datasets(args)
+    # classlist = train_data.classlist if train_data.class_cond == True else []
+
+    # load the codec
     codec = load_dac(load_path=dac_path)
     codec.eval()
     codec.to(accel.device)
 
+    # load vampnet
     model, v_extra = None, {}
+    
+    if args["fine_tune"]:
+        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
+        model = VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu")
 
     if resume:
         kwargs = {
@@ -610,18 +539,18 @@ def load(
             raise ValueError(
                 f"Could not find a VampNet checkpoint in {kwargs['folder']}"
             )
-
-    if args["fine_tune"]:
-        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = VampNet.load(location=Path(fine_tune_checkpoint), 
-                         map_location="cpu")
+        
 
     model = VampNet() if model is None else model
     if compile: 
         model = torch.compile(model)
-    model = accel.prepare_model(model, find_unused_parameters=True if fine_tune_checkpoint is not None else False)
 
-    # assert accel.unwrap(model).n_codebooks == codec.quantizer.n_codebooks
+    local_rank = os.getenv("LOCAL_RANK", None)
+    if torch.cuda.device_count() > 1 and local_rank is not None:
+        model = accel.prepare_model(model, find_unused_parameters=True if args["fine_tune"] else False)
+    else:
+        model = accel.prepare_model(model)
+
     assert accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
 
     optimizer = AdamW(model.parameters(), use_zero=accel.use_ddp)
@@ -647,15 +576,6 @@ def load(
         with open(f"{save_path}/model.txt", "w") as f:
             f.write(repr(accel.unwrap(model)))
 
-    # load the datasets
-    train_data, val_data, sample_data = build_datasets(
-        args, sample_rate,
-        metadata_paths=metadata_paths, 
-        seq_len=accel.unwrap(model).max_seq_len,
-        hop_length=codec.hop_length
-    )
-    has_dac_data = isinstance(train_data, DACDataset)
-
     return State(
         tracker=tracker,
         model=model,
@@ -664,7 +584,6 @@ def load(
         scheduler=scheduler,
         criterion=criterion,
         rng=rng,
-        has_dac_data=has_dac_data,
         train_data=train_data,
         val_data=val_data,
         sample_data=sample_data,
@@ -779,6 +698,9 @@ def train(
                     last_iter = (
                         tracker.step == num_iters - 1 if num_iters is not None else False
                     )
+
+                    if tracker.step == 0:
+                        continue
 
                     if tracker.step % sample_freq == 0 or last_iter:
                         tracker.print(f"Saving samples at iteration {tracker.step}")

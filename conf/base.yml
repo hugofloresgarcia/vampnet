@@ -30,12 +30,6 @@ VampNet.n_heads: 10
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 512
 
-AudioDataset.loudness_cutoff: -30.0
-AudioDataset.without_replacement: true
-AudioLoader.shuffle: true
-AudioDataset.num_channels: 1
-
-dac_cache: null
-
-train/AudioDataset.n_examples: 10000000
-val/AudioDataset.n_examples: 2500
+train/DACDataset.split: "train"
+val/DACDataset.split: "val"
+test/DACDataset.split: "test"

@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 import argbind
 import audiotools as at
@@ -85,9 +86,11 @@ def condition_and_save(
     assert audio_folder is not None, "audio_folder must be specified"
     assert output_folder is not None, "output_folder must be specified"
 
-    audio_files = list(at.util.find_audio(Path(audio_folder)))
-    import random
+    print(f"looking for audio files in {audio_folder}")
+    audio_files = list(at.util.find_audio(Path(audio_folder), ext=[".wav", ".mp3", ".flac", ".WAV", ".MP3", ".FLAC"]))
+    
     random.shuffle(audio_files)
+    print(f"Found {len(audio_files)} audio files")
 
     if conditioner_name == "dac":
         conditioner = DACProcessor()
@@ -108,12 +111,12 @@ def condition_and_save(
             if sig is None:
                 # print(f"skipping {audio_file.name}")
                 continue
+            
             sig.path_to_file = audio_file.relative_to(audio_folder)
             process_fn = process_dac if conditioner_name == "dac" else process_audio
             features = process_fn(
                 conditioner=conditioner, 
                 sig=sig)
-            
 
             output_path.parent.mkdir(exist_ok=True, parents=True)
             features.save(output_path)

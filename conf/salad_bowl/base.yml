@@ -8,6 +8,10 @@ num_workers: 18
 VampNet.max_seq_len: 512
 VampNet.embedding_dim: 1024
 
-metadata_paths:
+sample_freq: 1000
+save_iters: [1000, 2000, 4000, 8000, 10000, 12000, 50000, 100000]
+
+DACDataset.seq_len: 512
+DACDataset.metadata_paths:
 - data/metadata/prosound_redacted/metadata.csv
 - data/metadata/disco-300k/metadata.csv

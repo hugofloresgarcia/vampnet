@@ -1,0 +1,7 @@
+$include:
+  - conf/salad_bowl/salad/salad-base.yml
+
+DACDataset.classlist: 
+- "cartoon"
+
+save_path: runs/salad_bowl/cartoon
