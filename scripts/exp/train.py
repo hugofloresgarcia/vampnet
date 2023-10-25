@@ -496,6 +496,14 @@ def load(
 
     model, v_extra = None, {}
 
+    if args["fine_tune"]:
+        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
+        model = torch.compile(
+            VampNet.load(location=Path(fine_tune_checkpoint), 
+                         map_location="cpu", 
+            )
+        )
+        
     if resume:
         kwargs = {
             "folder": f"{save_path}/{tag}",
@@ -511,13 +519,6 @@ def load(
             )
 
 
-    if args["fine_tune"]:
-        assert fine_tune_checkpoint is not None, "Must provide a fine-tune checkpoint"
-        model = torch.compile(
-            VampNet.load(location=Path(fine_tune_checkpoint), 
-                         map_location="cpu", 
-            )
-        )
 
 
     model = torch.compile(VampNet()) if model is None else model
