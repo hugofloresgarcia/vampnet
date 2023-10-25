@@ -13,8 +13,6 @@ import gradio as gr
 from vampnet.interface import Interface
 from vampnet import mask as pmask
 
-from pyharp import ModelCard, build_endpoint
-
 Interface = argbind.bind(Interface)
 # AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
@@ -659,24 +657,5 @@ with gr.Blocks() as demo:
         outputs=[thank_you, download_file]
     )
 
-    # harp stuff
-    harp_inputs = [
-        input_audio, 
-        beat_mask_width,
-        sampletemp,
-    ]
-    
-    build_endpoint(
-        inputs=harp_inputs,  
-        output=output_audio, 
-        process_fn=harp_vamp,
-        card=ModelCard(
-            name="vampnet", 
-            description="Generate variations on music input, based on small prompts around the beat.", 
-            author="Hugo Flores García", 
-            tags=["music", "generative"]
-        ), 
-        visible=False
-    )
 
 demo.launch(share=True, enable_queue=True, debug=True)
