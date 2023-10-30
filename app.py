@@ -8,6 +8,7 @@ from dataclasses import dataclass, asdict
 import numpy as np
 import audiotools as at
 import argbind
+import torch
 
 import gradio as gr
 from vampnet.interface import Interface
@@ -16,7 +17,7 @@ from vampnet import mask as pmask
 Interface = argbind.bind(Interface)
 # AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
-conf = argbind.parse_args()
+
 
 
 from torch_pitch_shift import pitch_shift, get_fast_shifts
@@ -28,18 +29,46 @@ def shift_pitch(signal, interval: int):
     )
     return signal
 
-def load_interface():
-    with argbind.scope(conf):
-        interface = Interface()
+MODELS = {
+    "default": "conf/interface.yml", 
+    "xeno-canto": "conf/generated/xeno-canto/interface.yml",
+    "soundrangers": "conf/generated/soundrangers/interface.yml",
+    "prep-piano": "conf/generated/prep-piano/interface.yml",
+    "machines": "conf/generated/machines/interface.yml",
+    "knower": "conf/generated/knower/interface.yml",
+    "boleros": "conf/generated/boleros/interface.yml",
+    "soundrangers2": "/home/hugo/descript/vampnet-v0/conf/generated/soundrangers2/interface.yml"
+}
+
+def load_interface(_conf):
+    with argbind.scope(_conf):
+        interface = Interface(
+            wavebeat_ckpt=None,
+            device="cuda" if torch.cuda.is_available() else "cpu"
+            )
         # loader = AudioLoader()
         print(f"interface device is {interface.device}")
         return interface
+    
+def load_lora(interface, _conf):
+    interface.lora_load(
+        coarse_ckpt=_conf["Interface.coarse_ckpt"],
+        c2f_ckpt=_conf["Interface.coarse2fine_ckpt"],
+        full_ckpts=True
+    )
+    return interface
+    
 
+def load_conf(path):
+    with open(path, "r") as f:
+        cnf = yaml.safe_load(f)
+    return cnf
 
+# conf = argbind.parse_args()
+conf = load_conf(MODELS["default"])
+curr_conf_key = "default"
 
-
-interface = load_interface()
-
+interface = load_interface(conf)
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -66,18 +95,33 @@ def load_example_audio():
 
 def _vamp(data, return_mask=False):
 
+    global interface, curr_conf_key
+    if data[model_choice] != curr_conf_key:
+        print(f"loading new interface {data[model_choice]}")
+        curr_conf_key = data[model_choice]
+        conf = load_conf(MODELS[curr_conf_key])
+        interface = load_lora(interface, conf)
+        print(f"interface device is {interface.device}")
+
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
+
     sig = at.AudioSignal(data[input_audio])
     sig = interface.preprocess(sig)
+    sig = sig.to(interface.device)
 
+    print(f"computing loudness")
     loudness = sig.loudness()
     print(f"input loudness is {loudness}")
 
     if data[pitch_shift_amt] != 0:
+        print(f"pitch shifting by {data[pitch_shift_amt]} semitones")
         sig = shift_pitch(sig, data[pitch_shift_amt])
+        print(f"pitch shifting done")
 
+    print(f"encoding")
     z = interface.encode(sig)
+    print(f"encoding done")
 
     ncc = data[n_conditioning_codebooks]
 
@@ -100,7 +144,7 @@ def _vamp(data, return_mask=False):
     )
     if data[onset_mask_width] > 0:
         mask = pmask.mask_or(
-            mask, pmask.onset_mask(sig, z, interface, width=data[onset_mask_width])
+            mask, pmask.onset_mask(sig.clone().cpu(), z, interface, width=data[onset_mask_width])
         )
     if data[beat_mask_width] > 0:
         beat_mask = interface.make_beat_mask(
@@ -143,6 +187,7 @@ def _vamp(data, return_mask=False):
     np.savetxt(out_dir / "mask.txt", mask[:,0,:].long().cpu().numpy())
 
     _seed = data[seed] if data[seed] > 0 else None
+    print(f"processing coarse...")
     zv, mask_z = interface.coarse_vamp(
         z, 
         mask=mask,
@@ -158,14 +203,16 @@ def _vamp(data, return_mask=False):
         seed=_seed,
         sample_cutoff=data[sample_cutoff],
     )
-
+    
+    
     if use_coarse2fine: 
+        print(f"processing fine...")
         zv = interface.coarse_to_fine(
             zv, 
             mask_temperature=data[masktemp]*10, 
             sampling_temperature=data[sampletemp],
             mask=mask,
-            sampling_steps=data[num_steps],
+            sampling_steps=data[num_steps] // 2,
             sample_cutoff=data[sample_cutoff], 
             seed=_seed,
         )
@@ -575,12 +622,12 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
-            # lora_choice = gr.Dropdown(
-            #     label="lora choice", 
-            #     choices=list(loras.keys()),
-            #     value=LORA_NONE, 
-            #     visible=False
-            # )
+            model_choice = gr.Dropdown(
+                label="lora choice", 
+                choices=list(MODELS.keys()),
+                value="default", 
+                visible=True
+            )
 
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
@@ -624,7 +671,7 @@ with gr.Blocks() as demo:
             beat_mask_width,
             beat_mask_downbeats,
             seed, 
-            # lora_choice,
+            model_choice,
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff

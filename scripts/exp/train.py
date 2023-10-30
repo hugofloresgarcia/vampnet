@@ -80,20 +80,43 @@ def build_transform():
 
 @torch.no_grad()
 def apply_transform(transform_fn, batch):
-    sig: AudioSignal = batch["signal"]
+    sig_in: AudioSignal = batch["input"]['signal']
+    sig_out: AudioSignal = batch["output"]['signal']
     kwargs = batch["transform_args"]
 
-    sig: AudioSignal = transform_fn(sig.clone(), **kwargs)
-    return sig
+    sig_in: AudioSignal = transform_fn(sig_in.clone(), **kwargs)
+    sig_out: AudioSignal = transform_fn(sig_out.clone(), **kwargs)
+    return sig_in, sig_out
 
 
-def build_datasets(args, sample_rate: int):
+def vocal_imitation_matcher(path_in, path_out):
+    pin = Path(path_in)
+    pout = Path(path_out)
+    assert pin.exists() and pout.exists()
+
+    indices_match = pin.stem[0:3] == pout.stem[0:3]
+    diff_parent_dirs = pin.parent != pout.parent
+    return indices_match and diff_parent_dirs
+
+def build_datasets(args, loaders, sample_rate: int):
     with argbind.scope(args, "train"):
         train_data = AudioDataset(
-            AudioLoader(), sample_rate, transform=build_transform()
+            {k: AudioLoader(**v) for k, v in loaders.items()}, 
+            sample_rate, 
+            aligned=True,
+            matcher=vocal_imitation_matcher, 
+            without_replacement=False, 
+            transform=build_transform()
         )
     with argbind.scope(args, "val"):
-        val_data = AudioDataset(AudioLoader(), sample_rate, transform=build_transform())
+        val_data = AudioDataset(
+            {k: AudioLoader(**v) for k, v in loaders.items()}, 
+            sample_rate, 
+            aligned=True,
+            matcher=vocal_imitation_matcher,
+            without_replacement=False, 
+            transform=build_transform()
+        )
     return train_data, val_data
 
 
@@ -198,27 +221,33 @@ class State:
 
     tracker: Tracker
 
+    apply_loss_to_all_tokens: bool = True
+
 
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
     state.model.train()
     batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.train_data.transform, batch)
+    sig_in, sig_out = apply_transform(state.train_data.transform, batch)
+    breakpoint()
 
     output = {}
     vn = accel.unwrap(state.model)
     with accel.autocast():
         with torch.inference_mode():
             state.codec.to(accel.device)
-            z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-            z = z[:, : vn.n_codebooks, :]
+            z_in = state.codec.encode(sig_in.samples, sig_in.sample_rate)["codes"]
+            z_in = z_in[:, : vn.n_codebooks, :]
 
-        n_batch = z.shape[0]
+            z_out = state.codec.encode(sig_out.samples, sig_out.sample_rate)["codes"]
+            z_out = z_out[:, : vn.n_codebooks, :]
+
+        n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z, r)
+        mask = pmask.random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        z_mask, mask = pmask.apply_mask(z_in, mask, vn.mask_token)
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -227,7 +256,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
             z_hat = state.model(z_mask_latent)
 
         target = codebook_flatten(
-            z[:, vn.n_conditioning_codebooks :, :],
+            z_out[:, vn.n_conditioning_codebooks :, :],
         )
 
         flat_mask = codebook_flatten(
@@ -235,7 +264,11 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         )
 
         # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        if state.apply_loss_to_all_tokens:
+            t_masked = target
+        else:
+            t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+
         output["loss"] = state.criterion(z_hat, t_masked)
 
         _metrics(
@@ -250,7 +283,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
     accel.backward(output["loss"])
 
     output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
-    output["other/batch_size"] = z.shape[0]
+    output["other/batch_size"] = n_batch
 
 
     accel.scaler.unscale_(state.optimizer)
@@ -274,25 +307,27 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     state.model.eval()
     state.codec.eval()
     batch = at.util.prepare_batch(batch, accel.device)
-    signal = apply_transform(state.val_data.transform, batch)
+
+    sig_in, sig_out = apply_transform(state.val_data.transform, batch)
+    z_in = state.codec.encode(sig_in.samples, sig_in.sample_rate)["codes"]
+    z_out = state.codec.encode(sig_out.samples, sig_out.sample_rate)["codes"]
 
     vn = accel.unwrap(state.model)
-    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-    z = z[:, : vn.n_codebooks, :]
+    z_in = z_in[:, : vn.n_codebooks, :]
 
-    n_batch = z.shape[0]
+    n_batch = z_in.shape[0]
     r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-    mask = pmask.random(z, r)
+    mask = pmask.random(z_in, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+    z_mask, mask = pmask.apply_mask(z_in, mask, vn.mask_token)
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
     z_hat = state.model(z_mask_latent)
 
     target = codebook_flatten(
-        z[:, vn.n_conditioning_codebooks :, :],
+        z_out[:, vn.n_conditioning_codebooks :, :],
     )
 
     flat_mask = codebook_flatten(
@@ -301,7 +336,11 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
     output = {}
     # replace target with ignore index for masked tokens
-    t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+    if state.apply_loss_to_all_tokens:
+        t_masked = target
+    else:
+        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+
     output["loss"] = state.criterion(z_hat, t_masked)
 
     _metrics(
@@ -436,17 +475,18 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     batch = [state.val_data[i] for i in val_idx]
     batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
 
-    signal = apply_transform(state.val_data.transform, batch)
+    sig_in, sig_out = apply_transform(state.val_data.transform, batch)
 
-    z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-    z = z[:, : vn.n_codebooks, :]
+    z_in = state.codec.encode(sig_in.samples, sig_in.sample_rate)["codes"]
+    z_out = state.codec.encode(sig_out.samples, sig_out.sample_rate)["codes"]
+    z_in = z_in[:, : vn.n_codebooks, :]
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
 
-    mask = pmask.random(z, r)
+    mask = pmask.random(z_in, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+    z_mask, mask = pmask.apply_mask(z_in, mask, vn.mask_token)
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -454,15 +494,16 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
-    z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
+    z_pred = torch.cat([z_in[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
 
     generated = vn.to_signal(z_pred, state.codec)
-    reconstructed = vn.to_signal(z, state.codec)
+    reconstructed = vn.to_signal(z_out, state.codec)
     masked = vn.to_signal(z_mask.squeeze(1), state.codec)
 
     for i in range(generated.batch_size):
         audio_dict = {
-            "original": signal[i],
+            "sig in": sig_in[i],
+            "sig out": sig_out[i],
             "masked": masked[i],
             "generated": generated[i],
             "reconstructed": reconstructed[i],
@@ -475,8 +516,8 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
                 plot_fn=None,
             )
 
-    save_sampled(state=state, z=z, writer=writer)
-    save_imputation(state=state, z=z, val_idx=val_idx, writer=writer)
+    save_sampled(state=state, z=z_in, writer=writer)
+    save_imputation(state=state, z=z_in, val_idx=val_idx, writer=writer)
 
 
 
@@ -490,6 +531,7 @@ def load(
     tag: str = "latest",
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 5.0,
+    loaders: dict = {}
 ) -> State:
     codec = DAC.load(args["codec_ckpt"], map_location="cpu")
     codec.eval()
@@ -553,7 +595,7 @@ def load(
             f.write(repr(accel.unwrap(model)))
 
     # load the datasets
-    train_data, val_data = build_datasets(args, sample_rate)
+    train_data, val_data = build_datasets(args, loaders, sample_rate)
 
     return State(
         tracker=tracker,

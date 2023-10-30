@@ -1,0 +1,20 @@
+$include:
+  - conf/lora/lora.yml
+
+fine_tune: true
+fine_tune_checkpoint: ./models/vampnet/coarse.pth
+
+save_path: ./runs/vocal-imitation
+
+batch_size: 8
+AudioDataset.duration: 7
+
+loaders: 
+  input: 
+    sources: [/media/CHONK/hugo/vocal-imitation/VocalImitationSet/vocal_imitations/included]
+  output:
+    sources: [/media/CHONK/hugo/vocal-imitation/VocalImitationSet/original_recordings/reference]
+
+train/AudioDataset.n_examples: 10000000
+
+val/AudioDataset.n_examples: 2000
