@@ -2,9 +2,9 @@
 codec_ckpt: ./models/vampnet/codec.pth
 save_path: ckpt
 
-num_iters: 1000000000
-save_iters: [10000, 50000, 100000, 300000, 500000, 1000000]
-val_idx: [0,1,2,3,4,5,6,7,8,9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+num_iters: 1000002
+save_iters: [100000, 200000, 400000, 600000, 1000000]
+val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 sample_freq: 10000
 val_freq: 1000
 
@@ -24,9 +24,9 @@ NoamScheduler.warmup: 3000
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
-VampNet.embedding_dim: 768
-VampNet.n_layers: 10
-VampNet.n_heads: 10
+VampNet.embedding_dim: 1024
+VampNet.n_layers: 12
+VampNet.n_heads: 12
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 512
 

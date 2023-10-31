@@ -76,7 +76,12 @@ def load_example_audio():
 dac_path = "./models/dac/weights.pt"
 MODELS = {
     "default": "./runs/prosound-full/latest/vampnet/weights.pth", 
-    "piano": "./runs/salad_bowl/piano/latest/vampnet/weights.pth"
+    "piano": "./runs/salad_bowl/piano/latest/vampnet/weights.pth",
+    "birds": "./runs/salad_bowl/birds/latest/vampnet/weights.pth",
+    "chimes": "./runs/salad_bowl/chimes/latest/vampnet/weights.pth",
+    "cooking": "./runs/salad_bowl/cooking/latest/vampnet/weights.pth",
+    "machines": "./runs/salad_bowl/machines/latest/vampnet/weights.pth",
+    "cartoon": "./runs/salad_bowl/cartoon/latest/vampnet/weights.pth",
 }
 
 def load_model(model_key):

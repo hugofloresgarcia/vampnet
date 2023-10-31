@@ -184,40 +184,33 @@ class State:
     sample_data: DACDataset
 
     tracker: Tracker
+    compute_loss_on_masked_tokens_only: bool = True
 
-
-
-def encode(state, signal):
-    vn = accel.unwrap(state.model)
-    with torch.inference_mode():
-        state.codec.to(accel.device)
-        z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-        z = z[:, : vn.n_codebooks, :]
-    return z
 
 
 def preprocess(state: State, batch: dict, stage: str):
-    z = batch["codes"]
+    z_in = batch["in_codes"]
+    z_out = batch["out_codes"]
     ctx_mask = batch["ctx_mask"]
-    return z, ctx_mask
+    return z_in, z_out, ctx_mask
 
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
     state.model.train()
     batch = at.util.prepare_batch(batch, accel.device)
 
-    z, ctx_mask = preprocess(state, batch, "train")
+    z_in, z_out, ctx_mask = preprocess(state, batch, "train")
 
     output = {}
     vn = accel.unwrap(state.model)
     with accel.autocast():
 
-        n_batch = z.shape[0]
+        n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z, r)
+        mask = pmask.random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
+        z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -226,7 +219,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
             z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
         target = codebook_flatten(
-            z[:, vn.n_conditioning_codebooks :, :],
+            z_out[:, vn.n_conditioning_codebooks :, :],
         )
 
         # ctx mask is 1 where there is real data, 0 where there is padding
@@ -234,12 +227,15 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         # we want the loss mask to be 1 where we infer and 0 where we condition
         # loss mask = ctx_mask & mask
         ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
-        loss_mask = codebook_flatten(
-            torch.logical_and(
-                mask[:, vn.n_conditioning_codebooks :, :].bool(),
-                ctx_mask,
+        if state.compute_loss_on_masked_tokens_only:
+            loss_mask = codebook_flatten(
+                torch.logical_and(
+                    mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                    ctx_mask,
+                )
             )
-        )
+        else:
+            loss_mask = codebook_flatten(ctx_mask)
 
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
@@ -256,7 +252,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
     accel.backward(output["loss"])
 
     output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
-    output["other/batch_size"] = z.shape[0]
+    output["other/batch_size"] = n_batch
 
 
     accel.scaler.unscale_(state.optimizer)
@@ -281,39 +277,41 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     state.codec.eval()
 
     batch = at.util.prepare_batch(batch, accel.device)
-    z, ctx_mask = preprocess(state, batch, "val")
+    z_in, z_out, ctx_mask = preprocess(state, batch, "val")
 
     vn = accel.unwrap(state.model)
     
     output = {}
 
     with accel.autocast():
-        n_batch = z.shape[0]
+        n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z, r)
+        mask = pmask.random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
+        z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
         z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
         target = codebook_flatten(
-            z[:, vn.n_conditioning_codebooks :, :],
+            z_out[:, vn.n_conditioning_codebooks :, :],
         )
 
         # ctx mask is 1 where there is real data, 0 where there is padding
         # mask is 1 where there is generated data, 0 where there is real data
         # we want the loss mask to be 1 where we infer and 0 where we condition
         # loss mask = ctx_mask & mask
-        ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
-        loss_mask = codebook_flatten(
-            torch.logical_and(
-                mask[:, vn.n_conditioning_codebooks :, :].bool(),
-                ctx_mask,
+        if state.compute_loss_on_masked_tokens_only:
+            loss_mask = codebook_flatten(
+                torch.logical_and(
+                    mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                    ctx_mask,
+                )
             )
-        )
+        else:
+            loss_mask = codebook_flatten(ctx_mask)
 
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
@@ -451,17 +449,14 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     batch = [state.val_data[i] for i in val_idx]
     batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
 
-    # signal = apply_transform(state.sample_data.transform, batch)
-
-    # z = state.codec.encode(signal.samples, signal.sample_rate)["codes"]
-    z, ctx_mask = preprocess(state, batch, "sample")
-    z = z[:, : vn.n_codebooks, :]
+    z_in, z_out, ctx_mask = preprocess(state, batch, "sample")
+    z_in = z_in[:, : vn.n_codebooks, :]
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
-    mask = pmask.random(z, r)
+    mask = pmask.random(z_in, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
+    z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -469,11 +464,11 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
-    z_pred = torch.cat([z[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
+    z_pred = torch.cat([z_in[:, : vn.n_conditioning_codebooks, :], z_pred], dim=1)
     z_pred, _ = pmask.apply_mask(z_pred, (~mask.bool()).long(), z_mask)
 
     generated = vn.to_signal(z_pred, state.codec)
-    reconstructed = vn.to_signal(z, state.codec)
+    reconstructed = vn.to_signal(z_out, state.codec)
     masked = vn.to_signal(z_mask, state.codec, silence_mask=False)
 
     for i in range(generated.batch_size):
@@ -491,8 +486,8 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
                 plot_fn=None,
             )
 
-    save_sampled(state=state, z=z, writer=writer)
-    save_inpainting(state=state, z=z, val_idx=val_idx, writer=writer)
+    save_sampled(state=state, z=z_in, writer=writer)
+    save_inpainting(state=state, z=z_in, val_idx=val_idx, writer=writer)
 
 
 @argbind.bind(without_prefix=True)
