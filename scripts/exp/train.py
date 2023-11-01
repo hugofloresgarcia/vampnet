@@ -187,7 +187,6 @@ class State:
     compute_loss_on_masked_tokens_only: bool = True
 
 
-
 def preprocess(state: State, batch: dict, stage: str):
     z_in = batch[state.train_data.input_key]["codes"]
     z_out = batch[state.train_data.output_key]["codes"]
@@ -562,8 +561,6 @@ def load(
     
     criterion = CrossEntropyLoss()
 
-    sample_rate = codec.sample_rate
-
     # a better rng for sampling from our schedule
     rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=args["seed"])  
 
@@ -638,7 +635,7 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.train_data.collate,
-        prefetch_factor=8 if num_workers > 0 else None,
+        prefetch_factor=4 if num_workers > 0 else None,
     )
     val_dataloader = accel.prepare_dataloader(
         state.val_data,
@@ -668,62 +665,43 @@ def train(
     save_samples = when(lambda: accel.local_rank == 0)(save_samples)
     checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
 
-    def trace_handler(p):
-        output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=10)
-        tracker.print(output)
-        p.export_chrome_trace(str(Path(save_path) / (f"trace_{p.step_num}.json")))
-
     print("starting training loop.")
     with tracker.live:
-        # with profile(
-        #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-        #     record_shapes=True,
-        #     schedule=torch.profiler.schedule(
-        #         wait=0,
-        #         warmup=0,
-        #         active=0, 
-        #         repeat=1,
-        #     ),
-        #     on_trace_ready=trace_handler
-        # ) as prof:
-            done = False
-            while not done:
-                for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
-                    with record_function("train"):
-                        train_loop(state, batch, accel)
+        done = False
+        while not done:
+            for tracker.step, batch in enumerate(train_dataloader, start=tracker.step): 
+                train_loop(state, batch, accel)
 
-                    last_iter = (
-                        tracker.step == num_iters - 1 if num_iters is not None else False
-                    )
+                last_iter = (
+                    tracker.step == num_iters - 1 if num_iters is not None else False
+                )
+ 
+                if tracker.step == 0:
+                    continue
 
-                    # if tracker.step == 0:
-                        # continue
+                if tracker.step % sample_freq == 0 or last_iter:
+                    tracker.print(f"Saving samples at iteration {tracker.step}")
+                    with record_function("save_samples"):
+                        save_samples(state, val_idx, writer)
 
-                    if tracker.step % sample_freq == 0 or last_iter:
-                        tracker.print(f"Saving samples at iteration {tracker.step}")
-                        with record_function("save_samples"):
-                            save_samples(state, val_idx, writer)
+                if tracker.step % val_freq == 0 or last_iter:
+                    tracker.print(f"Validating at iteration {tracker.step}")
+                    with record_function("validate"):
+                        validate(state, val_dataloader, accel)
 
-                    if tracker.step % val_freq == 0 or last_iter:
-                        tracker.print(f"Validating at iteration {tracker.step}")
-                        with record_function("validate"):
-                            validate(state, val_dataloader, accel)
+                    checkpoint(
+                        state=state, 
+                        save_iters=save_iters,
+                        save_path=save_path, 
+                        fine_tune=fine_tune)
 
-                        checkpoint(
-                            state=state, 
-                            save_iters=save_iters, 
-                            save_path=save_path, 
-                            fine_tune=fine_tune)
+                    # Reset validation progress bar, print summary since last validation.
+                    tracker.done("val", f"Iteration {tracker.step}")
 
-                        # Reset validation progress bar, print summary since last validation.
-                        tracker.done("val", f"Iteration {tracker.step}")
-
-                    if last_iter:
-                        print(f"Finished training at iteration {tracker.step}")
-                        done = True
-                        break
-
-                    # prof.step()
+                if last_iter:
+                    print(f"Finished training at iteration {tracker.step}")
+                    done = True
+                    break
 
 
 if __name__ == "__main__":

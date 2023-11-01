@@ -8,14 +8,13 @@ val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
 val_freq: 1000
 
-batch_size: 64
-val_batch_size: 64
+batch_size: 24
+val_batch_size: 24
 num_workers: 16
 
 # Optimization
 amp: true
 
-# CrossEntropyLoss.label_smoothing: 0.0
 AdamW.lr: 0.001
 
 NoamScheduler.factor: 2.0
@@ -25,8 +24,8 @@ VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
 VampNet.embedding_dim: 1024
-VampNet.n_layers: 12
-VampNet.n_heads: 12
+VampNet.n_layers: 14
+VampNet.n_heads: 14
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 512
 
