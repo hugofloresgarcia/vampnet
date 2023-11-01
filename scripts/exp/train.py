@@ -189,9 +189,9 @@ class State:
 
 
 def preprocess(state: State, batch: dict, stage: str):
-    z_in = batch["in_codes"]
-    z_out = batch["out_codes"]
-    ctx_mask = batch["ctx_mask"]
+    z_in = batch[state.train_data.input_key]["codes"]
+    z_out = batch[state.train_data.output_key]["codes"]
+    ctx_mask = batch[state.train_data.input_key]["ctx_mask"]
     return z_in, z_out, ctx_mask
 
 @timer()
@@ -283,7 +283,8 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     
     output = {}
 
-    with accel.autocast():
+    dtype = torch.bfloat16 if accel.amp else None
+    with accel.autocast(dtype):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
@@ -303,6 +304,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         # mask is 1 where there is generated data, 0 where there is real data
         # we want the loss mask to be 1 where we infer and 0 where we condition
         # loss mask = ctx_mask & mask
+        ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
         if state.compute_loss_on_masked_tokens_only:
             loss_mask = codebook_flatten(
                 torch.logical_and(
@@ -673,17 +675,17 @@ def train(
 
     print("starting training loop.")
     with tracker.live:
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
-            record_shapes=True,
-            schedule=torch.profiler.schedule(
-                wait=10,
-                warmup=1,
-                active=10, 
-                repeat=2,
-            ),
-            on_trace_ready=trace_handler
-        ) as prof:
+        # with profile(
+        #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], 
+        #     record_shapes=True,
+        #     schedule=torch.profiler.schedule(
+        #         wait=0,
+        #         warmup=0,
+        #         active=0, 
+        #         repeat=1,
+        #     ),
+        #     on_trace_ready=trace_handler
+        # ) as prof:
             done = False
             while not done:
                 for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
@@ -694,8 +696,8 @@ def train(
                         tracker.step == num_iters - 1 if num_iters is not None else False
                     )
 
-                    if tracker.step == 0:
-                        continue
+                    # if tracker.step == 0:
+                        # continue
 
                     if tracker.step % sample_freq == 0 or last_iter:
                         tracker.print(f"Saving samples at iteration {tracker.step}")
@@ -721,7 +723,7 @@ def train(
                         done = True
                         break
 
-                    prof.step()
+                    # prof.step()
 
 
 if __name__ == "__main__":

@@ -73,12 +73,22 @@ def pivot_by_type(
 
 # if our seq is too short, then we need to pad it
 def pad_if_needed(codes, seq_len):
-    pad_mask = torch.ones(1, seq_len).int()
+    pad_mask = torch.ones(seq_len).int()
     if codes.shape[-1] < seq_len:
         pad_len = seq_len - codes.shape[-1]
         codes = torch.nn.functional.pad(codes, (0, pad_len))
-        pad_mask[:, -pad_len:] = 0
+        pad_mask[-pad_len:] = 0
     return codes, pad_mask
+
+def drop_nan(metadata, keys):
+    for key in keys:
+        metadata = metadata[~metadata[key].isna()]
+    return metadata
+
+def add_roots_to_paths(metadata, path_keys, root_keys):
+    for (path_key, root_key) in zip(path_keys, root_keys):
+        metadata[path_key] = metadata.apply(lambda row: str(Path(row[root_key]) / row[path_key]), axis=1)
+    return metadata
 
 class DACDataset(torch.utils.data.Dataset):
 
@@ -93,7 +103,7 @@ class DACDataset(torch.utils.data.Dataset):
         id_key: str = "id",
         label_key: str = "label",
         class_weights: dict = None, 
-        length: int = 1000000000
+        length: int = 2 ** 32 - 2048
     ):
         assert metadata_csvs is not None, "Must provide metadata_csvs"
 
@@ -121,15 +131,30 @@ class DACDataset(torch.utils.data.Dataset):
 
             # pivot the dataframe
             self.type_keys = self.metadata["type"].unique().tolist()
-            self.metadata = pivot_by_type(self.metadata, id_key, type_key)
             assert main_key in self.type_keys, f"main_key {main_key} not in type_keys {self.type_keys}"
             self.main_key = main_key
         else:
             # add dummy type column
             self.metadata[type_key] = main_key
             self.type_keys = [main_key]
+            # reindex
+            self.metadata = self.metadata.reset_index()
+            # add an id key
+            self.metadata[id_key] = self.metadata.index
 
-        # add p column
+        self.metadata = pivot_by_type(self.metadata, id_key, type_key)
+
+        # drop nans for all our path keys
+        path_keys = [self.get_path_key(type_key) for type_key in self.type_keys]
+        self.metadata = drop_nan(self.metadata, path_keys)
+        print(f"dropped nans for path keys {path_keys}")
+        print(f"metadata now has {len(self.metadata)} rows")
+
+        # add roots to paths (to make all paths absolute)
+        root_keys = [self.get_root_key(type_key) for type_key in self.type_keys]
+        self.metadata = add_roots_to_paths(self.metadata, path_keys, root_keys)
+
+        # add p column for weighted sampling
         self.metadata = add_p_column(self.metadata)
 
         self.label_key = None
@@ -148,29 +173,38 @@ class DACDataset(torch.utils.data.Dataset):
             if self.class_weights is not None:
                 self.metadata = apply_class_weights(self.metadata, class_weights, label_key)
 
+    @property
+    def input_key(self):
+        return self.type_keys[0]
+
+    @property
+    def output_key(self):
+        return self.type_keys[0]
+
     def __len__(self):
         return self.length
+
+    def get_path_key(self, type_key):
+        return f"dac_path_{type_key}"
+
+    def get_root_key(self, type_key):
+        return f"dac_root_{type_key}"
     
     def __getitem__(self, idx, attempt=0):
         util.seed(idx)
-        data = {type_key: {} for type_key in self.type_keys}
-
+        
         smpld = self.metadata.sample(1, weights=self.metadata['p'])
 
         def package(type_key, _batch_idx, _start_idx):
-            datum = {}
-
-            path = smpld[f"dac_path_{type_key}"].tolist()[0]
+            path = smpld[self.get_path_key(type_key)].tolist()[0]
+            
             try:
                 artifact = DACFile.load(path)
-            except:
-                print(f"Error loading {path} or {output_file}")
-                if attempt > 50:
-                    raise Exception(f"Error loading {file} after {attempt} attempts.")
-                return self.__getitem__(idx + random.randint(1, len(self)*10), attempt=attempt+1)
+            except Exception as e:
+                print(f"Error loading {path}: {e}")
+                raise e
 
             codes = artifact.codes
-            print(codes.shape)
 
             nb, nc, nt = codes.shape
             if _batch_idx is None:
@@ -202,23 +236,42 @@ class DACDataset(torch.utils.data.Dataset):
                 "codes": codes,
                 "label": label,
                 "path": path,
-                "pad_mask": pad_mask,
+                "ctx_mask": pad_mask,
                 "batch_idx": _batch_idx,
                 "start_idx": _start_idx,
             }
 
+        # breakpoint()
         batch_idx = None
         start_idx = None
+        data = {}
         for type_key in self.type_keys:
-            data[type_key] = package(type_key, batch_idx, start_idx)
+            try:
+                data[type_key] = package(type_key, batch_idx, start_idx)
+            except:
+                print(f"Error loading {idx}: {smpld}")
+                if attempt > 50:
+                    raise Exception(f"Error loading {idx} after {attempt} attempts.")
+                return self.__getitem__((idx + random.randint(1, len(self))) % len(self) , attempt=attempt+1)
+
+            
             batch_idx = data[type_key]["batch_idx"]
             start_idx = data[type_key]["start_idx"]
-
-        if len(self.type_keys) == 1:
-            data = data[self.type_keys[0]]
             
         return data
 
+    @staticmethod   
+    def collate(batch):
+        out = {}
+        for key in batch[0].keys():
+            val = batch[0][key]
+            if isinstance(val, torch.Tensor):
+                out[key] = torch.stack([item[key] for item in batch])
+            elif isinstance(val, dict):
+                out[key] = DACDataset.collate([item[key] for item in batch])
+            else:
+                out[key] = [item[key] for item in batch]
+        return out
 
 
 def test():
@@ -271,9 +324,46 @@ def test():
         assert data['input']['codes'].shape == (1, 113)
         assert data['output']['codes'].shape == (1, 113)
 
+def test2():
+
+    test_df = pd.DataFrame({
+        "label": ["a", "a", "b", "b", "c", "c", "d", "d"],
+        "dac_path": ["dac1.dac", "dac2.dac", "dac3.dac", "dac4.dac", "dac5.dac", "dac6.dac", "dac7.dac", "dac8.dac"]
+    })
+    
+
+    for (idx, row) in test_df.iterrows():
+        codes = torch.randn(1, 1, 1024)
+        dac = DACFile(
+            codes=codes,
+            chunk_length=1024,
+            original_length=1024,
+            input_db=torch.tensor(0),
+            channels=1,
+            sample_rate=44100,
+            padding=False,
+            dac_version="0.0.1"
+        )
+        dac.save(row['dac_path'])
+
+    # save to csv
+    test_df.to_csv("test.csv", index=False)
 
 
-        out.write(f"test{i}.wav")
+    dataset = DACDataset(
+        metadata_csvs=["test.csv"],
+        seq_len=113,
+        split=None,
+        classlist=["a", "b", "c", "d"],
+        label_key="label",
+        class_weights=None,
+        length=1000000000)
+    dac = load_dac(load_path="./models/dac/weights.pth")
+
+    # Load a sample
+    for i in range(10):
+        data = dataset[i]
+        assert data['dac']['codes'].shape == (1, 113)
 
 if __name__ == "__main__":
-    test()
+    test2()

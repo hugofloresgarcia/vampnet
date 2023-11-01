@@ -4,16 +4,16 @@ save_path: ckpt
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
-val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
 val_freq: 1000
 
 batch_size: 64
-val_batch_size: 24
+val_batch_size: 64
 num_workers: 16
 
 # Optimization
-amp: false
+amp: true
 
 # CrossEntropyLoss.label_smoothing: 0.0
 AdamW.lr: 0.001
@@ -30,6 +30,13 @@ VampNet.n_heads: 12
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 512
 
+DACDataset.metadata_csvs: 
+- ./data/metadata/prosound_redacted.csv
+- ./data/metadata/fma_full.csv
+- ./data/metadata/disco-300k.csv
+
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
+val/DACDataset.length: 2000
 test/DACDataset.split: "test"
+test/DACDataset.length: 2000
