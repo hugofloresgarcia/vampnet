@@ -96,7 +96,8 @@ def condition_and_save(
     input_csv: str = None,
     output_folder: str= None,
     conditioner_name: str = "dac",
-    num_workers: int = cpu_count()
+    num_workers: int = cpu_count(), 
+    overwrite: bool = False
 ):
     assert input_csv is not None, "input_csv must be specified"
     assert output_folder is not None, "output_folder must be specified"
@@ -123,36 +124,46 @@ def condition_and_save(
     dataset = AudioDataset(audio_files, audio_root, output_folder, conditioner_name)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers, collate_fn=lambda x: x,prefetch_factor=4)
 
-    output_files = []
+    if (f"{conditioner_name}_path" not in metadata.columns) or overwrite:
+        metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
+        metadata[f"{conditioner_name}_path"] = [None for _ in range(len(metadata))]
+    else:
+        # make sure the conditioner root is defined too. otherwise, prompt the user to define it
+        if f"{conditioner_name}_root" not in metadata.columns:
+            metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
+            print(f"WARNING: {conditioner_name}_root not defined in {input_csv}.")
+            print(f"Please define it in {input_csv} and re-run this script.")
+            return
+
+    # go through the audio files, get the output_path, place it on the metadata (if it exists)
+    print(f"checking for existing files...")
+    for idx, row in tqdm(metadata.iterrows()):
+        audio_file = Path(row['audio_path'])
+        output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
+        if output_path.exists():
+            metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
+        
+    # now, process the non-existent files
+    print("processing...")
     for batch in tqdm(dataloader):
         sig = batch[0]
         if sig is None:
             print(f"skipping  since it could not be read")
-            output_files.append(None)
+            metadata.at[idx, f"{conditioner_name}_path"] = None
             continue
 
         audio_file = sig.path_to_file
         output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
-
-        # This is not strictly necessary, since we've already filtered
-        # out existing files in the AudioDataset, but it can be left in for clarity.
-        if output_path.exists():
-            print(f"skipping {audio_file.name} since {output_path} already exists")
-            output_files.append(str(output_path.relative_to(output_folder)))
-            continue
 
         process_fn = process_dac if conditioner_name == "dac" else process_audio
         features = process_fn(conditioner=conditioner, sig=sig)
 
         output_path.parent.mkdir(exist_ok=True, parents=True)
         features.save(output_path)
-        
-        output_files.append(str(output_path.relative_to(output_folder)))
 
-    # write to the output csv
-    metadata[f"{conditioner_name}_path"] = output_files
-    metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
-
+        idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
+        metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
+    
     print(f"done! writing to {input_csv}")
     metadata.to_csv(input_csv, index=False)
 
