@@ -187,7 +187,7 @@ class DACDataset(torch.utils.data.Dataset):
         return self.type_keys[0]
 
     def __len__(self):
-        return self.length
+        return len(self.metadata)
 
     def get_path_key(self, type_key):
         return f"dac_path_{type_key}"
@@ -195,10 +195,7 @@ class DACDataset(torch.utils.data.Dataset):
     def get_root_key(self, type_key):
         return f"dac_root_{type_key}"
     
-    def __getitem__(self, idx, attempt=0):
-        print(f"getting item {idx}")
-        util.seed(idx)
-        
+    def __getitem__(self, idx, attempt=0):        
         smpld = self.metadata.sample(1, weights=self.metadata['p'])
 
         def package(type_key, _batch_idx, _start_idx):
