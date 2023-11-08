@@ -46,49 +46,41 @@ You can launch a gradio UI to play with vampnet.
 python app.py --args.load conf/interface.yml --Interface.device cuda
 ```
 
+# Preprocessing
+
+### create a csv file of audio files
+First, create a csv file to index a folder of audio files to use for training. 
+```bash
+python scripts/pre/create_dataset.py --audio_folder path/to/audio --output_file path/to/metadata.csv
+```
+
+### compute dac tokens for your dataset
+Now, you can preprocess all the files in that csv with the Descript Audio Codec, to compress the dataset into dac tokens for training. 
+```bash
+python scripts/pre/condition_workers.py --input_csv /path/to/metadata.csv --output_folder /path/to/codec/files --conditioner_name "dac"
+```
+
+### train/val/test split
+Finally, you can create a random train/val/test split for the dataset.
+```bash
+python scripts/pre/split.py --input_csv /path/to/metadata.csv --test_size 0.1 --val_size 0.1 --seed 123
+```
+
+## extras
+
+### Inspect the dataset audio
+If you want to get information about your dataset such as total duration, statistics on sample_rate, num_channels, etc. as well as get a random sample of the files in your dataset:
+```bash
+python scripts/pre/inspect_audio.py --input_csv /path/to/metadata.csv --output_dir /path/to/artifacts/folder --sample_files 100
+```
+
 # Training / Fine-tuning 
 
 ## Training a model
 
-To train a model, run the following script: 
-
-```bash
-python scripts/utils/vamp_folder.py  --args.load conf/interface/spotdl.yml --Interface.device cuda --exp_type sampling-steps
-```
-
-You can edit `conf/vampnet.yml` to change the dataset paths or any training hyperparameters. 
-
-For coarse2fine models, you can use `conf/c2f.yml` as a starting configuration. 
+You can edit `conf/base.yml` to change the csv paths for your audio data, or any training hyperparameters. 
 
 See `python scripts/exp/train.py -h` for a list of options.
 
 ## Fine-tuning
-To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
-The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to launch the gradio interface.
-
-```bash
-python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/audio3.wav" <fine_tune_name>
-```
-
-This will create a folder under `conf/<fine_tune_name>/` with the 3 configuration files.
-
-The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`.
-
-launch the coarse job:
-```bash
-python scripts/exp/train.py --args.load conf/<fine_tune_name>/coarse.yml
-```
-
-this will save the coarse model to `runs/<fine_tune_name>/coarse/ckpt/best/`.
-
-launch the c2f job:
-```bash
-python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml
-```
-
-launch the interface:
-```bash
-python  app.py --args.load conf/generated/<fine_tune_name>/interface.yml 
-```
-
-
+*todo*
