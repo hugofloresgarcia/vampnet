@@ -635,7 +635,7 @@ def train(
         num_workers=num_workers,
         batch_size=batch_size,
         collate_fn=state.train_data.collate,
-        prefetch_factor=4 if num_workers > 0 else None,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
     val_dataloader = accel.prepare_dataloader(
         state.val_data,
@@ -643,8 +643,7 @@ def train(
         num_workers=num_workers,
         batch_size=val_batch_size,
         collate_fn=state.val_data.collate,
-        persistent_workers=num_workers > 0,
-        prefetch_factor=8 if num_workers > 0 else None,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
     print("initialized dataloader.")
 
@@ -667,9 +666,11 @@ def train(
 
     print("starting training loop.")
     with tracker.live:
+        print(f"tracker opened")
         done = False
         while not done:
             for tracker.step, batch in enumerate(train_dataloader, start=tracker.step): 
+                print(f'got batch')
                 train_loop(state, batch, accel)
 
                 last_iter = (

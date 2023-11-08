@@ -37,7 +37,7 @@ setup(
         "torch_pitch_shift",
         "madmom",
         "x_transformers @ git+https://github.com/hugofloresgarcia/x-transformers.git@lora",
-        "demucs", "tensorflow==2.9.0" "tensorflow-hub"
-        "pyharp @ git+https://github.com/audacitorch/pyharp.git"
+        "dask", 
+        "pandas"
     ],
 )

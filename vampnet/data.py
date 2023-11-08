@@ -5,6 +5,8 @@ import random
 import time
 import yaml
 
+
+import dask.dataframe as dd
 import pandas as pd
 from audiotools import util
 
@@ -12,7 +14,9 @@ from audiotools import AudioSignal
 from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
 
-def filter_by_classlist(metadata: pd.DataFrame, classlist: List[str], label_key: str):
+BLOCK_SIZE = 300e6
+
+def filter_by_classlist(metadata, classlist: List[str], label_key: str):
     """
     Filters the metadata by the classlist and returns the filtered metadata.
     """
@@ -24,7 +28,7 @@ def filter_by_classlist(metadata: pd.DataFrame, classlist: List[str], label_key:
     metadata = metadata[metadata[label_key].isin(classlist)]
     return metadata
 
-def filter_by_split(metadata: pd.DataFrame, split: str):
+def filter_by_split(metadata, split: str):
     """
     Filters the metadata by the split and returns the filtered metadata.
     """
@@ -40,7 +44,7 @@ def add_p_column(metadata):
     metadata['p'] = 1 / len(metadata)
     return metadata
 
-def apply_class_weights(metadata: pd.DataFrame, class_weights: dict, label_key: str):
+def apply_class_weights(metadata, class_weights: dict, label_key: str):
     """
     Applies the class weights to the metadata and returns the metadata.
     """
@@ -51,7 +55,7 @@ def apply_class_weights(metadata: pd.DataFrame, class_weights: dict, label_key: 
 
 
 def pivot_by_type(
-    df: pd.DataFrame, 
+    df, 
     id_key: str, 
     type_key: str,
 ):
@@ -63,6 +67,7 @@ def pivot_by_type(
 
     for col in cols_to_pivot:
         # Pivot the current column based on 'id' and 'type'
+        # df = df.categorize(columns=[type_key])
         pivot = df.pivot(index=id_key, columns=type_key, values=col)
         pivot.columns = [f"{col}_{type_val}" for type_val in pivot.columns]
         
@@ -103,7 +108,7 @@ class DACDataset(torch.utils.data.Dataset):
         id_key: str = "id",
         label_key: str = "label",
         class_weights: dict = None, 
-        length: int = 2 ** 32 - 2048
+        length: int = 1000000000
     ):
         assert metadata_csvs is not None, "Must provide metadata_csvs"
 
@@ -116,7 +121,7 @@ class DACDataset(torch.utils.data.Dataset):
             self.metadata.append(pd.read_csv(csv))
         
         self.metadata = pd.concat(self.metadata)
-        print(f"loaded metadata with {len(self.metadata)} rows")
+        print(f"loaded metadata with {len(self.metadata.index)} rows")
 
         # filter by split
         if split is not None:
@@ -148,7 +153,7 @@ class DACDataset(torch.utils.data.Dataset):
         path_keys = [self.get_path_key(type_key) for type_key in self.type_keys]
         self.metadata = drop_nan(self.metadata, path_keys)
         print(f"dropped nans for path keys {path_keys}")
-        print(f"metadata now has {len(self.metadata)} rows")
+        print(f"metadata now has {len(self.metadata.index)} rows")
 
         # add roots to paths (to make all paths absolute)
         root_keys = [self.get_root_key(type_key) for type_key in self.type_keys]
@@ -166,7 +171,7 @@ class DACDataset(torch.utils.data.Dataset):
             self.classlist = classlist if classlist is not None else self.metadata[label_key].unique().tolist()
             self.metadata = filter_by_classlist(self.metadata, classlist, label_key)
             print(f"resolved classlist: {self.classlist}")
-            print(f'metadata now has {len(self.metadata)} rows')
+            print(f'metadata now has {len(self.metadata.index)} rows')
 
             # resolve class weights
             self.class_weights = class_weights
@@ -191,6 +196,7 @@ class DACDataset(torch.utils.data.Dataset):
         return f"dac_root_{type_key}"
     
     def __getitem__(self, idx, attempt=0):
+        print(f"getting item {idx}")
         util.seed(idx)
         
         smpld = self.metadata.sample(1, weights=self.metadata['p'])
