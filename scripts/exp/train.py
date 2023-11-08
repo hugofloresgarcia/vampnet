@@ -670,7 +670,6 @@ def train(
         done = False
         while not done:
             for tracker.step, batch in enumerate(train_dataloader, start=tracker.step): 
-                print(f'got batch')
                 train_loop(state, batch, accel)
 
                 last_iter = (
