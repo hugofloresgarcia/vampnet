@@ -36,6 +36,7 @@ setup(
         "loralib",
         "torch_pitch_shift",
         "madmom",
-        "pyharp @ git+https://github.com/audacitorch/pyharp.git"
+        "pyharp @ git+https://github.com/audacitorch/pyharp.git",
+        "plotly",
     ],
 )
