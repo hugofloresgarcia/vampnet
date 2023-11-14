@@ -212,8 +212,7 @@ def main(
                 if DEBUG:
                     print(f"loading cached embedding for {cached_path.stem}")
                 embedding = Embedding.load(cached_path)
-                data.append(embedding)
-            else: 
+            else:
                 try:
                     sig = AudioSignal(audio_file)
                 except Exception as e:
@@ -230,10 +229,11 @@ def main(
                     filename=audio_file.name,
                     embedding=emb
                 )
-                
+
                 # cache the embeddings
                 cached_path.parent.mkdir(exist_ok=True, parents=True)
                 embedding.save(cached_path)
+            data.append(embedding)
 
     # now, let's do a dim reduction on the embeddings
     # and visualize them. 
