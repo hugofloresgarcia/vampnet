@@ -8,12 +8,12 @@ val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
 val_freq: 1000
 
-batch_size: 32
-val_batch_size: 32
+batch_size: 36
+val_batch_size: 36
 num_workers: 16
 
 # Optimization
-amp: true
+amp: false
 
 AdamW.lr: 0.001
 
@@ -32,8 +32,9 @@ VampNet.max_seq_len: 512
 DACDataset.metadata_csvs: 
 - ./data/metadata/prosound_redacted.csv
 - ./data/metadata/fma_full.csv
-- ./data/metadata/disco-300k.csv
+- ./data/metadata/disco-1m.csv
 
+DACDataset.seq_len: 512 
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
 val/DACDataset.length: 2000

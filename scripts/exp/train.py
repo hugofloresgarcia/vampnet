@@ -712,3 +712,13 @@ if __name__ == "__main__":
             if accel.local_rank != 0:
                 sys.tracebacklimit = 0
             train(args, accel)
+
+
+# for i in range(loss_mask.shape[0]):
+#     row = loss_mask[i]
+#     # check if row is all true or all false
+#     if row.all() or not row.any():
+#         print(f"row {i} is all true or all false")
+#     else:
+#         # print counts of trues and falses
+#         print(f"row {i} has {row.sum()} true and {len(row) - row.sum()} false")
