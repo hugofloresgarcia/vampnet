@@ -595,9 +595,9 @@ def train(
         writer = SummaryWriter(log_dir=f"{save_path}/logs/")
         argbind.dump_args(args, f"{save_path}/args.yml")
 
-        tracker = Tracker(
-            writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
-        )
+    tracker = Tracker(
+        writer=writer, log_file=f"{save_path}/log.txt", rank=accel.local_rank
+    )
 
     # load the codec model
     state: State = load(
