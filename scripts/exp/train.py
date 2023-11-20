@@ -529,7 +529,7 @@ def load(
         accel.unwrap(model).vocab_size == codec.quantizer.quantizers[0].codebook_size
     )
 
-    optimizer = AdamW(model.parameters(), use_zero=accel.use_ddp)
+    optimizer = torch.optim.ZeroRedundancyOptimizer(model.parameters(), AdamW)
     scheduler = NoamScheduler(optimizer, d_model=accel.unwrap(model).embedding_dim)
     scheduler.step()
 
