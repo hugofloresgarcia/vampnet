@@ -142,30 +142,34 @@ def condition_and_save(
         output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
         if output_path.exists():
             metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
-        
-    # now, process the non-existent files
-    print("processing...")
-    for batch in tqdm(dataloader):
-        sig = batch[0]
-        if sig is None:
-            print(f"skipping  since it could not be read")
-            metadata.at[idx, f"{conditioner_name}_path"] = None
-            continue
 
-        audio_file = sig.path_to_file
-        output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
-
-        process_fn = process_dac if conditioner_name == "dac" else process_audio
-        features = process_fn(conditioner=conditioner, sig=sig)
-
+    def save(features, output_path):
         output_path.parent.mkdir(exist_ok=True, parents=True)
         features.save(output_path)
+        
+    with ThreadPoolExecutor(max_workers=num_workers // 2) as executor:
+        # now, process the non-existent files
+        print("processing...")
+        for batch in tqdm(dataloader):
+            sig = batch[0]
+            if sig is None:
+                print(f"skipping  since it could not be read")
+                metadata.at[idx, f"{conditioner_name}_path"] = None
+                continue
 
-        idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
-        metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
-    
-    print(f"done! writing to {input_csv}")
-    metadata.to_csv(input_csv, index=False)
+            audio_file = sig.path_to_file
+            output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
+
+            process_fn = process_dac if conditioner_name == "dac" else process_audio
+            features = process_fn(conditioner=conditioner, sig=sig)
+
+            idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
+            metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
+
+            executor.submit(save, features, output_path)
+        
+        print(f"done! writing to {input_csv}")
+        metadata.to_csv(input_csv, index=False)
 
     print(f"all done! if you want to remove the backup, run `rm {input_csv}.backup`")
 

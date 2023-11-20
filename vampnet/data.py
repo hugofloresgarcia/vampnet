@@ -99,11 +99,13 @@ class DACDataset(torch.utils.data.Dataset):
 
     def __init__(self, 
         metadata_csvs: List[str] = None,
-        seq_len: int = 1024,
+        seq_len: int = 512,
         split: str = None, 
         classlist: list = None,
         paired: bool = False,
         main_key: str = "dac",
+        input_key: str = "dac", 
+        output_key: str = "dac",
         type_key: str = "type",
         id_key: str = "id",
         label_key: str = "label",
@@ -146,6 +148,10 @@ class DACDataset(torch.utils.data.Dataset):
             self.metadata = self.metadata.reset_index()
             # add an id key
             self.metadata[id_key] = self.metadata.index
+        
+        # make sure our input and output keys are in our type keys
+        assert input_key in self.type_keys, f"input_key {input_key} not in type_keys {self.type_keys}"
+        assert output_key in self.type_keys, f"output_key {output_key} not in type_keys {self.type_keys}"
 
         self.metadata = pivot_by_type(self.metadata, id_key, type_key)
 
@@ -223,7 +229,7 @@ class DACDataset(torch.utils.data.Dataset):
                 else:
                     _start_idx = torch.randint(0, nt - self.seq_len, (1,)).item()
             else:
-                assert _start_idx + self.seq_len <= nt, f"start_idx {_start_idx} + seq_len {self.seq_len} must be less than nt {nt}"
+                assert _start_idx + self.seq_len <= nt, f"start_idx {_start_idx} + seq_len {self.seq_len} must be less than nt {nt}. If you are using a paired dataset, is your input and output seq_len the same?"
 
             codes = codes[:, _start_idx:_start_idx + self.seq_len]
                     
@@ -251,12 +257,9 @@ class DACDataset(torch.utils.data.Dataset):
         for type_key in self.type_keys:
             try:
                 data[type_key] = package(type_key, batch_idx, start_idx)
-            except:
+            except Exception as e:
                 print(f"Error loading {idx}: {smpld}")
-                if attempt > 50:
-                    raise Exception(f"Error loading {idx} after {attempt} attempts.")
-                return self.__getitem__((idx + random.randint(1, len(self))) % len(self) , attempt=attempt+1)
-
+                raise e
             
             batch_idx = data[type_key]["batch_idx"]
             start_idx = data[type_key]["start_idx"]

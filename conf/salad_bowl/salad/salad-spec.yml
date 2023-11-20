@@ -49,6 +49,9 @@ mammals:
 - BBC Nature Sound Effects Library/Animals/Racoon
 - BBC Nature Sound Effects Library/Animals/Cats
 
+animals:
+- BBC Nature Sound Effects Library/Animals/
+
 
 glass:
 - Sound Librarian - The Foundation Library/Glass - Scrapes and Squeaks
@@ -70,6 +73,6 @@ water:
 - Sound Librarian - The Foundation Library/Water - Underwater
 
 
-cartoon: 
-- Soundrangers Update 2018/Cartoon
-- Soundrangers Update 2018/Eating
+# cartoon: 
+# - Soundrangers Update 2018/Cartoon
+# - Soundrangers Update 2018/Eating

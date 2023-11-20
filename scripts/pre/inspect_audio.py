@@ -81,6 +81,7 @@ def extract_audio_metadata(
             zip(df['audio_path'].to_list(), df['audio_root'].to_list()),
         ):
         try:
+            file = Path(audio_root) / file
             info = at.util.info(file)
         except:
             print(f"Error reading {file}")
@@ -102,6 +103,7 @@ def extract_audio_metadata(
     df = pd.concat([df, metadata], axis=1)
 
     artifacts_dir = output_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     plot_sample_rate_histogram(df, artifacts_dir)
     plot_duration_boxplot(df, artifacts_dir)

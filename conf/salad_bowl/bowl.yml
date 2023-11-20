@@ -2,68 +2,21 @@ $include:
   - ./conf/base.yml
 
 fine_tune: True
-fine_tune_checkpoint: ./runs/b64s512/latest/vampnet/weights.pth
+fine_tune_checkpoint: ./runs/11-08-mid/latest/vampnet/weights.pth
 
-save_path: ./runs/bowl
-train_dac_cache: 
-  - /home/hugo/vampnet/data/codes/prosound/train/Avosound - Civilisation Soundscapes 51
-  - /home/hugo/vampnet/data/codes/prosound/train/BBC Nature Sound Effects Library
-  - /home/hugo/vampnet/data/codes/prosound/train/BBC Historical and 1-166 Sound Effects Library
-  - /home/hugo/vampnet/data/codes/prosound/train/Beautiful Bugs
-  - /home/hugo/vampnet/data/codes/prosound/train/Biophony
-  - /home/hugo/vampnet/data/codes/prosound/train/Industrial Sounds with Soul
-  - /home/hugo/vampnet/data/codes/prosound/train/Sonomar Collection - Pianos - Prepared
-  - /home/hugo/vampnet/data/codes/prosound/train/SoundBits - Collected Ambiences Vol 1
-  - /home/hugo/vampnet/data/codes/prosound/train/SoundBits - Collected Ambiences Vol 2/Sounds
-  - /home/hugo/vampnet/data/codes/prosound/train/Anns Animals
-  - /home/hugo/vampnet/data/codes/prosound/train/Big Room Complete
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Amsterdam
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Berlin
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Paris
-  - /home/hugo/vampnet/data/codes/prosound/train/King Collection - Volume 1
-  - /home/hugo/vampnet/data/codes/prosound/train/Industrial Sounds with Soul
-  - /home/hugo/vampnet/data/codes/prosound/train/Clack
-  - /home/hugo/vampnet/data/codes/prosound/train/Submerged
-  - /home/hugo/vampnet/data/codes/prosound/train/Big Room Update 2018
-  - /home/hugo/vampnet/data/codes/prosound/train/Rare Animals
-  - /home/hugo/vampnet/data/codes/prosound/train/Soundrangers Complete
-  - /home/hugo/vampnet/data/codes/prosound/train/The Odyssey Collection - Complete
-
-val_dac_cache: 
-  - /home/hugo/vampnet/data/codes/prosound/val/Avosound - Civilisation Soundscapes 51
-  - /home/hugo/vampnet/data/codes/prosound/val/BBC Nature Sound Effects Library
-  - /home/hugo/vampnet/data/codes/prosound/val/BBC Historical and 1-166 Sound Effects Library
-  - /home/hugo/vampnet/data/codes/prosound/val/Beautiful Bugs
-  - /home/hugo/vampnet/data/codes/prosound/val/Biophony
-  - /home/hugo/vampnet/data/codes/prosound/val/Industrial Sounds with Soul
-  - /home/hugo/vampnet/data/codes/prosound/val/Sonomar Collection - Pianos - Prepared
-  - /home/hugo/vampnet/data/codes/prosound/val/SoundBits - Collected Ambiences Vol 1
-  - /home/hugo/vampnet/data/codes/prosound/val/SoundBits - Collected Ambiences Vol 2/Sounds
-  - /home/hugo/vampnet/data/codes/prosound/val/Anns Animals
-  - /home/hugo/vampnet/data/codes/prosound/val/Industrial Sounds with Soul
-  - /home/hugo/vampnet/data/codes/prosound/val/Big Room Complete
-  - /home/hugo/vampnet/data/codes/prosound/val/The Odyssey Collection - Complete
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Amsterdam
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Berlin
-  - /home/hugo/vampnet/data/codes/prosound/train/European Capitals - Paris
-  - /home/hugo/vampnet/data/codes/prosound/train/King Collection - Volume 1
-  - /home/hugo/vampnet/data/codes/prosound/train/Submerged
-  - /home/hugo/vampnet/data/codes/prosound/train/Big Room Update 2018
-  - /home/hugo/vampnet/data/codes/prosound/train/Soundrangers Complete
-
+save_path: ./runs/bowl-11-08-mid
 
 VampNet.max_seq_len: 512
 NoamScheduler.warmup: 500
 
 batch_size: 36
-num_workers: 12
+num_workers: 18
 save_iters: [500, 1000, 5000, 10000, 20000, 30000, 40000, 50000, 100000]
-sample_freq: 500
-val_freq: 500
+sample_freq: 5000
+val_freq: 1000
 
 AdamW.lr: 0.0001
 VampNet.max_seq_len: 512
 
-# let's us organize sound classes into folders and choose from those sound classes uniformly
 num_iters: 500000
 

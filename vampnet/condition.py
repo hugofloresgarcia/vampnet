@@ -256,19 +256,32 @@ class MFCCConditioner(WaveformConditioner):
     def __init__(self, 
                  n_mfcc: int = 7, 
                  window_size: int = 8192, 
-                 hop_size: int = 8192):
+                 hop_size: int = 8192, 
+                 sample_rate: int = 44100):
         
         self.n_mfcc = n_mfcc
         self.window_size = window_size
         self.hop_size = hop_size
+        self.sample_rate = sample_rate
+        assert self.window_size == self.hop_size, "window size must equal hop size (todo)"
     
     @torch.inference_mode()
     def condition(self, sig: AudioSignal):
-        waveform = sig.samples
-        sample_rate = sig.sample_rate
+        assert sig.shape[0] == 1, f"batch size 1 only"
+        sig = sig.resample(self.sample_rate)
+        sig = sig.to_mono()
+
+        sig.to("cuda" if torch.cuda.is_available() else "cpu")        
         
+        # pad sig to window size
+        pad = self.window_size - (sig.shape[-1] % self.window_size)
+        sig.samples = F.pad(sig.samples, (0, pad), mode="constant", value=0)
+        n_windows = sig.shape[-1] // self.window_size
+
+        # fold into a batch 
+        sig.samples = sig.samples.view(n_windows, 1, self.window_size)
         transform = MFCC(
-            sample_rate=sample_rate,
+            sample_rate=self.sample_rate,
             n_mfcc=self.n_mfcc,
             melkwargs={
                 "n_fft": self.window_size, 
@@ -276,12 +289,12 @@ class MFCCConditioner(WaveformConditioner):
                 "n_mels": 23, 
                 "center": False
             },
-        )
+        ).to(sig.device)
         
-        mfcc = transform(waveform)
-        
-        # For your specification, if you want only the first 5-7 MFCCs:
-        breakpoint()
+        mfcc = transform(sig.samples)
+
+        #unfold the windows
+        mfcc = mfcc.view(1, self.n_mfcc, -1)[0]
         
         return {"mfcc": mfcc}
     
@@ -388,5 +401,6 @@ class ConditionFeatures:
 REGISTRY = {
     "chroma": ChromaStemConditioner,
     "yamnet": YamnetConditioner,
+    "mfcc": MFCCConditioner
 }
 
