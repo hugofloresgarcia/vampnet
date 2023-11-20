@@ -10,7 +10,7 @@ import audiotools as at
 import torch
 import torch.nn as nn
 from audiotools import AudioSignal
-from audiotools.data import transforms
+from audiotools.data import transforms as tfm
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
@@ -55,7 +55,6 @@ filter_fn = lambda fn: hasattr(fn, "transform") and fn.__qualname__ not in [
     "Compose",
     "Choose",
 ]
-tfm = argbind.bind_module(transforms, "train", "val", filter_fn=filter_fn)
 
 # model
 VampNet = argbind.bind(VampNet)
