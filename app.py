@@ -225,7 +225,7 @@ def save_vamp(data):
         yaml.dump(_data, f)
 
     import zipfile
-    zip_path = out_dir.with_suffix(".zip")
+    zip_path = str(out_dir.with_suffix(".zip"))
     with zipfile.ZipFile(zip_path, "w") as zf:
         for file in out_dir.iterdir():
             zf.write(file, file.name)
