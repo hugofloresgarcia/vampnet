@@ -68,6 +68,14 @@ For coarse2fine models, you can use `conf/c2f.yml` as a starting configuration.
 
 See `python scripts/exp/train.py -h` for a list of options.
 
+## Debugging training
+
+To debug training, it's easier to debug with 1 gpu and 0 workers
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
+```
+
 ## Fine-tuning
 To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
 The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to launch the gradio interface.
