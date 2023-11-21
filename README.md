@@ -56,6 +56,12 @@ To train a model, run the following script:
 python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints
 ```
 
+for multi-gpu training, use torchrun:
+
+```bash
+torchrun --nproc_per_node gpu scripts/exp/train.py --args.load conf/vampnet.yml --save_path path/to/ckpt
+```
+
 You can edit `conf/vampnet.yml` to change the dataset paths or any training hyperparameters. 
 
 For coarse2fine models, you can use `conf/c2f.yml` as a starting configuration. 
