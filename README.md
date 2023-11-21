@@ -73,7 +73,7 @@ See `python scripts/exp/train.py -h` for a list of options.
 To debug training, it's easier to debug with 1 gpu and 0 workers
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
+CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
 ```
 
 ## Fine-tuning
