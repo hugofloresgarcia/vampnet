@@ -62,6 +62,7 @@ def dim_reduce(emb, labels, save_path, n_components=3, method='tsne', title=''):
     import pandas as pd
     import plotly.express as px
     if method == 'umap':
+        from umap import UMAP
         reducer = umap.UMAP(n_components=n_components)
     elif method == 'tsne':
         from sklearn.manifold import TSNE

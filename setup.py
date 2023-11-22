@@ -38,5 +38,6 @@ setup(
         "madmom",
         "pyharp @ git+https://github.com/audacitorch/pyharp.git",
         "plotly",
+        "umap_learn",
     ],
 )

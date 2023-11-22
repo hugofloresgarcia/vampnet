@@ -69,6 +69,7 @@ def dim_reduce(annotated_embeddings, layer, output_dir, n_components=3, method="
     save_path = (output_dir / fig_name).with_suffix(".html")
 
     if method == "umap":
+        from umap import UMAP
         reducer = umap.UMAP(n_components=n_components)
     elif method == "tsne":
         from sklearn.manifold import TSNE
