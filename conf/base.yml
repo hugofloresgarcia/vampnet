@@ -40,3 +40,5 @@ val/DACDataset.split: "val"
 val/DACDataset.length: 2000
 test/DACDataset.split: "test"
 test/DACDataset.length: 2000
+
+compute_loss_on_masked_tokens_only: True
