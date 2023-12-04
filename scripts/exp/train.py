@@ -44,6 +44,25 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+class CtxTimer:
+
+    def __init__(self, name, output):
+        self.name = name
+        self.output: dict = output
+
+    def __enter__(self):
+        self.start = time.time()
+    
+    def __exit__(self, *args):
+        self.end = time.time()
+        self.output[f"time/{self.name}"] = self.end - self.start
+        
+    def __str__(self):
+        return f"{self.name}: {self.end - self.start:.3f}s"
+
+    def __dict__(self):
+        return {f"time/{self.name}": self.end - self.start}
+
 torch.autograd.set_detect_anomaly(True)
 
 # Enable cudnn autotuner to speed up training
@@ -184,21 +203,23 @@ class State:
     sample_data: DACDataset
 
     tracker: Tracker
-    compute_loss_on_masked_tokens_only: bool = True
+    compute_loss_on_masked_tokens_only: bool
 
 
 def preprocess(state: State, batch: dict, stage: str):
-    z_in = batch[state.train_data.input_key]["codes"]
-    z_out = batch[state.train_data.output_key]["codes"]
-    ctx_mask = batch[state.train_data.input_key]["ctx_mask"]
+    z_in = batch["codes"]
+    z_out = batch["codes"]
+    ctx_mask = batch["ctx_mask"]
     return z_in, z_out, ctx_mask
 
 @timer()
 def train_loop(state: State, batch: dict, accel: Accelerator):
-    state.model.train()
-    batch = at.util.prepare_batch(batch, accel.device)
+    with record_function("preprocess"):
+        state.model.train()
+        batch = at.util.prepare_batch(batch, accel.device)
 
-    z_in, z_out, ctx_mask = preprocess(state, batch, "train")
+        z_in, z_out, ctx_mask = preprocess(state, batch, "train")
+        cond = batch["mfcc"]
 
     output = {}
     vn = accel.unwrap(state.model)
@@ -207,63 +228,71 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z_in, r)
-        mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
+        with CtxTimer("mask", output):
+            mask = pmask.random(z_in, r)
+            mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+            z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
         
-        z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
+        with CtxTimer("embedding", output):
+            z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        dtype = torch.bfloat16 if accel.amp else None
-        with accel.autocast(dtype=dtype):
-            z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
+        with CtxTimer("model", output):
+            dtype = torch.bfloat16 if accel.amp else None
+            with accel.autocast(dtype=dtype):
+                z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, cond=cond)
 
-        target = codebook_flatten(
-            z_out[:, vn.n_conditioning_codebooks :, :],
-        )
-
-        # ctx mask is 1 where there is real data, 0 where there is padding
-        # mask is 1 where there is generated data, 0 where there is real data
-        # we want the loss mask to be 1 where we infer and 0 where we condition
-        # loss mask = ctx_mask & mask
-        ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
-        if state.compute_loss_on_masked_tokens_only:
-            loss_mask = codebook_flatten(
-                torch.logical_and(
-                    mask[:, vn.n_conditioning_codebooks :, :].bool(),
-                    ctx_mask,
-                )
+        with CtxTimer("loss", output):
+            target = codebook_flatten(
+                z_out[:, vn.n_conditioning_codebooks :, :],
             )
-        else:
-            loss_mask = codebook_flatten(ctx_mask)
 
-        # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
-        output["loss"] = state.criterion(z_hat, t_masked)
-        _metrics(
-            r=r,
-            z_hat=z_hat,
-            target=target,
-            flat_mask=loss_mask,
-            output=output,
-        )
+            # ctx mask is 1 where there is real data, 0 where there is padding
+            # mask is 1 where there is generated data, 0 where there is real data
+            # we want the loss mask to be 1 where we infer and 0 where we condition
+            # loss mask = ctx_mask & mask
+            ctx_mask = ctx_mask.unsqueeze(1).repeat_interleave(vn.n_predict_codebooks, dim=1)
+            if state.compute_loss_on_masked_tokens_only:
+                loss_mask = codebook_flatten(
+                    torch.logical_and(
+                        mask[:, vn.n_conditioning_codebooks :, :].bool(),
+                        ctx_mask,
+                    )
+                )
+            else:
+                loss_mask = codebook_flatten(ctx_mask.bool())
 
-    
-    accel.backward(output["loss"])
+            # replace target with ignore index for masked tokens
+            t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
+            output["loss"] = state.criterion(z_hat, t_masked)
+        
+        with CtxTimer("metrics", output):
+            _metrics(
+                r=r,
+                z_hat=z_hat,
+                target=target,
+                flat_mask=loss_mask,
+                output=output,
+            )
+
+    with CtxTimer("backward", output):
+        accel.backward(output["loss"])
+
 
     output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
     output["other/batch_size"] = n_batch
 
 
-    accel.scaler.unscale_(state.optimizer)
-    output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
-        state.model.parameters(), state.grad_clip_val
-    )
+    with CtxTimer("step", output):
+        accel.scaler.unscale_(state.optimizer)
+        output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
+            state.model.parameters(), state.grad_clip_val
+        )
 
-    accel.step(state.optimizer)
-    state.optimizer.zero_grad()
+        accel.step(state.optimizer)
+        state.optimizer.zero_grad()
 
-    state.scheduler.step()
-    accel.update()
+        state.scheduler.step()
+        accel.update()
 
 
     return {k: v for k, v in sorted(output.items())}
@@ -277,6 +306,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
     batch = at.util.prepare_batch(batch, accel.device)
     z_in, z_out, ctx_mask = preprocess(state, batch, "val")
+    cond = batch["mfcc"]
 
     vn = accel.unwrap(state.model)
     
@@ -293,7 +323,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
 
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
+        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, cond=cond)
 
         target = codebook_flatten(
             z_out[:, vn.n_conditioning_codebooks :, :],
@@ -312,7 +342,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
                 )
             )
         else:
-            loss_mask = codebook_flatten(ctx_mask)
+            loss_mask = codebook_flatten(ctx_mask.bool())
 
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
@@ -503,11 +533,23 @@ def load(
     grad_clip_val: float = 5.0,
     dac_path: str = "./models/dac/weights.pth",
     compile: bool = False, 
+    compute_loss_on_masked_tokens_only: bool = True,
+    model_version: str = "xtfm"
 ) -> State:
     
     # load the datasets
     train_data, val_data, sample_data = build_datasets(args)
     # classlist = train_data.classlist if train_data.class_cond == True else []
+
+    # model version control (oops)
+    global VampNet
+    if model_version == "v0":
+        from vampnet.modules.transformer_old import VampNetV0
+        VampNet = argbind.bind(VampNetV0)
+    elif model_version == "xtfm":
+        pass
+    else:
+        raise ValueError(f"Unknown model version {model_version}")
 
     # load the codec
     codec = load_dac(load_path=dac_path)
@@ -582,6 +624,7 @@ def load(
         val_data=val_data,
         sample_data=sample_data,
         grad_clip_val=grad_clip_val,
+        compute_loss_on_masked_tokens_only=compute_loss_on_masked_tokens_only,
     )
 
 

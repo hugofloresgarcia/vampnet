@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 import random
 import time
+import math
 import yaml
 
 
@@ -13,6 +14,7 @@ from audiotools import util
 from audiotools import AudioSignal
 from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
+from .condition import ConditionFeatures
 
 BLOCK_SIZE = 300e6
 
@@ -95,7 +97,129 @@ def add_roots_to_paths(metadata, path_keys, root_keys):
         metadata[path_key] = metadata.apply(lambda row: str(Path(row[root_key]) / row[path_key]), axis=1)
     return metadata
 
+def get_path_key(feature_key):
+    return f"{feature_key}_path"
+
+def get_root_key(feature_key):
+    return f"{feature_key}_root"
+
+
 class DACDataset(torch.utils.data.Dataset):
+
+    def __init__(self, 
+        metadata_csvs: List[str] = None,
+        seq_len: int = 512,
+        split: str = None,
+        dac_key: str = "dac", 
+        feature_keys: List[str] = None, 
+    ):
+        self.feature_keys = feature_keys if feature_keys is not None else []
+        
+        self.seq_len = seq_len
+
+        # load the metadata csvs
+        self.metadata = []
+        for csv in metadata_csvs:
+            self.metadata.append(pd.read_csv(csv))
+
+        self.metadata = pd.concat(self.metadata)
+        print(f"loaded metadata with {len(self.metadata.index)} rows")
+
+        # filter by split
+        if split is not None:
+            self.metadata = filter_by_split(self.metadata, split)
+        print(f"resolved split: {split}")
+
+        # check dac_keys
+        self.dac_key = dac_key
+
+        # drop nans for all our path keys
+        path_keys = [get_path_key(feature_key) for feature_key in (self.feature_keys + [self.dac_key])]
+        self.metadata = drop_nan(self.metadata, path_keys)
+        print(f"dropped nans for path keys {path_keys}")
+        print(f"metadata now has {len(self.metadata.index)} rows")
+
+        # add roots to paths (to make all paths absolute)
+        root_keys = [get_root_key(feature_key) for feature_key in (self.feature_keys + [self.dac_key])]
+        self.metadata = add_roots_to_paths(self.metadata, path_keys, root_keys)
+
+        # add p column for weighted sampling
+        self.metadata = add_p_column(self.metadata)
+
+    def __len__(self):
+        return len(self.metadata)
+
+    
+    def __getitem__(self, idx, attempt=0):
+        smpld = self.metadata.sample(1, weights=self.metadata['p'])
+
+        # load our dac key
+        dac_path = smpld[get_path_key(self.dac_key)].tolist()[0]
+        try:
+            dac = DACFile.load(dac_path)
+        except Exception as e:
+            print(f"Error loading {dac_path}: {e}")
+            raise e
+        
+        codes = dac.codes
+
+        nb, nc, nt = codes.shape
+        print(f"nb: {nb}, nc: {nc}, nt: {nt}")
+        batch_idx = torch.randint(0, nb, (1,)).item()
+        if nt <= self.seq_len:
+            start_idx = 0
+        else:
+            start_idx = torch.randint(0, nt - self.seq_len, (1,)).item()
+        
+        codes = codes[batch_idx, :, start_idx:start_idx + self.seq_len]
+
+        codes, pad_mask = pad_if_needed(codes, self.seq_len)
+
+        # grab the features
+        # TODO: this doesn't promise good alignment in a number of cases
+        features = {}
+        for feature_key in self.feature_keys:
+            feature_path = smpld[get_path_key(feature_key)].tolist()[0]
+            try:
+                feature_obj = ConditionFeatures.load(feature_path)
+                feat_dict = feature_obj.features
+                for (k, v) in feat_dict.items():
+                    print(f"feature {k} has shape {v.shape}")
+                    print(f" resolution is {v.shape[-1] / nt}")
+                    print()
+                    _stidx = math.floor(start_idx * (v.shape[-1] / nt))
+                    _edidx = math.ceil((start_idx + self.seq_len) * (v.shape[-1] / nt))
+                    features[k] = torch.from_numpy(v[..., _stidx:_edidx])
+
+                    if _edidx > v.shape[-1]:
+                        # pad w/ zeros
+                        features[k], _ = pad_if_needed(features[k], _edidx - _stidx)
+            
+            except Exception as e:
+                print(f"Error loading {feature_path}: {e}")
+                raise e
+            
+        data = {}
+        data["codes"] = codes
+        data["ctx_mask"] = pad_mask
+        data.update(features)
+
+        return data
+
+    @staticmethod   
+    def collate(batch):
+        out = {}
+        for key in batch[0].keys():
+            val = batch[0][key]
+            if isinstance(val, torch.Tensor):
+                out[key] = torch.stack([item[key] for item in batch])
+            elif isinstance(val, dict):
+                out[key] = DACDataset.collate([item[key] for item in batch])
+            else:
+                out[key] = [item[key] for item in batch]
+        return out
+
+class MatchedPairDACDataset(torch.utils.data.Dataset):
 
     def __init__(self, 
         metadata_csvs: List[str] = None,
@@ -156,13 +280,13 @@ class DACDataset(torch.utils.data.Dataset):
         self.metadata = pivot_by_type(self.metadata, id_key, type_key)
 
         # drop nans for all our path keys
-        path_keys = [self.get_path_key(type_key) for type_key in self.type_keys]
+        path_keys = [get_path_key(type_key) for type_key in self.type_keys]
         self.metadata = drop_nan(self.metadata, path_keys)
         print(f"dropped nans for path keys {path_keys}")
         print(f"metadata now has {len(self.metadata.index)} rows")
 
         # add roots to paths (to make all paths absolute)
-        root_keys = [self.get_root_key(type_key) for type_key in self.type_keys]
+        root_keys = [get_root_key(type_key) for type_key in self.type_keys]
         self.metadata = add_roots_to_paths(self.metadata, path_keys, root_keys)
 
         # add p column for weighted sampling

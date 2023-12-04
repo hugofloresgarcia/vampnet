@@ -302,7 +302,55 @@ class MFCCConditioner(WaveformConditioner):
     def keys(self):
         return ["mfcc"]
     
-    
+
+class LoudnessSpectralCentroidConditioner(WaveformConditioner):
+
+    def __init__(self, 
+            sample_rate: int = 48000,
+            window_size: int = 8192,
+            hop_size: int = 8192,
+    ):
+        self.sample_rate = sample_rate
+        self.window_size = window_size
+        self.hop_size = hop_size
+        self.centroid = torchaudio.transforms.SpectralCentroid(
+            sample_rate=sample_rate, 
+            n_fft=self.window_size,
+            hop_length=self.hop_size,
+            win_length=self.window_size,
+            pad=0
+        )
+
+    @torch.inference_mode()
+    def condition(self, sig: AudioSignal):
+        sig.resample(self.sample_rate)
+        sig.to_mono()
+
+        # pad signal to the right to be as long as the window size
+        pad = self.window_size - (sig.shape[-1] % self.window_size)
+        sig.samples = F.pad(sig.samples, (0, pad), mode="constant", value=0)
+
+
+        loudness = []
+        for _sig in sig.windows(
+            window_duration=self.window_size / sig.sample_rate,
+            hop_duration=self.hop_size / sig.sample_rate,
+        ):
+            loudness.append(_sig.loudness())
+
+        loudness = torch.stack(loudness)
+
+
+        spectral_centroid = self.centroid(sig.samples)
+        # stack them on top of each other
+        breakpoint()
+        return torch.cat([loudness, spectral_centroid], dim=1)        
+            
+
+    @property
+    def keys(self):
+        return "loudness-spectal-centroid"
+
 class ConditionEmbedder(nn.Module):
 
     def __init__(self, 
@@ -401,6 +449,7 @@ class ConditionFeatures:
 REGISTRY = {
     "chroma": ChromaStemConditioner,
     "yamnet": YamnetConditioner,
-    "mfcc": MFCCConditioner
+    "mfcc": MFCCConditioner, 
+    "loudness-spectral-centroid": LoudnessSpectralCentroidConditioner
 }
 

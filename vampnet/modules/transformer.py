@@ -19,7 +19,8 @@ from ..mask import _gamma, scalar_to_batch_tensor
 from ..util import codebook_flatten
 from ..util import codebook_unflatten
 from .layers import CodebookEmbedding
-from .layers import WNConv1d
+from .layers import WNConv1d, FiLM
+from ..condition import ConditionEmbedder
 
 LORA_R = 8
 
@@ -48,6 +49,7 @@ class VampNet(at.ml.BaseModel):
         # chroma_dim: int = 0,
         max_seq_len: int = 1024,
         num_reg_tokens: int = 0,
+        add_cond_input_dim: int = 0
         # classes = [], 
     ):
         super().__init__()
@@ -61,6 +63,7 @@ class VampNet(at.ml.BaseModel):
         self.max_seq_len = max_seq_len
         self.cross_attend = cross_attend
         self.num_reg_tokens = num_reg_tokens
+        self.add_cond_input_dim = add_cond_input_dim
         # self.classes = classes
 
         # self.chroma_dim = chroma_dim
@@ -101,6 +104,12 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
+        if self.add_cond_input_dim > 0:
+            self.cond_embedder = ConditionEmbedder(
+                self.add_cond_input_dim, 
+                self.embedding_dim, 
+            )
+
     #     self._register_class_tokens(classes)
         
 
@@ -111,11 +120,24 @@ class VampNet(at.ml.BaseModel):
     #     self.class_embedding = nn.Embedding(len(self.classlist), self.embedding_dim)
         
 
-    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None, 
+    def forward(self, x, pad_mask=None, 
+                cross_x=None, cross_pad_mask=None, 
+                cond=None, cond_pad_mask=None,
                 # class_ids=None, class_dropout: float = 0.0
                 ):
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
         x = self.embedding(x)
+
+        # embed cond if we're given 
+        if cond is not None:
+            assert self.add_cond_input_dim > 0, "model was not initialized with cond input dim"
+            assert cond.ndim == 3, f"cond embeddings should be shape (batch, cond_dim, seq), got {cond_embeddings.shape}"
+            assert cond_pad_mask.ndim == 2, f"cond pad mask should be shape (batch, seq), got {cond_pad_mask.shape}"
+
+            cond = self.cond_embedder(cond, target_length=x.shape[-1])
+
+            # add the cond embeddings to the input?
+            x = x + cond
 
         # if class_ids is not None:
         #     assert class_ids.ndim == 1, f"should be shape (batch,), got {class_ids.shape}"
@@ -195,6 +217,7 @@ class VampNet(at.ml.BaseModel):
         seed: int = None, 
         sample_cutoff: float = 1.0,
         classname: str = None,
+        cond: Optional[torch.Tensor] = None,
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -266,6 +289,7 @@ class VampNet(at.ml.BaseModel):
             # NOTE: this collapses the codebook dimension into the sequence dimension
             logits = self.forward(
                 latents, 
+                cond=cond,
                 # class_ids=class_ids
             )  # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
