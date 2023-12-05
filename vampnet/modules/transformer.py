@@ -15,7 +15,7 @@ from einops import rearrange
 from x_transformers import ContinuousTransformerWrapper
 from x_transformers import Encoder
 
-from ..mask import _gamma, scalar_to_batch_tensor
+from ..mask import _gamma, scalar_to_batch_tensor, full_mask
 from ..util import codebook_flatten
 from ..util import codebook_unflatten
 from .layers import CodebookEmbedding
@@ -195,6 +195,7 @@ class VampNet(at.ml.BaseModel):
         seed: int = None, 
         sample_cutoff: float = 1.0,
         classname: str = None,
+        cond_scale: float = 3.0,
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -270,6 +271,14 @@ class VampNet(at.ml.BaseModel):
             )  # b, prob, seq
             logits = logits.permute(0, 2, 1)  # b, seq, prob
 
+            z_uncond = torch.full_like(z_masked, self.special_tokens["MASK"])
+            logits_uncond = self.forward(
+                self.embedding.from_codes(z_uncond, codec), 
+                # class_ids=class_ids
+            ) # b, prob, seq
+            logits_uncond = logits_uncond.permute(0, 2, 1) # b, seq, prob
+            logits = logits_uncond + (logits - logits_uncond) * cond_scale
+
             logging.debug(f"permuted logits with shape: {logits.shape}")
 
             sampled_z, selected_probs = sample_from_logits(
@@ -300,6 +309,7 @@ class VampNet(at.ml.BaseModel):
             logging.debug(f"added z back into sampled z with shape: {sampled_z.shape}")
 
             # ignore any tokens that weren't masked
+            # TODO: important that you uncomment this
             selected_probs = torch.where(
                 mask.bool(), selected_probs, torch.inf
             )
