@@ -65,6 +65,8 @@ def load_example_audio():
 
 
 def _vamp(data, return_mask=False):
+    if seed != 0:
+        at.util.seed(seed)
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
