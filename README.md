@@ -90,14 +90,14 @@ The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tun
 
 launch the coarse job: 
 ```bash
-python scripts/exp/train.py --args.load conf/<fine_tune_name>/coarse.yml 
+python scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/coarse.yml 
 ```
 
 this will save the coarse model to `runs/<fine_tune_name>/coarse/ckpt/best/`.
 
 launch the c2f job: 
 ```bash
-python  scripts/exp/train.py --args.load conf/<fine_tune_name>/c2f.yml 
+python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml 
 ```
 
 launch the interface: 

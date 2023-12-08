@@ -1,7 +1,7 @@
 """
 TODO: train a linear probe
 usage:
-   python gtzan_embeddings.py --args.load conf/interface.yml --Interface.device cuda --path_to_gtzan /path/to/gtzan/genres_original  --output_dir /path/to/output
+   python gtzan_embeddings.py --args.load conf/interface.yml --Interface.device cuda --path_to_audio /path/to/audio/labels  --output_dir /path/to/output
 """
 from pathlib import Path
 from typing import List
@@ -22,15 +22,16 @@ Interface = argbind.bind(Interface)
 
 DEBUG = False
 
-def smart_plotly_export(fig, save_path):
-    img_format = save_path.split('.')[-1]
-    if img_format == 'html':
+
+def smart_plotly_export(fig, save_path: Path):
+    img_format = save_path.suffix[1:]
+    if img_format == "html":
         fig.write_html(save_path)
     elif img_format == 'bytes':
         return fig.to_image(format='png')
     #TODO: come back and make this prettier
     elif img_format == 'numpy':
-        import io 
+        import io
         from PIL import Image
 
         def plotly_fig2array(fig):
@@ -39,68 +40,79 @@ def smart_plotly_export(fig, save_path):
             buf = io.BytesIO(fig_bytes)
             img = Image.open(buf)
             return np.asarray(img)
-        
+
         return plotly_fig2array(fig)
     elif img_format == 'jpeg' or 'png' or 'webp':
         fig.write_image(save_path)
     else:
         raise ValueError("invalid image format")
 
-def dim_reduce(emb, labels, save_path, n_components=3, method='tsne', title=''):
+
+def dim_reduce(annotated_embeddings, layer, output_dir, n_components=3, method="tsne"):
     """
     dimensionality reduction for visualization!
     saves an html plotly figure to save_path
     parameters:
-        emb (np.ndarray): the samples to be reduces with shape (samples, features)
+        annotated_embeddings (list): the annotated enmbeddings to be reduced; embeddings have shape (samples, features)
         labels (list): list of labels for embedding
         save_path (str): path where u wanna save ur figure
         method (str): umap, tsne, or pca
         title (str): title for ur figure
-    returns:    
+    returns:
         proj (np.ndarray): projection vector with shape (samples, dimensions)
     """
     import pandas as pd
     import plotly.express as px
-    if method == 'umap':
+
+    fig_name = f"vampnet-embeddings-layer={layer}"
+    fig_title = f"{fig_name}_{method}"
+    save_path = (output_dir / fig_name).with_suffix(".html")
+
+    if method == "umap":
         from umap import UMAP
         reducer = umap.UMAP(n_components=n_components)
-    elif method == 'tsne':
+    elif method == "tsne":
         from sklearn.manifold import TSNE
+
         reducer = TSNE(n_components=n_components)
-    elif method == 'pca':
+    elif method == "pca":
         from sklearn.decomposition import PCA
+
         reducer = PCA(n_components=n_components)
     else:
-        raise ValueError
- 
-    proj = reducer.fit_transform(emb)
+        raise ValueError(f"invalid method: {method}")
 
+    labels = [emb.label for emb in annotated_embeddings]
+    names = [emb.filename for emb in annotated_embeddings]
+    embs = [emb.embedding for emb in annotated_embeddings]
+    embs_at_layer = np.stack(embs)[:, layer, :]
+    projs = reducer.fit_transform(embs_at_layer)
+
+    df = pd.DataFrame(
+        {
+            "label": labels,
+            "name": names,
+            "x": projs[:, 0],
+            "y": projs[:, 1],
+        }
+    )
     if n_components == 2:
-        df = pd.DataFrame(dict(
-            x=proj[:, 0],
-            y=proj[:, 1],
-            instrument=labels
-        ))
-        fig = px.scatter(df, x='x', y='y', color='instrument',
-                        title=title+f"_{method}")
+        fig = px.scatter(
+            df, x="x", y="y", color="label", hover_name="name", title=fig_title,
+        )
 
     elif n_components == 3:
-        df = pd.DataFrame(dict(
-            x=proj[:, 0],
-            y=proj[:, 1],
-            z=proj[:, 2],
-            instrument=labels
-        ))
-        fig = px.scatter_3d(df, x='x', y='y', z='z',
-                        color='instrument',
-                        title=title)
+        df['z'] = projs[:, 2]
+        fig = px.scatter_3d(
+            df, x="x", y="y", z="z", color="label", hover_name="name", title=fig_title
+        )
     else:
-        raise ValueError("cant plot more than 3 components")
+        raise ValueError(f"can't plot {n_components} components")
 
-    fig.update_traces(marker=dict(size=6,
-                                  line=dict(width=1,
-                                            color='DarkSlateGrey')),
-                      selector=dict(mode='markers'))
+    fig.update_traces(
+        marker=dict(size=6, line=dict(width=1, color="DarkSlateGrey")),
+        selector=dict(mode="markers"),
+    )
 
     return smart_plotly_export(fig, save_path)
 
@@ -124,7 +136,7 @@ def vampnet_embed(sig: AudioSignal, interface: Interface, layer=10):
         # print(f"got embeddings with shape {embeddings.shape}")
         # [layer, batch, time, n_dims]
         # [20, 1, 600ish, 768]
-    
+
 
         # squeeze batch dim (1 bc layer should be dim 0)
         assert embeddings.shape[1] == 1, f"expected batch dim to be 1, got {embeddings.shape[0]}"
@@ -142,15 +154,15 @@ def vampnet_embed(sig: AudioSignal, interface: Interface, layer=10):
 
 from dataclasses import dataclass, fields
 @dataclass
-class Embedding:
-    genre: str
+class AnnotatedEmbedding:
+    label: str
     filename: str
     embedding: np.ndarray
 
     def save(self, path):
         """Save the Embedding object to a given path as a zip file."""
         with zipfile.ZipFile(path, 'w') as archive:
-            
+
             # Save numpy array
             with archive.open('embedding.npy', 'w') as f:
                 np.save(f, self.embedding)
@@ -164,7 +176,7 @@ class Embedding:
     def load(cls, path):
         """Load the Embedding object from a given zip path."""
         with zipfile.ZipFile(path, 'r') as archive:
-            
+
             # Load numpy array
             with archive.open('embedding.npy') as f:
                 embedding = np.load(f)
@@ -178,13 +190,15 @@ class Embedding:
 
 @argbind.bind(without_prefix=True)
 def main(
-    path_to_gtzan: str = None, 
-    cache_dir: str = "./.gtzan_emb_cache",
-    output_dir: str = "./gtzan_vampnet_embeddings",
-    layers: List[int] = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+    path_to_audio: str = None,
+    cache_dir: str = "./.emb_cache",
+    output_dir: str = "./vampnet_embeddings",
+    layers: List[int] = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19],
+    method: str = "tsne",
+    n_components: int = 2,
 ):
-    path_to_gtzan = Path(path_to_gtzan)
-    assert path_to_gtzan.exists(), f"{path_to_gtzan} does not exist"
+    path_to_audio = Path(path_to_audio)
+    assert path_to_audio.exists(), f"{path_to_audio} does not exist"
 
     cache_dir = Path(cache_dir)
     output_dir = Path(output_dir)
@@ -194,25 +208,25 @@ def main(
     # argbind will automatically load the default config,
     interface = Interface()
 
-    # gtzan should have a folder for each genre, so let's get the list of genres
-    genres = [Path(x).name for x in path_to_gtzan.iterdir() if x.is_dir()]
-    print(f"Found {len(genres)} genres")
-    print(f"genres: {genres}")
+    # we expect path_to_audio to consist of a folder for each label, so let's get the list of labels
+    labels = [Path(x).name for x in path_to_audio.iterdir() if x.is_dir()]
+    print(f"Found {len(labels)} labels")
+    print(f"labels: {labels}")
 
-    # collect audio files, genres, and embeddings
-    data = []
-    for genre in genres:
-        audio_files = list(at.util.find_audio(path_to_gtzan / genre))
-        print(f"Found {len(audio_files)} audio files for genre {genre}")
+    # collect audio files, labels, and embeddings
+    annotated_embeddings = []
+    for label in labels:
+        audio_files = list(at.util.find_audio(path_to_audio / label))
+        print(f"Found {len(audio_files)} audio files for label {label}")
 
-        for audio_file in tqdm.tqdm(audio_files, desc=f"embedding genre {genre}"):
+        for audio_file in tqdm.tqdm(audio_files, desc=f"embedding label {label}"):
             # check if we have a cached embedding for this file
-            cached_path = (cache_dir / f"{genre}_{audio_file.stem}.emb")
+            cached_path = cache_dir / f"{label}_{audio_file.stem}.emb"
             if cached_path.exists():
                 # if so, load it
                 if DEBUG:
                     print(f"loading cached embedding for {cached_path.stem}")
-                embedding = Embedding.load(cached_path)
+                embedding = AnnotatedEmbedding.load(cached_path)
             else:
                 try:
                     sig = AudioSignal(audio_file)
@@ -221,41 +235,28 @@ def main(
                     print(f"skipping {audio_file.name}")
                     continue
 
-                # gets the embedding 
+                # gets the embedding
                 emb = vampnet_embed(sig, interface).cpu().numpy()
 
                 # create an embedding we can save/load
-                embedding = Embedding(
-                    genre=genre,
-                    filename=audio_file.name,
-                    embedding=emb
+                embedding = AnnotatedEmbedding(
+                    label=label, filename=audio_file.name, embedding=emb
                 )
 
                 # cache the embeddings
                 cached_path.parent.mkdir(exist_ok=True, parents=True)
                 embedding.save(cached_path)
-            data.append(embedding)
+            annotated_embeddings.append(embedding)
 
-    # now, let's do a dim reduction on the embeddings
-    # and visualize them. 
-
-    # collect a list of embeddings and labels
-    embeddings = [d.embedding for d in data]
-    labels = [d.genre for d in data]
-
-    # convert the embeddings to a numpy array
-    embeddings = np.stack(embeddings)
-
-    # do dimensionality reduction for each layer we're given
+    # now, let's do a dim reduction on the embeddings and visualize them.
     for layer in tqdm.tqdm(layers, desc="dim reduction"):
         dim_reduce(
-            embeddings[:, layer, :], labels, 
-            save_path=str(output_dir / f'vampnet-gtzan-layer={layer}.html'), 
-            n_components=2, method='tsne', 
-            title=f'vampnet-gtzan-layer={layer}'
+            annotated_embeddings,
+            layer,
+            output_dir=output_dir,
+            n_components=n_components,
+            method=method,
         )
-        
-
 
 
 if __name__ == "__main__":
