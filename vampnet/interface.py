@@ -68,6 +68,7 @@ class Interface(torch.nn.Module):
         self.codec = DAC.load(Path(codec_ckpt))
         self.codec.eval()
         self.codec.to(device)
+        self.codec_path = Path(codec_ckpt)
 
         assert coarse_ckpt is not None, "must provide a coarse checkpoint"
         self.coarse = _load_model(
@@ -76,9 +77,11 @@ class Interface(torch.nn.Module):
             device=device,
             chunk_size_s=coarse_chunk_size_s,
         )
+        self.coarse_path = Path(coarse_ckpt)
 
         # check if we have a coarse2fine ckpt
         if coarse2fine_ckpt is not None:
+            self.c2f_path = Path(coarse2fine_ckpt)
             self.c2f = _load_model(
                 ckpt=coarse2fine_ckpt,
                 lora_ckpt=coarse2fine_lora_ckpt,
@@ -86,6 +89,7 @@ class Interface(torch.nn.Module):
                 chunk_size_s=coarse2fine_chunk_size_s,
             )
         else:
+            self.c2f_path = None
             self.c2f = None
 
         if wavebeat_ckpt is not None:
@@ -97,38 +101,35 @@ class Interface(torch.nn.Module):
 
         self.device = device
 
-    def lora_load(
+    def reload(
         self, 
         coarse_ckpt: str = None,
         c2f_ckpt: str = None,
-        full_ckpts: bool = False,
     ):
-        if full_ckpts:
-            if coarse_ckpt is not None:
-                self.coarse = _load_model(
-                    ckpt=coarse_ckpt,  
-                    device=self.device,
-                    chunk_size_s=self.coarse.chunk_size_s,
-                )
-            if c2f_ckpt is not None:
-                self.c2f = _load_model(
-                    ckpt=c2f_ckpt,
-                    device=self.device,
-                    chunk_size_s=self.c2f.chunk_size_s,
-                )
-        else:
-            if coarse_ckpt is not None:
-                self.coarse.to("cpu")
-                state_dict = torch.load(coarse_ckpt, map_location="cpu")
-                print(f"loading coarse from {coarse_ckpt}")
-                self.coarse.load_state_dict(state_dict, strict=False)
-                self.coarse.to(self.device)
-            if c2f_ckpt is not None:
-                self.c2f.to("cpu")
-                state_dict = torch.load(c2f_ckpt, map_location="cpu")
-                print(f"loading c2f from {c2f_ckpt}")
-                self.c2f.load_state_dict(state_dict, strict=False)
-                self.c2f.to(self.device)
+        if coarse_ckpt is not None:
+            # check if we already loaded, if so, don't reload
+            if self.coarse_path == Path(coarse_ckpt):
+                print(f"already loaded {coarse_ckpt}")
+                return
+            self.coarse = _load_model(
+                ckpt=coarse_ckpt,  
+                device=self.device,
+                chunk_size_s=self.coarse.chunk_size_s,
+            )
+            self.coarse_path = Path(coarse_ckpt)
+            print(f"loaded {coarse_ckpt}")
+
+        if c2f_ckpt is not None:
+            if self.c2f_path == Path(c2f_ckpt):
+                print(f"already loaded {c2f_ckpt}")
+                return
+            self.c2f = _load_model(
+                ckpt=c2f_ckpt,
+                device=self.device,
+                chunk_size_s=self.c2f.chunk_size_s,
+            )
+            self.c2f_path = Path(c2f_ckpt)
+            print(f"loaded {c2f_ckpt}")
         
     def s2t(self, seconds: float):
         """seconds to tokens"""
