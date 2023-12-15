@@ -34,7 +34,7 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
         "VampNet.n_heads": 20,
         "AudioDataset.duration": 3.0,
         "AudioDataset.loudness_cutoff": -40.0,
-        "save_path": f"./runs/{name}/c2f",
+        "save_path": str(finetune_dir / "ckpt/c2f"),
         "fine_tune_checkpoint": "./models/vampnet/c2f.pth"
     }
 
@@ -43,14 +43,14 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
         "fine_tune": True,
         "train/AudioLoader.sources": audio_files_or_folders,
         "val/AudioLoader.sources": audio_files_or_folders,
-        "save_path": f"./runs/{name}/coarse",
+        "save_path": str(finetune_dir / "ckpt/coarse"),
         "fine_tune_checkpoint": "./models/vampnet/coarse.pth"
     }
 
     interface_conf = {
-        "Interface.coarse_ckpt": f"./runs/{name}/coarse/latest/vampnet/weights.pth",
+        "Interface.coarse_ckpt": f"{finetune_dir}/ckpt/coarse/latest/vampnet/weights.pth",
 
-        "Interface.coarse2fine_ckpt": f"./runs/{name}/c2f/latest/vampnet/weights.pth",
+        "Interface.coarse2fine_ckpt": f"{finetune_dir}/ckpt/c2f/latest/vampnet/weights.pth",
         "Interface.wavebeat_ckpt": "./models/wavebeat.pth",
 
         "Interface.codec_ckpt": "./models/vampnet/codec.pth",
