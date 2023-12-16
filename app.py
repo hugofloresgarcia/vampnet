@@ -65,16 +65,6 @@ def load_example_audio():
 
 
 dac_path = "./models/dac/weights.pt"
-MODELS = {
-    "default": "./runs/prosound-full/latest/vampnet/weights.pth", 
-    "piano": "./runs/salad_bowl/piano/latest/vampnet/weights.pth",
-    "birds": "./runs/salad_bowl/birds/latest/vampnet/weights.pth",
-    "chimes": "./runs/salad_bowl/chimes/latest/vampnet/weights.pth",
-    "cooking": "./runs/salad_bowl/cooking/latest/vampnet/weights.pth",
-    "machines": "./runs/salad_bowl/machines/latest/vampnet/weights.pth",
-    "cartoon": "./runs/salad_bowl/cartoon/latest/vampnet/weights.pth",
-}
-
 def load_model(model_key):
     global interface
     coarse_path = MODELS[model_key]
@@ -85,7 +75,7 @@ def load_model(model_key):
 
 def _vamp(data, return_mask=False):
 
-    interface = load_model(data[model_choice])
+    # interface = load_model(data[model_choice])
 
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
@@ -521,11 +511,11 @@ with gr.Blocks() as demo:
             #     visible=False
             # )
 
-            model_choice = gr.Dropdown(
-                label="model choice", 
-                choices=list(MODELS.keys()),
-                value="vampnet", 
-            )
+            # model_choice = gr.Dropdown(
+            #     label="model choice", 
+            #     choices=list(MODELS.keys()),
+            #     value="vampnet", 
+            # )
 
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
@@ -567,7 +557,7 @@ with gr.Blocks() as demo:
             beat_mask_downbeats,
             seed, 
             # lora_choice,
-            model_choice,
+            # model_choice,
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
