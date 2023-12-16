@@ -1,7 +1,0 @@
-$include:
-  - conf/salad_bowl/salad/salad-base.yml
-
-DACDataset.classlist: 
-- "cooking"
-
-save_path: runs/salad_bowl/cooking

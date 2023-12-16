@@ -213,7 +213,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        dtype = torch.bfloat16 if accel.amp else None
+        dtype = torch.float16 if accel.amp else None
         with accel.autocast(dtype=dtype):
             z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 

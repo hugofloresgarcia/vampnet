@@ -20,15 +20,6 @@ Interface = argbind.bind(Interface)
 conf = argbind.parse_args()
 
 
-# from torch_pitch_shift import pitch_shift, get_fast_shifts
-def shift_pitch(signal, interval: int):
-    signal.samples = pitch_shift(
-        signal.samples, 
-        shift=interval, 
-        sample_rate=signal.sample_rate
-    )
-    return signal
-
 def load_interface():
     with argbind.scope(conf):
         interface = Interface()
