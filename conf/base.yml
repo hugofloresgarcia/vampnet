@@ -6,10 +6,10 @@ num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
 val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
-val_freq: 1000
+val_freq: 500
 
-batch_size: 72
-val_batch_size: 72
+batch_size: 52
+val_batch_size: 128
 num_workers: 16
 
 # Optimization
@@ -17,6 +17,7 @@ amp: false
 compile: false
 
 AdamW.lr: 0.001
+AdamW.eps: 0.0001
 
 NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 3000
@@ -38,7 +39,7 @@ DACDataset.metadata_csvs:
 DACDataset.seq_len: 1024
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
-val/DACDataset.length: 4000
+val/DACDataset.length: 2000
 test/DACDataset.split: "test"
 test/DACDataset.length: 4000
 

@@ -4,6 +4,7 @@ from audiotools import util
 from pathlib import Path
 import pandas as pd
 import tqdm
+from tqdm.contrib.concurrent import thread_map
 import plotly.express as px
 import shutil
 
@@ -69,6 +70,7 @@ def extract_audio_metadata(
     input_csv: str = None,
     output_dir: str = None,
     sample_files: int = 100,
+    max_workers: int = 16,
 ):
     # make a backup of the metadata
     shutil.copy(input_csv, f"{input_csv}.backup")
@@ -76,27 +78,32 @@ def extract_audio_metadata(
     df = pd.read_csv(input_csv)
     print(f"Loaded metadata with {len(df)} rows")
 
-    metadata = []
-    for file, audio_root in tqdm.tqdm(
-            zip(df['audio_path'].to_list(), df['audio_root'].to_list()),
-        ):
+    def get_info(file, audio_too):
         try:
-            file = Path(audio_root) / file
             info = at.util.info(file)
         except:
             print(f"Error reading {file}")
-            continue
+            return None
 
         meta = {
             "duration": info.duration, 
             "sample_rate": info.sample_rate,
             "audio_path": file,
-            "audio_root": audio_root,
             "name": Path(file).name,
             "num_channels": info.num_channels,
         }
+        return meta
 
-        metadata.append(meta)
+
+    # metadata = []
+    # for file, audio_root in tqdm.tqdm(
+    #         zip(df['audio_path'].to_list(), df['audio_root'].to_list()),
+    #     ):
+
+    files = [Path(r['audio_root'])/r['audio_path'] for _, r in df.iterrows()]
+    metadata = thread_map(get_info, files, max_workers=max_workers)
+
+        # metadata.append(meta)
 
     # add the metadata to the dataframe
     metadata = pd.DataFrame(metadata)
