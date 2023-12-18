@@ -3,21 +3,25 @@ import json
 
 import pandas as pd
 from ast import literal_eval
+import shutil
 
 import argbind
 
 
 @argbind.bind(without_prefix=True)
 def main(
-    path_to_metadata: str = None, 
+    input_csv: str = None, 
     audio_root: str = None,
     dac_root: str = None, 
-    output_path: str = "./data/metadata/metadata-with-family.csv"
+    output_path: str = "./data/metadata/salad_bowl.csv"
 ):
+    # backup the csv
+    shutil.copy(path_to_metadata, f"{path_to_metadata}.backup")
+    print(f"backed up {path_to_metadata} to {path_to_metadata}.backup")
+
     print(f"loading metadata from {path_to_metadata}")
     metadata = pd.read_csv(path_to_metadata)
     print(f"found {len(metadata)} rows in metadata")
-    # metadata columns: duration,sample_rate,filename,name,num_channels,tags
 
     audio_path = Path(audio_root)
     dac_path = Path(dac_root)
@@ -29,9 +33,8 @@ def main(
 
     print(f"{metadata['dac_exists'].sum()} DAC files exist out of {len(metadata)}")
 
-    metadata.to_csv(output_path, index=False)
-
-
+    print(f"saving to {output_path}")
+    metadata.to_csv(path_to_metadata, index=False)
 
 
 

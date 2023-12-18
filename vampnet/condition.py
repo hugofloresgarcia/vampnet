@@ -15,6 +15,12 @@ from audiotools import AudioSignal
 
 from einops import rearrange
 
+# use these to ensure all conditioning signals are aligned.
+SAMPLE_RATE = 44100
+MIN_HOP_LENGTH = 512
+CENTER = True
+
+
 def resample_embeddings(
         embs: torch.Tensor, n_t: int,
         method: str = 'nearest'
@@ -178,7 +184,15 @@ class ChromaStemConditioner(WaveformConditioner):
         stems = self._get_filtered_wav(wav)
         chroma = self.chroma(stems)
 
-        return {"chroma": chroma}
+        return {
+            "chroma": chroma, 
+            "meta": {
+                "sample_rate": self.sample_rate,
+                "hop_size": self.hop,
+                "win_size": self.chroma.winlen,
+                "original_length": sig.shape[-1],
+            }
+        }
 
     @property
     def keys(self,):
@@ -187,6 +201,7 @@ class ChromaStemConditioner(WaveformConditioner):
 
 # Find the name of the class with the top score when mean-aggregated across frames.
 def class_names_from_csv(class_map_csv_text):
+  import tensorflow as tf
   """Returns list of class names corresponding to score vector."""
   class_names = []
   with tf.io.gfile.GFile(class_map_csv_text) as csvfile:
@@ -244,7 +259,15 @@ class YamnetConditioner(WaveformConditioner):
         scores = torch.from_numpy(scores).float()
         embeddings = torch.from_numpy(embeddings).float()
 
-        return {"scores": scores, "embeddings": embeddings}
+        return {
+            "scores": scores, "embeddings": embeddings, 
+            "meta": {
+                "sample_rate": self.yamnet_sample_rate,
+                "hop_size": self.chunk_size,
+                "win_size": self.chunk_size,
+                "original_length": sig.shape[-1],
+            }
+        }
 
     @property
     def keys(self,):
@@ -255,20 +278,18 @@ class MFCCConditioner(WaveformConditioner):
     
     def __init__(self, 
                  n_mfcc: int = 7, 
-                 window_size: int = 8192, 
-                 hop_size: int = 8192, 
-                 sample_rate: int = 44100):
+                 win_size_multiplier: int = 32, 
+                 hop_size_multiplier: int = 16, 
+        ):
         
         self.n_mfcc = n_mfcc
-        self.window_size = window_size
-        self.hop_size = hop_size
-        self.sample_rate = sample_rate
-        assert self.window_size == self.hop_size, "window size must equal hop size (todo)"
-    
+        self.window_size = win_size_multiplier * MIN_HOP_LENGTH
+        self.hop_size = hop_size_multiplier * MIN_HOP_LENGTH
+
     @torch.inference_mode()
     def condition(self, sig: AudioSignal):
         assert sig.shape[0] == 1, f"batch size 1 only"
-        sig = sig.resample(self.sample_rate)
+        sig = sig.resample(SAMPLE_RATE)
         sig = sig.to_mono()
 
         sig.to("cuda" if torch.cuda.is_available() else "cpu")        
@@ -279,29 +300,69 @@ class MFCCConditioner(WaveformConditioner):
         n_windows = sig.shape[-1] // self.window_size
 
         # fold into a batch 
-        sig.samples = sig.samples.view(n_windows, 1, self.window_size)
         transform = MFCC(
             sample_rate=self.sample_rate,
             n_mfcc=self.n_mfcc,
             melkwargs={
                 "n_fft": self.window_size, 
+                "win_length": self.window_size,
                 "hop_length": self.hop_size, 
                 "n_mels": 23, 
-                "center": False
+                "center": CENTER
             },
         ).to(sig.device)
         
         mfcc = transform(sig.samples)
 
         #unfold the windows
+        breakpoint()
         mfcc = mfcc.view(1, self.n_mfcc, -1)[0]
         
-        return {"mfcc": mfcc}
+        return {
+            "mfcc": mfcc, 
+            "meta": {
+                "sample_rate": SAMPLE_RATE,
+                "hop_size": self.hop_size,
+                "win_size": self.window_size,
+                "original_length": sig.shape[-1],
+            }
+        }
     
     @property
     def keys(self):
         return ["mfcc"]
     
+
+class LoudnessConditioner(WaveformConditioner):
+
+    def __init__(self, 
+        hop_size_mult: int = 16,
+        win_size_mult: int = 32,
+    ):
+        self.hop_size = MIN_HOP_LENGTH * hop_size_mult
+        self.win_size = MIN_HOP_LENGTH * win_size_mult
+
+    def condition(self, sig: AudioSignal):
+        sig = sig.resample(SAMPLE_RATE)
+        sig = sig.to_mono()
+
+        loudness = []
+        for _sig in sig.windows(
+            window_duration=self.win_size / SAMPLE_RATE,
+            hop_duration=self.hop_size / SAMPLE_RATE,
+            preprocess=True
+        ):
+            loudness.append(_sig.loudness().item())
+        
+        return {
+            "loudness": torch.tensor(loudness),
+            "meta": {
+                "sample_rate": SAMPLE_RATE,
+                "hop_size": self.hop_size,
+                "win_size": self.win_size,
+                "original_length": sig.shape[-1],
+            }
+        }
     
 class ConditionEmbedder(nn.Module):
 
@@ -401,6 +462,7 @@ class ConditionFeatures:
 REGISTRY = {
     "chroma": ChromaStemConditioner,
     "yamnet": YamnetConditioner,
-    "mfcc": MFCCConditioner
+    "mfcc": MFCCConditioner,
+    "loudness": LoudnessConditioner,
 }
 

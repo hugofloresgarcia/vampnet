@@ -78,10 +78,11 @@ YamnetConditioner = argbind.bind(YamnetConditioner)
 
 def process_audio(conditioner, sig):
     outputs = conditioner.condition(sig)
+    meta = outputs.pop("meta")
     features = ConditionFeatures(
         audio_path=str(sig.path_to_file),
         features={k: outputs[k].cpu().numpy() for k in outputs},
-        metadata={}
+        metadata=meta
     ) 
     return features
 
@@ -122,7 +123,7 @@ def condition_and_save(
     file_ext = ".emb" if conditioner_name != "dac" else ".dac"
 
     dataset = AudioDataset(audio_files, audio_root, output_folder, conditioner_name)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers, collate_fn=lambda x: x,prefetch_factor=4)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers, collate_fn=lambda x: x,prefetch_factor=4 if num_workers > 0 else None)
 
     if (f"{conditioner_name}_path" not in metadata.columns) or overwrite:
         metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
@@ -147,7 +148,7 @@ def condition_and_save(
         output_path.parent.mkdir(exist_ok=True, parents=True)
         features.save(output_path)
         
-    with ThreadPoolExecutor(max_workers=num_workers // 2) as executor:
+    with ThreadPoolExecutor(max_workers=(num_workers // 2) if num_workers > 0 else 1) as executor:
         # now, process the non-existent files
         print("processing...")
         for batch in tqdm(dataloader):
