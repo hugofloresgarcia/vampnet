@@ -103,6 +103,9 @@ def extract_audio_metadata(
     files = [Path(r['audio_root'])/r['audio_path'] for _, r in df.iterrows()]
     metadata = thread_map(get_info, files, max_workers=max_workers)
 
+    # remove None values
+    metadata = [m for m in metadata if m is not None]
+
         # metadata.append(meta)
 
     # add the metadata to the dataframe
