@@ -35,11 +35,14 @@ from vampnet.data import DACDataset
 from audiotools.ml.decorators import (
     timer, Tracker, when
 )
-
+                                                                  
 import loralib as lora
 
 import torch._dynamo
+torch._dynamo.config.suppress_errors = True     
 torch._dynamo.config.verbose=True
+torch._dynamo.skip_nnmodule_hook_guards=False
+
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -202,7 +205,15 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
     output = {}
     vn = accel.unwrap(state.model)
-    with accel.autocast():
+    dtype = torch.float16 if accel.amp else None
+
+    # if not half:
+    #     # cut the batch in half
+    #     z_in = z_in[:len(z_in) // 2]
+    #     z_out = z_out[:len(z_out) // 2]
+    #     ctx_mask = ctx_mask[:len(ctx_mask) // 2]
+        
+    with accel.autocast(dtype=dtype):
 
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
@@ -213,9 +224,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        dtype = torch.bfloat16 if accel.amp else None
-        with accel.autocast(dtype=dtype):
-            z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
+        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask)
 
         target = codebook_flatten(
             z_out[:, vn.n_conditioning_codebooks :, :],
@@ -248,19 +257,16 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         )
 
     
+    state.optimizer.zero_grad()
     accel.backward(output["loss"])
-
-    output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
-    output["other/batch_size"] = n_batch
-
-
     accel.scaler.unscale_(state.optimizer)
     output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
         state.model.parameters(), state.grad_clip_val
     )
-
     accel.step(state.optimizer)
-    state.optimizer.zero_grad()
+
+    output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
+    output["other/batch_size"] = n_batch
 
     state.scheduler.step()
     accel.update()
@@ -282,8 +288,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
     
     output = {}
 
-    dtype = torch.bfloat16 if accel.amp else None
-    with accel.autocast(dtype):
+    with accel.autocast(dtype=torch.float16):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
@@ -500,7 +505,7 @@ def load(
     resume: bool = False,
     tag: str = "latest",
     fine_tune_checkpoint: Optional[str] = None,
-    grad_clip_val: float = 5.0,
+    grad_clip_val: float = 10.0,
     dac_path: str = "./models/dac/weights.pth",
     compile: bool = False, 
 ) -> State:
@@ -539,7 +544,9 @@ def load(
 
     model = VampNet() if model is None else model
     if compile: 
+        print(f"Compiling model")
         model = torch.compile(model)
+        print(f"Finished compiling model")
 
     local_rank = os.getenv("LOCAL_RANK", None)
     if torch.cuda.device_count() > 1 and local_rank is not None:
@@ -665,30 +672,32 @@ def train(
     checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
 
     print("starting training loop.")
+    first_iter = True
     with tracker.live:
         print(f"tracker opened")
         done = False
+
         while not done:
             for tracker.step, batch in enumerate(train_dataloader, start=tracker.step): 
                 train_loop(state, batch, accel)
-
+                    
                 last_iter = (
                     tracker.step == num_iters - 1 if num_iters is not None else False
                 )
  
-                if tracker.step == 0:
+                if tracker.step == 0 or first_iter:
+                    first_iter = False
                     continue
 
                 if tracker.step % sample_freq == 0 or last_iter:
                     tracker.print(f"Saving samples at iteration {tracker.step}")
-                    with record_function("save_samples"):
-                        save_samples(state, val_idx, writer)
+                    save_samples(state, val_idx, writer)
 
                 if tracker.step % val_freq == 0 or last_iter:
                     tracker.print(f"Validating at iteration {tracker.step}")
-                    with record_function("validate"):
-                        validate(state, val_dataloader, accel)
+                    validate(state, val_dataloader, accel)
 
+                    print(f"Saving checkpoint at iteration {tracker.step}")
                     checkpoint(
                         state=state, 
                         save_iters=save_iters,
@@ -713,12 +722,3 @@ if __name__ == "__main__":
                 sys.tracebacklimit = 0
             train(args, accel)
 
-
-# for i in range(loss_mask.shape[0]):
-#     row = loss_mask[i]
-#     # check if row is all true or all false
-#     if row.all() or not row.any():
-#         print(f"row {i} is all true or all false")
-#     else:
-#         # print counts of trues and falses
-#         print(f"row {i} has {row.sum()} true and {len(row) - row.sum()} false")

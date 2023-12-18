@@ -76,6 +76,12 @@ python scripts/pre/inspect_audio.py --input_csv /path/to/metadata.csv --output_d
 
 # Training / Fine-tuning 
 
+## download a DAC model to use as a tokenizer
+```bash
+python -m dac download
+```
+this will download a `.pth` file to `~/.cache/descript/dac/` that you can copy to `models/vampnet/codec.pth`. 
+
 ## Training a model
 
 You can edit `conf/base.yml` to change the csv paths for your audio data, or any training hyperparameters. 

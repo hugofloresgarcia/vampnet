@@ -10,11 +10,8 @@ import dask.dataframe as dd
 import pandas as pd
 from audiotools import util
 
-from audiotools import AudioSignal
 from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
-
-BLOCK_SIZE = 300e6
 
 def filter_by_classlist(metadata, classlist: List[str], label_key: str):
     """

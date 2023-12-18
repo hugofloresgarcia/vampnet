@@ -1,21 +1,23 @@
 
-codec_ckpt: ./models/vampnet/codec.pth
-save_path: ckpt
+dac_path: ./models/vampnet/codec.pth
+save_path: runs/base-500m
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
 val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
-val_freq: 1000
+val_freq: 500
 
-batch_size: 36
-val_batch_size: 36
+batch_size: 52
+val_batch_size: 128
 num_workers: 16
 
 # Optimization
 amp: false
+compile: false
 
 AdamW.lr: 0.001
+AdamW.eps: 0.0001
 
 NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 3000
@@ -23,22 +25,22 @@ NoamScheduler.warmup: 3000
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
-VampNet.embedding_dim: 1024
-VampNet.n_layers: 12
+VampNet.embedding_dim: 1192
+VampNet.n_layers: 24
 VampNet.n_heads: 12
 VampNet.dropout: 0.05
-VampNet.max_seq_len: 512
+VampNet.max_seq_len: 1024
 
 DACDataset.metadata_csvs: 
-- ./data/metadata/prosound_redacted.csv
+# - ./data/metadata/prosound_redacted.csv
 - ./data/metadata/fma_full.csv
 - ./data/metadata/disco-1m.csv
 
-DACDataset.seq_len: 512 
+DACDataset.seq_len: 1024
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
 val/DACDataset.length: 2000
 test/DACDataset.split: "test"
-test/DACDataset.length: 2000
+test/DACDataset.length: 4000
 
 compute_loss_on_masked_tokens_only: True

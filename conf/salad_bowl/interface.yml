@@ -1,3 +1,0 @@
-Interface.coarse_ckpt: "runs/bowl-11-08-mid/latest/vampnet/weights.pth"
-# Interface.coarse_lora_ckpt: 
-Interface.device: cuda

@@ -20,15 +20,6 @@ Interface = argbind.bind(Interface)
 conf = argbind.parse_args()
 
 
-# from torch_pitch_shift import pitch_shift, get_fast_shifts
-def shift_pitch(signal, interval: int):
-    signal.samples = pitch_shift(
-        signal.samples, 
-        shift=interval, 
-        sample_rate=signal.sample_rate
-    )
-    return signal
-
 def load_interface():
     with argbind.scope(conf):
         interface = Interface()
@@ -74,16 +65,6 @@ def load_example_audio():
 
 
 dac_path = "./models/dac/weights.pt"
-# MODELS = {
-#     "default": "./runs/prosound-full/latest/vampnet/weights.pth", 
-#     "piano": "./runs/salad_bowl/piano/latest/vampnet/weights.pth",
-#     "birds": "./runs/salad_bowl/birds/latest/vampnet/weights.pth",
-#     "chimes": "./runs/salad_bowl/chimes/latest/vampnet/weights.pth",
-#     "cooking": "./runs/salad_bowl/cooking/latest/vampnet/weights.pth",
-#     "machines": "./runs/salad_bowl/machines/latest/vampnet/weights.pth",
-#     "cartoon": "./runs/salad_bowl/cartoon/latest/vampnet/weights.pth",
-# }
-
 def load_model(model_key):
     global interface
     coarse_path = MODELS[model_key]
