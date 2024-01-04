@@ -1,6 +1,6 @@
 
 dac_path: ./models/vampnet/codec.pth
-save_path: runs/base-500m
+save_path: runs/base-500m-spotdl
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -8,8 +8,8 @@ val_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, ]
 sample_freq: 10000
 val_freq: 500
 
-batch_size: 52
-val_batch_size: 128
+batch_size: 42
+val_batch_size: 52
 num_workers: 16
 
 # Optimization
@@ -32,9 +32,10 @@ VampNet.dropout: 0.05
 VampNet.max_seq_len: 1024
 
 DACDataset.metadata_csvs: 
+- ./data/metadata/spotdl.csv
 # - ./data/metadata/prosound_redacted.csv
-- ./data/metadata/fma_full.csv
-- ./data/metadata/disco-1m.csv
+# - ./data/metadata/fma_full.csv
+# - ./data/metadata/disco-1m.csv
 
 DACDataset.seq_len: 1024
 train/DACDataset.split: "train"

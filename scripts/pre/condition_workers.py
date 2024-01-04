@@ -190,9 +190,7 @@ class DACProcessor:
         return DACArtifact(codes=codes, metadata=metadata)
 
 
-DACProcessor = argbind.bind(DACProcessor)
-ChromaStemConditioner = argbind.bind(ChromaStemConditioner)
-YamnetConditioner = argbind.bind(YamnetConditioner)
+
 
 
 def process_audio(conditioner, sig):
@@ -211,7 +209,7 @@ def process_dac(conditioner, sig):
     return artifact
 
 
-@argbind.bind(without_prefix=True)
+
 def condition_and_save(
     input_csv: str = None,
     output_folder: str= None,
@@ -299,6 +297,10 @@ def condition_and_save(
     print(f"all done! if you want to remove the backup, run `rm {input_csv}.backup`")
 
 if __name__ == "__main__":
+    DACProcessor = argbind.bind(DACProcessor)
+    ChromaStemConditioner = argbind.bind(ChromaStemConditioner)
+    YamnetConditioner = argbind.bind(YamnetConditioner)
+    condition_and_save = argbind.bind(condition_and_save, without_prefix=True)
     args = argbind.parse_args()
 
     with argbind.scope(args):

@@ -10,7 +10,7 @@ import dask.dataframe as dd
 import pandas as pd
 from audiotools import util
 
-# from dac.model.base import DACFile
+from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
 from scripts.pre.condition_workers import DACArtifact
 
@@ -127,6 +127,7 @@ class DACDataset(torch.utils.data.Dataset):
         if split is not None:
             self.metadata = filter_by_split(self.metadata, split)
         print(f"resolved split: {split}")
+        print(f"metadata now has {len(self.metadata.index)} rows")
 
         # check dac_keys
         self.paired = paired
@@ -206,7 +207,6 @@ class DACDataset(torch.utils.data.Dataset):
             path = smpld[self.get_path_key(type_key)].tolist()[0]
             
             try:
-                
                 artifact = DACArtifact.load(path)
             except Exception as e:
                 print(f"Error loading {path}: {e}")
@@ -241,7 +241,7 @@ class DACDataset(torch.utils.data.Dataset):
             
             codes, pad_mask = pad_if_needed(codes, self.seq_len)
             return {
-                "codes": codes,
+                "codes": codes.long(),
                 "label": label,
                 "path": path,
                 "ctx_mask": pad_mask,
