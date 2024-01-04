@@ -77,8 +77,10 @@ def extract_audio_metadata(
 
     df = pd.read_csv(input_csv)
     print(f"Loaded metadata with {len(df)} rows")
+    
+    output_dir = Path(output_dir)
 
-    def get_info(file, audio_too):
+    def get_info(file):
         try:
             info = at.util.info(file)
         except:

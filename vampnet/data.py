@@ -10,8 +10,9 @@ import dask.dataframe as dd
 import pandas as pd
 from audiotools import util
 
-from dac.model.base import DACFile
+# from dac.model.base import DACFile
 from dac.utils import load_model as load_dac
+from scripts.pre.condition_workers import DACArtifact
 
 def filter_by_classlist(metadata, classlist: List[str], label_key: str):
     """
@@ -205,7 +206,8 @@ class DACDataset(torch.utils.data.Dataset):
             path = smpld[self.get_path_key(type_key)].tolist()[0]
             
             try:
-                artifact = DACFile.load(path)
+                
+                artifact = DACArtifact.load(path)
             except Exception as e:
                 print(f"Error loading {path}: {e}")
                 raise e

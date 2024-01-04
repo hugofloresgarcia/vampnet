@@ -21,7 +21,7 @@ conda activate vampnet
 install VampNet
 
 ```bash
-git clone https://github.com/hugofloresgarcia/vampnet.git
+git clone --recurse-submodules https://github.com/hugofloresgarcia/vampnet.git 
 pip install -e ./vampnet
 ```
 

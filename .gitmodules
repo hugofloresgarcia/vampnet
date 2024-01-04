@@ -1,0 +1,6 @@
+[submodule "lib/descript-audio-codec"]
+	path = lib/descript-audio-codec
+	url = https://github.com/hugofloresgarcia/descript-audio-codec
+[submodule "lib/x-transformers"]
+	path = lib/x-transformers
+	url = https://github.com/hugofloresgarcia/x-transformers
