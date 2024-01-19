@@ -194,6 +194,9 @@ def preprocess(state: State, batch: dict, stage: str):
     z_in = batch[state.train_data.input_key]["codes"]
     z_out = batch[state.train_data.output_key]["codes"]
     ctx_mask = batch[state.train_data.input_key]["ctx_mask"]
+
+    z_in = z_in[:, :accel.unwrap(state.model).n_codebooks, :]
+    z_out = z_out[:, :accel.unwrap(state.model).n_codebooks, :]
     return z_in, z_out, ctx_mask
 
 @timer()
