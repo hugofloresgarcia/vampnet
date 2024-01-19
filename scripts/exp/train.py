@@ -47,7 +47,6 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-torch.autograd.set_detect_anomaly(True)
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
@@ -187,6 +186,7 @@ class State:
     sample_data: DACDataset
 
     tracker: Tracker
+    grad_acc_steps: int = 1
     compute_loss_on_masked_tokens_only: bool = True
 
 
@@ -218,7 +218,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z_in, r)
+        mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
         
@@ -245,31 +245,35 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         else:
             loss_mask = codebook_flatten(ctx_mask)
 
+        # add the ignore indices mask to the loss mask
+        loss_mask = ~loss_mask
+        loss_mask = loss_mask | codebook_flatten(ignore_indices_mask)
+
         # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
+        t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
         output["loss"] = state.criterion(z_hat, t_masked)
         _metrics(
             r=r,
             z_hat=z_hat,
             target=target,
-            flat_mask=loss_mask,
+            flat_mask=~loss_mask,
             output=output,
         )
 
-    
-    state.optimizer.zero_grad()
-    accel.backward(output["loss"])
-    accel.scaler.unscale_(state.optimizer)
-    output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
-        state.model.parameters(), state.grad_clip_val
-    )
-    accel.step(state.optimizer)
+    if state.tracker.step % state.grad_acc_steps == 0:
+        state.optimizer.zero_grad()
+        accel.backward(output["loss"])
+        accel.scaler.unscale_(state.optimizer)
+        output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
+            state.model.parameters(), state.grad_clip_val
+        )
+        accel.step(state.optimizer)
 
-    output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
-    output["other/batch_size"] = n_batch
+        output["other/learning_rate"] = state.optimizer.param_groups[0]["lr"]
+        output["other/batch_size"] = n_batch
 
-    state.scheduler.step()
-    accel.update()
+        state.scheduler.step()
+        accel.update()
 
 
     return {k: v for k, v in sorted(output.items())}
@@ -292,7 +296,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask = pmask.random(z_in, r)
+        mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
@@ -319,15 +323,19 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         else:
             loss_mask = codebook_flatten(ctx_mask)
 
+        # add the ignore indices mask to the loss mask
+        loss_mask = ~loss_mask
+        loss_mask = loss_mask | codebook_flatten(ignore_indices_mask)
+
         # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~loss_mask, IGNORE_INDEX)
+        t_masked = target.masked_fill(loss_mask, IGNORE_INDEX)
         output["loss"] = state.criterion(z_hat, t_masked)
 
         _metrics(
             r=r,
             z_hat=z_hat,
             target=target,
-            flat_mask=loss_mask,
+            flat_mask=~loss_mask,
             output=output,
         )
 
@@ -460,7 +468,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
-    mask = pmask.random(z_in, r)
+    mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
@@ -506,6 +514,7 @@ def load(
     tag: str = "latest",
     fine_tune_checkpoint: Optional[str] = None,
     grad_clip_val: float = 10.0,
+    grad_acc_steps: int = 1,
     dac_path: str = "./models/dac/weights.pth",
     compile: bool = False, 
 ) -> State:
@@ -589,6 +598,7 @@ def load(
         val_data=val_data,
         sample_data=sample_data,
         grad_clip_val=grad_clip_val,
+        grad_acc_steps=grad_acc_steps,
     )
 
 
@@ -685,9 +695,9 @@ def train(
                     tracker.step == num_iters - 1 if num_iters is not None else False
                 )
  
-                if tracker.step == 0 or first_iter:
-                    first_iter = False
-                    continue
+                # if tracker.step == 0 or first_iter:
+                #     first_iter = False
+                #     continue
 
                 if tracker.step % sample_freq == 0 or last_iter:
                     tracker.print(f"Saving samples at iteration {tracker.step}")

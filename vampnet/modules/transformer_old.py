@@ -242,7 +242,7 @@ class MultiHeadRelativeAttention(nn.Module):
 
         # Apply mask to attention scores to prevent looking up invalid locations
         if mask is not None:
-            attn = attn.masked_fill(mask[None] == 0, -1e9)
+            attn = attn.masked_fill(mask[None] == 0, -1e4)
 
         # Normalize attention scores and add dropout
         attn = torch.softmax(attn, dim=3)
@@ -500,6 +500,7 @@ class VampNet(at.ml.BaseModel):
             special_tokens=["MASK"],
         )
         self.mask_token = self.embedding.special_idxs["MASK"]
+        self.special_tokens = self.embedding.special_idxs
 
         self.transformer = TransformerStack(
             d_model=embedding_dim,
@@ -525,12 +526,13 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x, return_activations: bool = False):
+    def forward(self, x, return_activations: bool = False, pad_mask=None):
         x = self.embedding(x)
-        x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
-
+        if pad_mask is None:
+            pad_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
         x = rearrange(x, "b d n -> b n d")
-        out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
+    
+        out = self.transformer(x=x, x_mask=pad_mask, return_activations=return_activations)
         if return_activations:
             out, activations = out
 
@@ -566,28 +568,27 @@ class VampNet(at.ml.BaseModel):
             return r
     
     @torch.no_grad()
-    def to_signal(self, z, codec):
+    def to_signal(self, z, codec, silence_mask=True):
         """
-        convert a sequence of latents to a signal. 
+        convert a sequence of latents to a signal.
         """
         assert z.ndim == 3
 
+        _z = codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
         signal = at.AudioSignal(
-            codec.decode(
-                codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
-            )["audio"],
+            codec.decode(_z), 
             codec.sample_rate,
         )
 
-        # find where the mask token is and replace it with silence in the audio
-        for tstep in range(z.shape[-1]):
-            if torch.any(z[:, :, tstep] == self.mask_token):
-                sample_idx_0 = tstep * codec.hop_length
-                sample_idx_1 = sample_idx_0 + codec.hop_length
-                signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
+        if silence_mask:
+            # find where the mask token is and replace it with silence in the audio
+            for tstep in range(z.shape[-1]):
+                if torch.any(z[:, :, tstep] == self.special_tokens["MASK"]):
+                    sample_idx_0 = tstep * codec.hop_length
+                    sample_idx_1 = sample_idx_0 + codec.hop_length
+                    signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
 
         return signal
-
 
     @torch.no_grad()
     def generate(

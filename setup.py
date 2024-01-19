@@ -29,8 +29,6 @@ setup(
         "torch",
         "argbind>=0.3.2",
         "numpy==1.23",
-        "descript-audio-codec @ git+ssh://git@github.com/hugofloresgarcia/descript-audio-codec.git",
-        "descript-audiotools @ git+ssh://git@github.com/descriptinc/audiotools.git",
         "gradio", 
         "loralib",
         "madmom",

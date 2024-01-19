@@ -84,9 +84,6 @@ def _vamp(data, return_mask=False):
 
     loudness = sig.loudness()
 
-    if data[pitch_shift_amt] != 0:
-        sig = shift_pitch(sig, data[pitch_shift_amt])
-
     z = interface.encode(sig)
 
 

@@ -45,10 +45,8 @@ class VampNet(at.ml.BaseModel):
         vocab_size: int = 1024,
         dropout: float = 0.1,
         cross_attend: bool = False, 
-        # chroma_dim: int = 0,
         max_seq_len: int = 1024,
         num_reg_tokens: int = 0,
-        # classes = [], 
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -61,9 +59,7 @@ class VampNet(at.ml.BaseModel):
         self.max_seq_len = max_seq_len
         self.cross_attend = cross_attend
         self.num_reg_tokens = num_reg_tokens
-        # self.classes = classes
 
-        # self.chroma_dim = chroma_dim
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
             n_codebooks=n_codebooks,
@@ -97,44 +93,16 @@ class VampNet(at.ml.BaseModel):
                 vocab_size * self.n_predict_codebooks,
                 kernel_size=1,
                 padding="same",
-                # groups=self.n_predict_codebooks,
             ),
         )
 
-    #     self._register_class_tokens(classes)
-        
 
-    # def _register_class_tokens(self, classes: List[str]):
-    #     self.classlist = classes
-    #     if "null" not in self.classlist:
-    #         self.classlist += ["null"]
-    #     self.class_embedding = nn.Embedding(len(self.classlist), self.embedding_dim)
-        
 
-    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None, 
-                # class_ids=None, class_dropout: float = 0.0
-                ):
+    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None,):
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
         x = self.embedding(x)
 
-        # if class_ids is not None:
-        #     assert class_ids.ndim == 1, f"should be shape (batch,), got {class_ids.shape}"
-        #     # dropout class_ids with "null" token
-        #     if class_dropout > 0.0:
-        #         mask = torch.bernoulli(class_ids) < class_dropout
-        #         class_ids = torch.where(
-        #             mask, 
-        #             torch.full_like(self.classlist.index("null"), class_ids), 
-        #             class_ids
-        #         )
 
-        #     class_emb = self.class_embedding(class_ids) # should be shape (batch, emb_dim)
-        #     class_emb = rearrange(class_emb, "b d -> b d 1")
-        #     x = torch.cat((x, class_emb), dim=-1)
-            
-        #     if pad_mask is not None:
-        #         ds = torch.ones_like(pad_mask[:, :, :1])
-        #         pad_mask = torch.cat((pad_mask, ds), dim=-1)
 
         x = rearrange(x, "b d n -> b n d")
         out = self.lm(
@@ -144,10 +112,6 @@ class VampNet(at.ml.BaseModel):
             context_mask=cross_pad_mask
         )
         out = rearrange(out, "b n d -> b d n")
-        
-        # remove the class embedding
-        # if class_ids is not None:
-        #     out = out[:, :, :-1]
 
         out = self.classifier(out)
         out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
