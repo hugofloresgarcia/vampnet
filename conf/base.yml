@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-1280
+save_path: runs/spotdl-300m-jan19
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -24,10 +24,10 @@ NoamScheduler.factor: 2.0
 NoamScheduler.warmup: 10000
 
 VampNet.vocab_size: 1024
-VampNet.n_codebooks: 4
+VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
 VampNet.embedding_dim: 1024
-VampNet.n_layers: 16
+VampNet.n_layers: 20
 VampNet.n_heads: 16
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 1024
