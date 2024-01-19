@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/base-disco-400m
+save_path: runs/spotdl-1280
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -34,10 +34,10 @@ VampNet.max_seq_len: 1024
 VampNet.flash_attn: true
 
 DACDataset.metadata_csvs: 
-# - ./data/metadata/spotdl.csv
+- ./data/metadata/spotdl.csv
 # - ./data/metadata/prosound_redacted.csv
 # - ./data/metadata/fma_full.csv
-- ./data/metadata/disco-1m.csv
+# - ./data/metadata/disco-1m.csv
 
 DACDataset.seq_len: 1024
 train/DACDataset.split: "train"
