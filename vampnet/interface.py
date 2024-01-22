@@ -110,26 +110,26 @@ class Interface(torch.nn.Module):
             # check if we already loaded, if so, don't reload
             if self.coarse_path == Path(coarse_ckpt):
                 print(f"already loaded {coarse_ckpt}")
-                return
-            self.coarse = _load_model(
-                ckpt=coarse_ckpt,  
-                device=self.device,
-                chunk_size_s=self.coarse.chunk_size_s,
-            )
-            self.coarse_path = Path(coarse_ckpt)
-            print(f"loaded {coarse_ckpt}")
+            else:
+                self.coarse = _load_model(
+                    ckpt=coarse_ckpt,  
+                    device=self.device,
+                    chunk_size_s=self.coarse.chunk_size_s,
+                )
+                self.coarse_path = Path(coarse_ckpt)
+                print(f"loaded {coarse_ckpt}")
 
         if c2f_ckpt is not None:
             if self.c2f_path == Path(c2f_ckpt):
                 print(f"already loaded {c2f_ckpt}")
-                return
-            self.c2f = _load_model(
-                ckpt=c2f_ckpt,
-                device=self.device,
-                chunk_size_s=self.c2f.chunk_size_s,
-            )
-            self.c2f_path = Path(c2f_ckpt)
-            print(f"loaded {c2f_ckpt}")
+            else:
+                self.c2f = _load_model(
+                    ckpt=c2f_ckpt,
+                    device=self.device,
+                    chunk_size_s=self.c2f.chunk_size_s,
+                )
+                self.c2f_path = Path(c2f_ckpt)
+                print(f"loaded {c2f_ckpt}")
         
     def s2t(self, seconds: float):
         """seconds to tokens"""

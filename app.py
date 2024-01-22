@@ -69,13 +69,11 @@ def shift_pitch(signal, interval: int):
 
 def _vamp(data, return_mask=False):
 
-    # clear the output dir recursively
-    shutil.rmtree(OUT_DIR)
-
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir(parents=True)
     sig = at.AudioSignal(data[input_audio])
     sig = interface.preprocess(sig)
+
 
     # reload the model if necessary
     interface.reload(
