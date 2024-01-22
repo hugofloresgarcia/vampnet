@@ -15,7 +15,6 @@ from vampnet import mask as pmask
 from vampnet.interface import Interface
 
 Interface = argbind.bind(Interface)
-# AudioLoader = argbind.bind(at.data.datasets.AudioLoader)
 
 conf = argbind.parse_args()
 
@@ -23,24 +22,10 @@ conf = argbind.parse_args()
 def load_interface():
     with argbind.scope(conf):
         interface = Interface()
-        # loader = AudioLoader()
         print(f"interface device is {interface.device}")
         return interface
 
-
-
 interface = load_interface()
-
-
-
-
-# dataset = at.data.datasets.AudioDataset(
-#     loader,
-#     sample_rate=interface.codec.sample_rate,
-#     duration=interface.coarse.chunk_size_s,
-#     n_examples=5000,
-#     without_replacement=True,
-# )
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -63,7 +48,6 @@ def load_audio(file):
 def load_example_audio():
     return "./assets/example.wav"
 
-
 dac_path = "./models/dac/weights.pt"
 def load_model(model_key):
     global interface
@@ -74,9 +58,6 @@ def load_model(model_key):
     return interface
 
 def _vamp(data, return_mask=False):
-
-    # interface = load_model(data[model_choice])
-
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
     sig = at.AudioSignal(data[input_audio])
@@ -123,7 +104,7 @@ def _vamp(data, return_mask=False):
     zv, mask_z = interface.coarse_vamp(
         z,
         mask=mask,
-        sampling_steps=data[num_steps],
+        _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
         return_mask=True, 
@@ -137,16 +118,6 @@ def _vamp(data, return_mask=False):
         cond_scale=data[guidance_scale],
     )
 
-    if use_coarse2fine and interface.c2f is not None: 
-        zv = interface.coarse_to_fine(
-            zv, 
-            mask_temperature=data[masktemp]*10, 
-            sampling_temperature=data[sampletemp],
-            mask=mask,
-            sampling_steps=data[num_steps],
-            sample_cutoff=data[sample_cutoff], 
-            seed=_seed,
-        )
 
     sig = interface.to_signal(zv).cpu()
     print("done")
@@ -172,66 +143,10 @@ def api_vamp(data):
     return _vamp(data, return_mask=False)
 
 
-def save_vamp(data):
-    out_dir = OUT_DIR / "saved" / str(uuid.uuid4())
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    sig_in = at.AudioSignal(data[input_audio])
-    sig_out = at.AudioSignal(data[output_audio])
-
-    sig_in.write(out_dir / "input.wav")
-    sig_out.write(out_dir / "output.wav")
-
-    _data = {
-        "masktemp": data[masktemp],
-        "sampletemp": data[sampletemp],
-        "top_p": data[top_p],
-        "prefix_s": data[prefix_s],
-        "suffix_s": data[suffix_s],
-        "rand_mask_intensity": data[rand_mask_intensity],
-        "num_steps": data[num_steps],
-        "notes": data[notes_text],
-        "periodic_period": data[periodic_p],
-        "periodic_width": data[periodic_w],
-        "n_conditioning_codebooks": data[n_conditioning_codebooks],
-        "use_coarse2fine": data[use_coarse2fine],
-        "stretch_factor": data[stretch_factor],
-        "seed": data[seed],
-        "samplecutoff": data[sample_cutoff],
-    }
-
-    # save with yaml
-    with open(out_dir / "data.yaml", "w") as f:
-        yaml.dump(_data, f)
-
-    import zipfile
-
-    zip_path = out_dir.with_suffix(".zip")
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for file in out_dir.iterdir():
-            zf.write(file, file.name)
-
-    return f"saved! your save code is {out_dir.stem}", zip_path
-
-
 with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
-            gr.Markdown("# VampNet Audio Vamping")
-            gr.Markdown("""## Description:
-            This is a demo of the VampNet, a generative audio model that transforms the input audio based on the chosen settings. 
-            You can control the extent and nature of variation with a set of manual controls and presets. 
-            Use this interface to experiment with different mask settings and explore the audio outputs.
-            """)
-
-            gr.Markdown("""
-            ## Instructions:
-            1. You can start by uploading some audio, or by loading the example audio. 
-            2. Choose a preset for the vamp operation, or manually adjust the controls to customize the mask settings. 
-            3. Click the "generate (vamp)!!!" button to apply the vamp operation. Listen to the output audio.
-            4. Optionally, you can add some notes and save the result. 
-            5. You can also use the output as the new input and continue experimenting!
-            """)
+            gr.Markdown("# VampNet")
     with gr.Row():
         with gr.Column():
 
@@ -267,64 +182,6 @@ with gr.Blocks() as demo:
         # mask settings
         with gr.Column():
 
-
-            presets = {
-                    "unconditional": {
-                        "periodic_p": 0,
-                        "onset_mask_width": 0,
-                        "beat_mask_width": 0,
-                        "beat_mask_downbeats": False,
-                    }, 
-                    "slight periodic variation": {
-                        "periodic_p": 5,
-                        "onset_mask_width": 5,
-                        "beat_mask_width": 0,
-                        "beat_mask_downbeats": False,
-                    },
-                    "moderate periodic variation": {
-                        "periodic_p": 13,
-                        "onset_mask_width": 5,
-                        "beat_mask_width": 0,
-                        "beat_mask_downbeats": False,
-                    },
-                    "strong periodic variation": {
-                        "periodic_p": 17,
-                        "onset_mask_width": 5,
-                        "beat_mask_width": 0,
-                        "beat_mask_downbeats": False,
-                    },
-                    "very strong periodic variation": {
-                        "periodic_p": 21,
-                        "onset_mask_width": 5,
-                        "beat_mask_width": 0,
-                        "beat_mask_downbeats": False,
-                    },
-                    "beat-driven variation": {
-                        "periodic_p": 0,
-                        "onset_mask_width": 0,
-                        "beat_mask_width": 50,
-                        "beat_mask_downbeats": False,
-                    },
-                    "beat-driven variation (downbeats only)": {
-                        "periodic_p": 0,
-                        "onset_mask_width": 0,
-                        "beat_mask_width": 50,
-                        "beat_mask_downbeats": True,
-                    },
-                    "beat-driven variation (downbeats only, strong)": {
-                        "periodic_p": 0,
-                        "onset_mask_width": 0,
-                        "beat_mask_width": 20,
-                        "beat_mask_downbeats": True,
-                    },
-                }
-
-            preset = gr.Dropdown(
-                label="preset", 
-                choices=list(presets.keys()),
-                value="strong periodic variation",
-            )
-            load_preset_button = gr.Button("load_preset")
 
             with gr.Accordion("manual controls", open=True):
                 periodic_p = gr.Slider(
@@ -397,23 +254,6 @@ with gr.Blocks() as demo:
                         value=1, 
                     )
 
-            preset_outputs = {
-                periodic_p, 
-                onset_mask_width, 
-                beat_mask_width,
-                beat_mask_downbeats,
-            }
-
-            def load_preset(_preset):
-                return tuple(presets[_preset].values())
-
-            load_preset_button.click(
-                fn=load_preset,
-                inputs=[preset],
-                outputs=preset_outputs
-            )
-
-
             with gr.Accordion("prefix/suffix prompts", open=False):
                 prefix_s = gr.Slider(
                     label="prefix hint length (seconds)",
@@ -482,12 +322,6 @@ with gr.Blocks() as demo:
                     step=0.01
                 )
 
-            use_coarse2fine = gr.Checkbox(
-                label="use coarse2fine",
-                value=True, 
-                visible=False
-            )
-
             num_steps = gr.Slider(
                 label="number of steps (should normally be between 12 and 36)",
                 minimum=1,
@@ -507,38 +341,13 @@ with gr.Blocks() as demo:
             )
 
         with gr.Column():
-
-            # lora_choice = gr.Dropdown(
-            #     label="lora choice", 
-            #     choices=list(loras.keys()),
-            #     value=LORA_NONE, 
-            #     visible=False
-            # )
-
-            # model_choice = gr.Dropdown(
-            #     label="model choice", 
-            #     choices=list(MODELS.keys()),
-            #     value="vampnet", 
-            # )
-
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
                 label="output audio", interactive=False, type="filepath"
             )
 
-            with gr.Accordion("liked your output?", open=False):
-                notes_text = gr.Textbox(
-                    label="type any notes about the generated audio here",
-                    value="",
-                    interactive=True,
-                )
-                save_button = gr.Button("save vamp")
-                download_file = gr.File(
-                    label="vamp to download will appear here", interactive=False
-                )
-                use_as_input_button = gr.Button("use output as input")
+            use_as_input_button = gr.Button("use output as input")
 
-                thank_you = gr.Markdown("")
 
     _inputs = {
             input_audio, 
@@ -551,7 +360,6 @@ with gr.Blocks() as demo:
             periodic_p, periodic_w,
             n_conditioning_codebooks, 
             dropout,
-            use_coarse2fine, 
             stretch_factor, 
             onset_mask_width, 
             typical_filtering,
@@ -560,8 +368,6 @@ with gr.Blocks() as demo:
             beat_mask_width,
             beat_mask_downbeats,
             seed, 
-            # lora_choice,
-            # model_choice,
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
@@ -584,10 +390,5 @@ with gr.Blocks() as demo:
         fn=lambda x: x, inputs=[output_audio], outputs=[input_audio]
     )
 
-    save_button.click(
-        fn=save_vamp,
-        inputs=_inputs | {notes_text, output_audio},
-        outputs=[thank_you, download_file],
-    )
 
 demo.launch(share=True, enable_queue=True, debug=True)

@@ -1,15 +1,15 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-300m-jan19
+save_path: runs/spotdl-500m-jan19
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
 val_idx: [0, 1, 2, 3, 4]
 sample_freq: 10000
-val_freq: 2500
+val_freq: 1000
 
 batch_size: 32
-val_batch_size: 32
+val_batch_size: 24
 num_workers: 16
 grad_acc_batches: 1
 
@@ -26,9 +26,9 @@ NoamScheduler.warmup: 10000
 VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
-VampNet.embedding_dim: 1024
+VampNet.embedding_dim: 1280
 VampNet.n_layers: 20
-VampNet.n_heads: 16
+VampNet.n_heads: 20
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 1024
 VampNet.flash_attn: true
