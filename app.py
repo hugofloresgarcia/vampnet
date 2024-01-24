@@ -47,7 +47,6 @@ def load_audio(file):
         filepath, 
         duration=interface.coarse.chunk_size_s
     )
-    sig = interface.preprocess(sig)
 
     out_dir = OUT_DIR / "tmp" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
