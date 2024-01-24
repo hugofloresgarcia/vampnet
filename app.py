@@ -72,7 +72,6 @@ def _vamp(data, return_mask=False):
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir(parents=True)
     sig = at.AudioSignal(data[input_audio])
-    sig = interface.preprocess(sig)
 
 
     # reload the model if necessary
@@ -87,6 +86,7 @@ def _vamp(data, return_mask=False):
     if data[pitch_shift_amt] != 0:
         sig = shift_pitch(sig, data[pitch_shift_amt])
 
+    sig = interface.preprocess(sig)
     z = interface.encode(sig)
 
     ncc = data[n_conditioning_codebooks]
