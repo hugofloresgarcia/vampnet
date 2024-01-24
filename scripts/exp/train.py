@@ -716,6 +716,7 @@ def train(
                         save_iters=save_iters,
                         save_path=save_path, 
                         fine_tune=fine_tune)
+                    print(f"checkpoint done")
 
                     # Reset validation progress bar, print summary since last validation.
                     tracker.done("val", f"Iteration {tracker.step}")

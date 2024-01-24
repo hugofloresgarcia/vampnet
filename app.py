@@ -10,22 +10,28 @@ import audiotools as at
 import gradio as gr
 import numpy as np
 import yaml
+import torch
 
 from vampnet import mask as pmask
 from vampnet.interface import Interface
 
-Interface = argbind.bind(Interface)
+interface = Interface(
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    vampnet_ckpt="runs/spotdl-500m-jan19/best/vampnet/weights.pth", 
+    codec_ckpt="models/codec.pth",
+)
 
-conf = argbind.parse_args()
+# populate the model choices with any interface.yml files in the generated confs
+MODEL_CHOICES = {
+    "default": str(interface.ckpts["vampnet"]), 
+}
+generated_confs = Path("conf/generated")
+for conf_file in generated_confs.glob("*/interface.yml"):
+    with open(conf_file) as f:
+        _conf = yaml.safe_load(f)
+        MODEL_CHOICES[conf_file.parent.name] = _conf
 
-
-def load_interface():
-    with argbind.scope(conf):
-        interface = Interface()
-        print(f"interface device is {interface.device}")
-        return interface
-
-interface = load_interface()
+    
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -34,10 +40,11 @@ OUT_DIR.mkdir(exist_ok=True, parents=True)
 def load_audio(file):
     print(file)
     filepath = file.name
-    sig = at.AudioSignal.salient_excerpt(
-        filepath, duration=interface.coarse.chunk_size_s
-    )
-    sig = interface.preprocess(sig)
+    # sig = at.AudioSignal.salient_excerpt(
+    #     filepath, duration=interface.coarse.chunk_size_s
+    # )
+    # sig = interface.preprocess(sig)
+    sig = at.AudioSignal(filepath)
 
     out_dir = OUT_DIR / "tmp" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -48,18 +55,11 @@ def load_audio(file):
 def load_example_audio():
     return "./assets/example.wav"
 
-dac_path = "./models/dac/weights.pt"
-def load_model(model_key):
-    global interface
-    coarse_path = MODELS[model_key]
-    interface = Interface(
-        coarse_ckpt=coarse_path
-    )
-    return interface
 
 def _vamp(data, return_mask=False):
     out_dir = OUT_DIR / str(uuid.uuid4())
     out_dir.mkdir()
+
     sig = at.AudioSignal(data[input_audio])
     sig = interface.preprocess(sig)
 
@@ -67,6 +67,8 @@ def _vamp(data, return_mask=False):
 
     z = interface.encode(sig)
 
+    print(f"reloading to {data[model_choice]}")
+    interface.reload(MODEL_CHOICES[data[model_choice]])
 
     # build the mask
     mask = pmask.linear_random(z, data[rand_mask_intensity])
@@ -101,10 +103,10 @@ def _vamp(data, return_mask=False):
     np.savetxt(out_dir / "mask.txt", mask[:, 0, :].long().cpu().numpy())
 
     _seed = data[seed] if data[seed] > 0 else None
-    zv, mask_z = interface.coarse_vamp(
+    zv, mask_z = interface.vamp(
         z,
         mask=mask,
-        _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
+        # _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
         return_mask=True, 
@@ -112,10 +114,8 @@ def _vamp(data, return_mask=False):
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
         top_p=_top_p,
-        gen_fn=interface.coarse.generate,
         seed=_seed,
         sample_cutoff=data[sample_cutoff],
-        cond_scale=data[guidance_scale],
     )
 
 
@@ -123,7 +123,6 @@ def _vamp(data, return_mask=False):
     print("done")
 
     sig = sig.normalize(loudness)
-
     sig.write(out_dir / "output.wav")
 
     if return_mask:
@@ -151,7 +150,7 @@ with gr.Blocks() as demo:
         with gr.Column():
 
             manual_audio_upload = gr.File(
-                label=f"upload some audio (will be randomly trimmed to max of {interface.coarse.chunk_size_s:.2f}s)",
+                label=f"upload some audio ",
                 file_types=["audio"],
             )
             load_example_audio_button = gr.Button("or load example audio")
@@ -282,13 +281,6 @@ with gr.Blocks() as demo:
                 step=0.001
             )
 
-            guidance_scale = gr.Slider(
-                label="guidance scale",
-                minimum=0.0, 
-                maximum=10.0,
-                value=3.0,
-            )
-    
 
             with gr.Accordion("sampling settings", open=False):
                 top_p = gr.Slider(
@@ -339,8 +331,16 @@ with gr.Blocks() as demo:
                 value=0,
                 precision=0,
             )
+        
 
         with gr.Column():
+            model_choice = gr.Dropdown(
+                label="model choice", 
+                choices=list(MODEL_CHOICES.keys()),
+                value="default", 
+                visible=True
+            )
+
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
                 label="output audio", interactive=False, type="filepath"
@@ -368,10 +368,10 @@ with gr.Blocks() as demo:
             beat_mask_width,
             beat_mask_downbeats,
             seed, 
+            model_choice,
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
-            guidance_scale,
         }
   
     # connect widgets
