@@ -276,6 +276,7 @@ class VampNet(at.ml.BaseModel):
 
                 # get the num tokens to mask, according to the schedule
                 num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
+                # num_to_mask = torch.floor(r * num_mask_tokens_at_start).unsqueeze(1).long() # doesn't work at all this way
                 logging.debug(f"num to mask: {num_to_mask}")
                 logging.debug(f"masking {num_to_mask.sum()} tokens")
 

@@ -17,7 +17,7 @@ from vampnet.interface import Interface
 
 interface = Interface(
     device="cuda" if torch.cuda.is_available() else "cpu",
-    vampnet_ckpt="runs/spotdl-500m-jan19/best/vampnet/weights.pth", 
+    vampnet_ckpt="runs/spotdl-500m-jan19/latest/vampnet/weights.pth", 
     codec_ckpt="models/codec.pth",
 )
 
