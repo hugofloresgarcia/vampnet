@@ -155,9 +155,9 @@ class VampNet(at.ml.BaseModel):
         typical_mass=0.2,
         typical_min_tokens=1,
         top_p=None,
-        return_signal=True,
         seed: int = None, 
         sample_cutoff: float = 1.0,
+        return_signal=True,
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -204,7 +204,7 @@ class VampNet(at.ml.BaseModel):
         steps = _sampling_steps + [1 for _ in range(n_infer_codebooks - len(_sampling_steps))]
         for codebook_level, nsteps in enumerate(steps):
             # how many mask tokens to begin with?
-            num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.special_tokens["MASK"]).sum()
+            num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.special_tokens["MASK"]).sum(dim=-1)
             logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
             for i in range(nsteps):
@@ -255,7 +255,7 @@ class VampNet(at.ml.BaseModel):
                 # flatten z_masked and mask, so we can deal with the sampling logic
                 # we'll unflatten them at the end of the loop for the next forward pass
                 # remove conditioning codebooks, we'll add them back at the end
-                z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])           
+                z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])      
 
                 mask = (z_masked == self.special_tokens["MASK"]).int()
                 logging.debug(f"mask now: {mask}")
@@ -291,7 +291,7 @@ class VampNet(at.ml.BaseModel):
 
                 # get our new mask
                 mask = mask_by_random_topk(
-                    num_to_mask, selected_probs, mask_temperature * (1-r)
+                    num_to_mask, selected_probs, mask_temperature * (1-r.unsqueeze(1))
                 )  
 
                 # add ones back to the mask on all codebook levels above the current one
@@ -367,7 +367,7 @@ def sample_from_logits(
     """
     shp = logits.shape[:-1]
 
-    if typical_filtering:
+    if typical_filtering and sample:
         typical_filter(logits, 
                         typical_mass=typical_mass, 
                         typical_min_tokens=typical_min_tokens
@@ -380,7 +380,7 @@ def sample_from_logits(
 
     # Apply top_p (nucleus) sampling
     if top_p is not None and top_p < 1.0:
-        v, sorted_indices = logits.sort(descending=True)
+        v, sorted_indices = logits.sort(dim=-1, descending=True)
         cumulative_probs = v.softmax(dim=-1).cumsum(dim=-1)
 
         sorted_indices_to_remove = cumulative_probs > top_p
@@ -506,8 +506,8 @@ if __name__ == "__main__":
         pred = z_hat.argmax(dim=1)
         pred = codebook_unflatten(pred, n_c=model.n_predict_codebooks)
 
-        print(f"model has {num_params(model)/1e6:<.3f}M parameters")
-        print(f"prediction has shape {pred.shape}")
+        logging.debug(f"model has {num_params(model)/1e6:<.3f}M parameters")
+        logging.debug(f"prediction has shape {pred.shape}")
         breakpoint()
 
     args = argbind.parse_args()

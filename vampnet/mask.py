@@ -51,7 +51,7 @@ def random(x: torch.Tensor, r: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     if not isinstance(r, torch.Tensor):
         r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
-
+ 
     r = _gamma(r)[:, None, None]
     probs = torch.ones_like(x) * r
 
@@ -105,8 +105,8 @@ def linear_random(
 
     probs = torch.ones_like(x).to(x.device).float()
     # expand to batch and codebook dims
-    probs = probs.expand(x.shape[0], x.shape[1], -1)
-    probs = probs * r
+    # probs = probs.expand(x.shape[0], x.shape[1], -1)
+    probs = probs * r.unsqueeze(-1).unsqueeze(-1)
 
     mask = torch.bernoulli(probs)
     mask = mask.round().long()

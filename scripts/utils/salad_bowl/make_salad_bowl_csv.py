@@ -1,13 +1,14 @@
 from pathlib import Path
 import pandas as pd
 import yaml
+from collections import defaultdict
 
 import argbind
 
 @argbind.bind(without_prefix=True)
 def main(
-    spec: str = "conf/salad_bowl/salad/salad-spec.yml", 
-    prosound_metadata: str = "data/metadata/prosound_redacted.csv",
+    spec: str = "scripts/utils/salad_bowl/salad_spec.yml", 
+    prosound_metadata: str = "data/metadata/prosound_new.csv",
     output_file: str = "data/metadata/salad_bowl.csv"
 ):
     # load the spec
@@ -26,15 +27,18 @@ def main(
     # it's a child of any of the folders in the spec
     # if it is, we keep in the subset, otherwise we drop it
     subset = []
+    stats = defaultdict(int)
     for _, row in prosound_metadata.iterrows():
         for class_name, folders in spec.items():
             for folder in folders:
-                if folder in row["dac_path"]:
+                if folder in row["audio_path"]:
+                    stats[class_name] += 1
                     subset.append(row)
                     break
     
     print(f"Subset has {len(subset)} rows")
-
+    print(stats)
+     
     # now we can make the metadata for the salad bowl and save it
     salad_bowl_metadata = pd.DataFrame(subset)
     salad_bowl_metadata.to_csv(output_file, index=False)

@@ -2,16 +2,16 @@ $include:
   - conf/base.yml
 
 fine_tune: True
+fine_tune_ckpt: ./models/vampnet.pth
 
 train/AudioDataset.n_examples: 100000000
 val/AudioDataset.n_examples: 500
 
+NoamScheduler.warmup: 10000
 
-NoamScheduler.warmup: 500
-
-batch_size: 7
-num_workers: 7
-save_iters: [10000, 20000, 30000, 40000, 50000]
+batch_size: 16
+num_workers: 12
+save_iters: [10000, 20000,  50000, 100000, 500000]
 sample_freq: 1000
 val_freq: 500
 

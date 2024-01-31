@@ -17,7 +17,7 @@ from vampnet.interface import Interface
 
 interface = Interface(
     device="cuda" if torch.cuda.is_available() else "cpu",
-    vampnet_ckpt="runs/spotdl-500m-jan19/latest/vampnet/weights.pth", 
+    vampnet_ckpt="models/vampnet.pth", 
     codec_ckpt="models/codec.pth",
 )
 
@@ -36,13 +36,13 @@ for conf_file in generated_confs.glob("*/interface.yml"):
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-
+MAX_DURATION_S = 60
 def load_audio(file):
     print(file)
     filepath = file.name
-    # sig = at.AudioSignal.salient_excerpt(
-    #     filepath, duration=interface.coarse.chunk_size_s
-    # )
+    sig = at.AudioSignal.salient_excerpt(
+        filepath, duration=MAX_DURATION_S
+    )
     # sig = interface.preprocess(sig)
     sig = at.AudioSignal(filepath)
 
@@ -61,51 +61,22 @@ def _vamp(data, return_mask=False):
     out_dir.mkdir()
 
     sig = at.AudioSignal(data[input_audio])
-    sig = interface.preprocess(sig)
-
-    loudness = sig.loudness()
-
-    z = interface.encode(sig)
 
     print(f"reloading to {data[model_choice]}")
     interface.reload(MODEL_CHOICES[data[model_choice]])
 
-    # build the mask
-    mask = pmask.linear_random(z, data[rand_mask_intensity])
-    mask = pmask.mask_and(
-        mask,
-        pmask.inpaint(z, interface.s2t(data[prefix_s]), interface.s2t(data[suffix_s])),
+    build_mask_kwargs = dict(
+        rand_mask_intensity=data[rand_mask_intensity],
+        prefix_s=data[prefix_s],
+        suffix_s=data[suffix_s],
+        periodic_prompt=data[periodic_p],
+        periodic_prompt_width=data[periodic_w],
+        onset_mask_width=data[onset_mask_width],
+        dropout=data[dropout],
+        upper_codebook_mask=int(data[n_mask_codebooks])
     )
-    mask = pmask.mask_and(
-        mask,
-        pmask.periodic_mask(z, data[periodic_p], data[periodic_w], random_roll=True),
-    )
-    if data[onset_mask_width] > 0:
-        mask = pmask.mask_or(
-            mask, pmask.onset_mask(sig, z, interface, width=data[onset_mask_width])
-        )
-    if data[beat_mask_width] > 0:
-        beat_mask = interface.make_beat_mask(
-            sig,
-            after_beat_s=(data[beat_mask_width]/1000), 
-            mask_upbeats=not data[beat_mask_downbeats],
-        )
-        mask = pmask.mask_and(mask, beat_mask)
 
-    # these should be the last two mask ops
-    mask = pmask.dropout(mask, data[dropout])
-    mask = pmask.codebook_mask(mask, int(data[n_mask_codebooks]))
-
-
-    
-    _top_p = data[top_p] if data[top_p] > 0 else None
-    # save the mask as a txt file
-    np.savetxt(out_dir / "mask.txt", mask[:, 0, :].long().cpu().numpy())
-
-    _seed = data[seed] if data[seed] > 0 else None
-    zv, mask_z = interface.vamp(
-        z,
-        mask=mask,
+    vamp_kwargs = dict(
         # _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
@@ -113,16 +84,22 @@ def _vamp(data, return_mask=False):
         typical_filtering=data[typical_filtering], 
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
-        top_p=_top_p,
+        top_p=data[top_p] if data[top_p] > 0 else None,
         seed=_seed,
         sample_cutoff=data[sample_cutoff],
     )
 
+    # save the mask as a txt file
+    np.savetxt(out_dir / "mask.txt", mask[:, 0, :].long().cpu().numpy())
 
-    sig = interface.to_signal(zv).cpu()
-    print("done")
+    _seed = data[seed] if data[seed] > 0 else None
+    sig, mask = interface.ez_vamp(
+        sig, 
+        feedback_steps=data[num_feedback_steps]
+        build_mask_kwargs=build_mask_kwargs,
+        vamp_kwargs=vamp_kwargs,
+    )
 
-    sig = sig.normalize(loudness)
     sig.write(out_dir / "output.wav")
 
     if return_mask:

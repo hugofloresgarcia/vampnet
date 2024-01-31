@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-500m-jan19
+save_path: runs/spotdl-500m-jan31
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
