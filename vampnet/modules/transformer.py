@@ -146,7 +146,7 @@ class VampNet(at.ml.BaseModel):
         self,
         codec,
         time_steps: int = 300,
-        _sampling_steps: List[int] = [16, 8, 8, 4, 4, 2, 2, 1, 1],
+        _sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         start_tokens: Optional[torch.Tensor] = None,
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
@@ -158,7 +158,10 @@ class VampNet(at.ml.BaseModel):
         seed: int = None, 
         sample_cutoff: float = 1.0,
         return_signal=True,
+        debug=False,
+        causal_weight: float = 0.0,
     ):
+        
         if seed is not None:
             at.util.seed(seed)
 
@@ -183,6 +186,7 @@ class VampNet(at.ml.BaseModel):
             mask[:, : self.n_conditioning_codebooks, :] = 0.0
         if mask.ndim == 2:
             mask = mask[:, None, :].repeat(1, z.shape[1], 1)
+        orig_mask = mask
         logging.debug(f"created mask with shape {mask.shape}")
 
         ###########
@@ -203,6 +207,16 @@ class VampNet(at.ml.BaseModel):
         logging.debug(f"adding {n_infer_codebooks} sampling steps")
         steps = _sampling_steps + [1 for _ in range(n_infer_codebooks - len(_sampling_steps))]
         for codebook_level, nsteps in enumerate(steps):
+
+            # apply the orig mask to z_masked, only in the current codebook level
+            # this is crucial due to the stemgen random masking we did during training
+            # which ensures all upper codebooks are masked while inferring the bottom ones.
+            z_masked[:, codebook_level, :] = torch.where(
+                orig_mask[:, codebook_level, :].bool(), 
+                self.special_tokens["MASK"], 
+                z_masked[:, codebook_level, :]
+            )
+
             # how many mask tokens to begin with?
             num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.special_tokens["MASK"]).sum(dim=-1)
             logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
@@ -244,7 +258,7 @@ class VampNet(at.ml.BaseModel):
                 # find out which codebook we are sampling from
                 selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
                 selected_probs[:,  codebook_level+1:, :,] = -float("inf") # all the ones above
-                selected_probs[:, :codebook_level, :,] = -float("inf")
+                # selected_probs[:, :codebook_level, :,] = -float("inf")
                 logging.debug(f"masking all but codebook {codebook_level}")
                 logging.debug(f"selected probs: {selected_probs}")
                 logging.debug(mask)
@@ -269,11 +283,6 @@ class VampNet(at.ml.BaseModel):
                 )
                 logging.debug(f"added z back into sampled z with shape: {sampled_z.shape}")
 
-                # ignore any tokens that weren't masked
-                selected_probs = torch.where(
-                    mask.bool(), selected_probs, torch.inf
-                )
-
                 # get the num tokens to mask, according to the schedule
                 num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
                 # num_to_mask = torch.floor(r * num_mask_tokens_at_start).unsqueeze(1).long() # doesn't work at all this way
@@ -281,20 +290,45 @@ class VampNet(at.ml.BaseModel):
                 logging.debug(f"masking {num_to_mask.sum()} tokens")
 
                 if i != (nsteps - 1):
+                    mask = codebook_unflatten(mask, n_infer_codebooks)
                     num_to_mask = torch.maximum(
                         torch.tensor(1),
                         torch.minimum(
-                            mask.sum(dim=-1, keepdim=True) - 1,
+                            mask[:, codebook_level, :].sum(dim=-1, keepdim=True) - 1,
                             num_to_mask
                         )
                     )
+                    mask = codebook_flatten(mask)
 
-                # get our new mask
-                mask = mask_by_random_topk(
-                    num_to_mask, selected_probs, mask_temperature * (1-r.unsqueeze(1))
+            
+                # ignore any tokens that weren't masked
+                selected_probs = torch.where(
+                   mask.bool(), selected_probs, torch.inf
+                )
+
+                # add a causal weight to the selected probs
+                # NOTE: some experiments i did showed that this didn't help. 
+                # set it to 0 until further eval
+                causal_probs = torch.linspace(1, 0, z_masked.shape[-1], device=z_masked.device)
+                causal_probs = causal_probs.repeat(z_masked.shape[0], 1)
+                selected_probs = selected_probs + causal_probs * causal_weight
+
+                # # get our new mask
+                ############
+                mask = codebook_unflatten(mask, n_infer_codebooks)
+                selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
+
+                # only consider probs at current level
+                selected_probs_cur_level = selected_probs[:, codebook_level, :]
+                mask_cur_level = mask_by_random_topk(
+                    num_to_mask, selected_probs_cur_level, mask_temperature * (1-r.unsqueeze(1))
                 )  
+                mask[:, codebook_level, :] = mask_cur_level
 
-                # add ones back to the mask on all codebook levels above the current one
+                mask = codebook_flatten(mask)
+                selected_probs = codebook_flatten(selected_probs)
+                ###############
+
                 mask = codebook_unflatten(mask, n_infer_codebooks)
                 mask[:, codebook_level+1:, :] = 1.0
                 mask = codebook_flatten(mask)
@@ -324,11 +358,11 @@ class VampNet(at.ml.BaseModel):
 
         logging.debug(f"finished sampling")
 
+
         if return_signal:
             return self.to_signal(sampled_z, codec)
         else:
             return sampled_z
-
 
 def sample_from_logits(
         logits, 
@@ -513,3 +547,41 @@ if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
         try_model()
+
+
+# if debug:
+#     import matplotlib.pyplot as plt
+#     from pathlib import Path
+#     Path(".vampnet").mkdir(exist_ok=True)
+#     plt.clf()
+#     # close all figs
+#     plt.close('all')
+#     # set the fig size
+#     plt.subplot(4, 1, 1)
+#     # sig =  self.to_signal(sampled_z, codec)
+#     # sig.cpu().specshow()
+
+#     plt.subplot(4, 1, 2)       
+#     # since z_masked is a codebook, we want to plot the colormap
+#     # with distinct colors for each codebook index
+#     plt.imshow(z_masked[0].cpu().numpy(), aspect='auto', origin='lower', cmap="tab20")
+
+
+#     plt.subplot(3, 1, 2)
+#     # plot the mask (which is a matrix)
+#     plt.imshow(mask[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r')
+#     plt.subplot(3, 1, 3)
+#     # replace any inf or -inf with 0
+#     _selected_probs = torch.where(
+#         selected_probs == torch.inf, torch.zeros_like(selected_probs), selected_probs
+#     )
+#     _selected_probs = torch.where(
+#         selected_probs == -torch.inf, torch.zeros_like(selected_probs), selected_probs
+#     )
+#     # fig = plt.gcf()
+#     # fig.set_figheight(15)
+#     # fig.set_figwidth(15)
+#     plt.imshow(codebook_unflatten(_selected_probs, n_infer_codebooks)[0].cpu().numpy(), aspect='auto', origin='lower', cmap="viridis" )
+#     # plt.show()
+#     plt.savefig(f".vampnet/c={codebook_level}_{i}.png")
+#     plt.close('all')

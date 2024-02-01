@@ -80,9 +80,6 @@ class Interface:
         cz = z[:, : self.vampnet.n_codebooks, :].clone()
         mask = mask[:, : self.vampnet.n_codebooks, :]
 
-        cz_masked, mask = pmask.apply_mask(cz, mask, self.vampnet.special_tokens["MASK"])
-        cz_masked = cz_masked[:, : self.vampnet.n_codebooks, :]
-
         seq_len = cz.shape[-1]
 
         # we need to split the sequence into chunks by max seq length
@@ -91,7 +88,7 @@ class Interface:
         chunk_len = math.ceil(seq_len / n_chunks)
         print(f"will process {n_chunks} chunks of length {chunk_len}")
 
-        cz_chunks = torch.split(cz_masked, chunk_len, dim=-1)
+        z_chunks = torch.split(cz, chunk_len, dim=-1)
         mask_chunks = torch.split(mask, chunk_len, dim=-1)
 
         gen_fn = gen_fn or self.vampnet.generate
@@ -104,12 +101,11 @@ class Interface:
                 return_signal=False,
                 **kwargs,
             )
-            for chunk, mask_chunk in tqdm(zip(cz_chunks, mask_chunks), desc="vamping chunks")
+            for chunk, mask_chunk in tqdm(zip(z_chunks, mask_chunks), desc="vamping chunks")
         ]
 
         # concatenate the chunks
         c_vamp = torch.cat(c_vamp_chunks, dim=-1)
-        cz_masked = torch.cat(cz_chunks, dim=-1)
 
         if return_mask:
             return c_vamp, mask
@@ -202,3 +198,13 @@ class Interface:
             return sig, mask.cpu()
         else:
             return sig.path_to_file
+
+    def plot_sig_with_mask(self, sig, mask):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 10))
+        plt.subplot(2, 1, 1)
+        sigout[0].specshow()
+        plt.subplot(2, 1, 2)
+        # plot the mask (which is a matrix)
+        plt.imshow(mask[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r')
+        plt.show()
