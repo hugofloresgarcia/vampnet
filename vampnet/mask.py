@@ -62,38 +62,38 @@ def random(x: torch.Tensor, r: torch.Tensor):
 
 
 
-def stemgen_random(x: torch.Tensor, r: torch.Tensor):
-    assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
-    if not isinstance(r, torch.Tensor):
-        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
+# def stemgen_random(x: torch.Tensor, r: torch.Tensor):
+#     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
+#     if not isinstance(r, torch.Tensor):
+#         r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
 
-    # Assuming x is your input tensor and r is the probability for the Bernoulli distribution
-    nb, nc, nt = x.shape
+#     # Assuming x is your input tensor and r is the probability for the Bernoulli distribution
+#     nb, nc, nt = x.shape
 
-    # Randomly sample a codebook level to infer for each item in the batch
-    c = torch.randint(0, nc, (nb,)).to(x.device)
+#     # Randomly sample a codebook level to infer for each item in the batch
+#     c = torch.randint(0, nc, (nb,)).to(x.device)
 
-    # Create a mask tensor of the same shape as x, initially filled with ones
-    mask = torch.ones_like(x).long().to(x.device)
-    ignore_indices_mask = torch.zeros_like(x).long().to(x.device)
+#     # Create a mask tensor of the same shape as x, initially filled with ones
+#     mask = torch.ones_like(x).long().to(x.device)
+#     ignore_indices_mask = torch.zeros_like(x).long().to(x.device)
 
-    # Iterate over each item in the batch
-    for i in range(nb):
-        # Create the Bernoulli mask for the sampled level
-        level_mask = torch.bernoulli(torch.ones(nt).to(x.device) * r[i]).long()
+#     # Iterate over each item in the batch
+#     for i in range(nb):
+#         # Create the Bernoulli mask for the sampled level
+#         level_mask = torch.bernoulli(torch.ones(nt).to(x.device) * r[i]).long()
 
-        # Apply the mask to the sampled level
-        mask[i, c[i]] = level_mask
+#         # Apply the mask to the sampled level
+#         mask[i, c[i]] = level_mask
 
-        # All levels below the sampled level are unmasked (zeros)
-        mask[i, :c[i]] = 0
-        ignore_indices_mask[i, :c[i]] = 1
+#         # All levels below the sampled level are unmasked (zeros)
+#         mask[i, :c[i]] = 0
+#         ignore_indices_mask[i, :c[i]] = 1
 
-        # All levels above the sampled level are masked (ones)
-        mask[i, c[i]+1:] = 1
-        ignore_indices_mask[i, c[i]+1:] = 1
+#         # All levels above the sampled level are masked (ones)
+#         mask[i, c[i]+1:] = 1
+#         ignore_indices_mask[i, c[i]+1:] = 1
 
-    return mask, ignore_indices_mask.bool()
+#     return mask, ignore_indices_mask.bool()
 
 def linear_random(
     x: torch.Tensor,

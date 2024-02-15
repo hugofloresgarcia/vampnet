@@ -15,23 +15,25 @@ import torch
 from vampnet import mask as pmask
 from vampnet.interface import Interface
 
+
+# populate the model choices with any interface.yml files in the generated confs
+MODEL_CHOICES = {
+    "default": "models/vampnet.pth", 
+}
+
+generated_confs = Path("models/fine-tuned/")
+for model_file in generated_confs.glob("*/**/best/vampnet/weights.pth"):
+    print(f"adding {model_file}")
+    model_name = model_file.parent.parent.parent.name
+    MODEL_CHOICES[model_name] = str(model_file)
+
+print(f"model choices: {MODEL_CHOICES}")
+
 interface = Interface(
     device="cuda" if torch.cuda.is_available() else "cpu",
     vampnet_ckpt="models/vampnet.pth", 
     codec_ckpt="models/codec.pth",
 )
-
-# populate the model choices with any interface.yml files in the generated confs
-MODEL_CHOICES = {
-    "default": str(interface.ckpts["vampnet"]), 
-}
-generated_confs = Path("conf/generated")
-for conf_file in generated_confs.glob("*/interface.yml"):
-    with open(conf_file) as f:
-        _conf = yaml.safe_load(f)
-        MODEL_CHOICES[conf_file.parent.name] = _conf
-
-    
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
@@ -76,11 +78,11 @@ def _vamp(data, return_mask=False):
         upper_codebook_mask=int(data[n_mask_codebooks])
     )
 
+    _seed = data[seed] if data[seed] > 0 else None
     vamp_kwargs = dict(
         # _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
-        return_mask=True, 
         typical_filtering=data[typical_filtering], 
         typical_mass=data[typical_mass], 
         typical_min_tokens=data[typical_min_tokens], 
@@ -90,20 +92,19 @@ def _vamp(data, return_mask=False):
     )
 
     # save the mask as a txt file
-    np.savetxt(out_dir / "mask.txt", mask[:, 0, :].long().cpu().numpy())
-
-    _seed = data[seed] if data[seed] > 0 else None
     sig, mask = interface.ez_vamp(
         sig, 
-        feedback_steps=data[num_feedback_steps]
+        batch_size=1,
+        feedback_steps=data[num_feedback_steps],
         build_mask_kwargs=build_mask_kwargs,
         vamp_kwargs=vamp_kwargs,
+        return_mask=return_mask,
     )
 
     sig.write(out_dir / "output.wav")
 
     if return_mask:
-        mask = interface.to_signal(mask_z).cpu()
+        mask = interface.to_signal(mask.cuda()).cpu()
         mask.write(out_dir / "mask.wav")
         return sig.path_to_file, mask.path_to_file
     else:
@@ -318,6 +319,14 @@ with gr.Blocks() as demo:
                 visible=True
             )
 
+            num_feedback_steps = gr.Slider(
+                label="number of feedback steps (each one takes a while)",
+                minimum=1,
+                maximum=16,
+                step=1,
+                value=1
+            )
+
             vamp_button = gr.Button("generate (vamp)!!!")
             output_audio = gr.Audio(
                 label="output audio", interactive=False, type="filepath"
@@ -349,6 +358,7 @@ with gr.Blocks() as demo:
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
+            num_feedback_steps
         }
   
     # connect widgets

@@ -221,7 +221,7 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
+        mask = pmask.random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
         
@@ -299,7 +299,7 @@ def val_loop(state: State, batch: dict, accel: Accelerator):
         n_batch = z_in.shape[0]
         r = state.rng.draw(n_batch)[:, 0].to(accel.device)
 
-        mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
+        mask = pmask.random(z_in, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
@@ -471,7 +471,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
 
-    mask, ignore_indices_mask = pmask.stemgen_random(z_in, r)
+    mask = pmask.random(z_in, r)
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z_in, mask, vn.special_tokens["MASK"])
 
