@@ -108,16 +108,16 @@ def hugo_random(x: torch.Tensor, r:torch.Tensor):
     probs = torch.ones_like(x) * r
     mask = torch.bernoulli(probs)
     # alternatively, the mask level could be the cumsum of the mask
-    mask = mask.round().long()
+    mask = mask.round().long().to(x.device)
     mask_levels = nc - mask.sum(dim=1) - 1
 
     # create a new mask, where all levels below the mask level are masked
     # shape (nb, nc, nt) where new_mask[i, CB:, t] = 1, CB = mask_level[i, t] 
     # mask = mask_levels[:, :, None] > torch.arange(nc)[None, None, :]
-    mask = (mask_levels[:, None, :] < torch.arange(nc)[None, :, None]).long()
+    mask = (mask_levels[:, None, :] < torch.arange(nc, device=x.device)[None, :, None]).long()
 
     ignore_levels = mask_levels + 1
-    ignore_indices_mask = (ignore_levels[:, None, :] < torch.arange(nc)[None, :, None]).long()
+    ignore_indices_mask = (ignore_levels[:, None, :] < torch.arange(nc, device=x.device)[None, :, None]).long()
 
     # for _b in range(nb):
     #     for _t in range(nt):
@@ -127,7 +127,7 @@ def hugo_random(x: torch.Tensor, r:torch.Tensor):
     #                 ignore_indices_mask[_b, _c + 1:, _t] = 1
     #                 break
     
-    return mask.long(), ignore_indices_mask.long()
+    return mask.long(), ignore_indices_mask.bool()
 
 def linear_random(
     x: torch.Tensor,
