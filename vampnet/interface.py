@@ -78,7 +78,6 @@ class Interface:
         mask, 
         return_mask=False, 
         gen_fn=None, 
-        z_onsets=None,
         **kwargs
     ):
         # coarse z
@@ -203,11 +202,12 @@ class Interface:
         else:
             return sig
 
+
     def plot_sig_with_mask(self, sig, mask):
         import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 10))
         plt.subplot(2, 1, 1)
-        sigout[0].specshow()
+        sig[0].specshow()
         plt.subplot(2, 1, 2)
         # plot the mask (which is a matrix)
         plt.imshow(mask[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r')
