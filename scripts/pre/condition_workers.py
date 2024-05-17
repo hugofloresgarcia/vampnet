@@ -69,7 +69,6 @@ def receptive_field(model):
             total_size += (layer_size - 1) * total_stride
     return total_size, total_stride, total_padding
 
-
 @torch.inference_mode()
 def compress(model, device, audio, win_duration, n_quantizers=None):
     """Encodes the given audio signal, returns the codes."""
@@ -190,9 +189,6 @@ class DACProcessor:
         return DACArtifact(codes=codes, metadata=metadata)
 
 
-
-
-
 def process_audio(conditioner, sig):
     outputs = conditioner.condition(sig)
     meta = outputs.pop("meta")
@@ -209,92 +205,112 @@ def process_dac(conditioner, sig):
     return artifact
 
 
+CONDITIONERS = [
+    "dac", 
+    "loudness"
+]
+
+def get_file_ext(name):
+    return ".emb" if name != "dac" else ".adac"
+
 
 def condition_and_save(
     input_csv: str = None,
-    output_folder: str= None,
-    conditioner_name: str = "dac",
-    num_workers: int = cpu_count(), 
+    output_folder: str = None,
+    num_workers: int = cpu_count(),
     overwrite: bool = False
 ):
     assert input_csv is not None, "input_csv must be specified"
     assert output_folder is not None, "output_folder must be specified"
 
-    # make a backup of the input csv
+    # Make a backup of the input csv
     shutil.copy(input_csv, f"{input_csv}.backup")
-    print(f"backed up {input_csv} to {input_csv}.backup")
+    print(f"Backed up {input_csv} to {input_csv}.backup")
 
     metadata = pd.read_csv(input_csv)
-    # scramble the metadata
+    # Scramble the metadata
     metadata = metadata.sample(frac=1)
     audio_files = [Path(p) for p in metadata['audio_path']]
     audio_roots = [Path(p) for p in metadata['audio_root']]
-    assert all([r == audio_roots[0] for r in audio_roots]), "all audio roots must be the same"
+    assert all([r == audio_roots[0] for r in audio_roots]), "All audio roots must be the same"
     audio_root = Path(audio_roots[0])
 
     print(f"Found {len(audio_files)} audio files")
 
-    if conditioner_name == "dac":
-        conditioner = DACProcessor()
-    else:
-        conditioner = REGISTRY[conditioner_name]()
+    conditioner_names = CONDITIONERS
+    conditioners = {}
+    for name in conditioner_names:
+        if name == "dac":
+            conditioners[name] = DACProcessor()
+        else:
+            conditioners[name] = REGISTRY[name]()
 
-    file_ext = ".emb" if conditioner_name != "dac" else ".adac"
+    for name in conditioner_names:
+        file_ext = get_file_ext(name)
+        if (f"{name}_path" not in metadata.columns) or overwrite:
+            metadata[f"{name}_root"] = [output_folder for _ in range(len(metadata))]
+            metadata[f"{name}_path"] = [None for _ in range(len(metadata))]
+        else:
+            if f"{name}_root" not in metadata.columns:
+                metadata[f"{name}_root"] = [output_folder for _ in range(len(metadata))]
+                print(f"WARNING: {name}_root not defined in {input_csv}.")
+                print(f"Please define it in {input_csv} and re-run this script.")
+                return
 
-    dataset = AudioDataset(audio_files, audio_root, output_folder, conditioner_name, file_ext=file_ext)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=num_workers, collate_fn=lambda x: x,prefetch_factor=4 if num_workers > 0 else None)
-
-    if (f"{conditioner_name}_path" not in metadata.columns) or overwrite:
-        metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
-        metadata[f"{conditioner_name}_path"] = [None for _ in range(len(metadata))]
-    else:
-        # make sure the conditioner root is defined too. otherwise, prompt the user to define it
-        if f"{conditioner_name}_root" not in metadata.columns:
-            metadata[f"{conditioner_name}_root"] = [output_folder for _ in range(len(metadata))]
-            print(f"WARNING: {conditioner_name}_root not defined in {input_csv}.")
-            print(f"Please define it in {input_csv} and re-run this script.")
-            return
-
-    # go through the audio files, get the output_path, place it on the metadata (if it exists)
-    print(f"checking for existing files...")
-    for idx, row in tqdm.tqdm(metadata.iterrows()):
-        audio_file = Path(row['audio_path'])
-        output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
-        if output_path.exists():
-            metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
+    dataset = AudioDataset(
+        audio_files,
+        audio_root,
+        output_folder,
+        conditioner_names,  # Pass conditioner names to the dataset
+        file_ext=".tmp"  # Temporarily use a generic extension
+    )
+    dataloader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=lambda x: x,
+        prefetch_factor=4 if num_workers > 0 else None
+    )
 
     def save(features, output_path):
         output_path.parent.mkdir(exist_ok=True, parents=True)
         features.save(output_path)
-        
+
     with ThreadPoolExecutor(max_workers=(num_workers // 2) if num_workers > 0 else 1) as executor:
-        # now, process the non-existent files
-        print("processing...")
+        print("Processing...")
         for batch in tqdm.tqdm(dataloader):
-            sig = batch[0]
+            sig = batch[0].to("cuda" if torch.cuda.is_available() else "cpu")
+            idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
+
             if sig is None:
                 print(f"skipping  since it could not be read")
-                metadata.at[idx, f"{conditioner_name}_path"] = None
+                for name in conditioner_names:
+                    idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
+                    metadata.at[idx, f"{name}_path"] = None
                 continue
 
-            audio_file = sig.path_to_file
-            output_path = Path(output_folder) / audio_file.with_suffix(file_ext)
-            if output_path.exists():
-                print(f"skipping {audio_file} since it already exists")
-                continue
+            for name, conditioner in conditioners.items():
+                file_ext = get_file_ext(name)
+                if name == "dac":
+                    output_path = Path(output_folder) / sig.path_to_file.with_suffix(file_ext)
+                else:
+                    output_path = Path(output_folder) / sig.path_to_file.parent / sig.path_to_file.stem / f"{name}.{file_ext}"
 
-            process_fn = process_dac if conditioner_name == "dac" else process_audio
-            features = process_fn(conditioner=conditioner, sig=sig)
+                if output_path.exists() and not overwrite:
+                    print(f"skipping {output_path} since it already exists")
+                    continue
 
-            idx = metadata[metadata['audio_path'] == str(sig.path_to_file)].index[0]
-            metadata.at[idx, f"{conditioner_name}_path"] = str(output_path.relative_to(output_folder))
+                process_fn = process_dac if name == "dac" else process_audio
+                features = process_fn(conditioner=conditioner, sig=sig)
 
-            executor.submit(save, features, output_path)
-        
-        print(f"done! writing to {input_csv}")
-        metadata.to_csv(input_csv, index=False)
+                metadata.at[idx, f"{name}_path"] = str(output_path.relative_to(output_folder))
 
-    print(f"all done! if you want to remove the backup, run `rm {input_csv}.backup`")
+                executor.submit(save, features, output_path)
+
+    print(f"Done! Writing to {input_csv}")
+    metadata.to_csv(input_csv, index=False)
+    print(f"All done! If you want to remove the backup, run `rm {input_csv}.backup`")
 
 if __name__ == "__main__":
     DACProcessor = argbind.bind(DACProcessor)

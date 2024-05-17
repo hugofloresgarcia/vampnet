@@ -291,6 +291,7 @@ class MFCCConditioner(WaveformConditioner):
         assert sig.shape[0] == 1, f"batch size 1 only"
         sig = sig.resample(SAMPLE_RATE)
         sig = sig.to_mono()
+        sig = sig.normalize(-16)
 
         sig.to("cuda" if torch.cuda.is_available() else "cpu")        
         
@@ -342,20 +343,30 @@ class LoudnessConditioner(WaveformConditioner):
         self.hop_size = MIN_HOP_LENGTH * hop_size_mult
         self.win_size = MIN_HOP_LENGTH * win_size_mult
 
+        print(f"hop_size: {self.hop_size}, win_size: {self.win_size}")
+        print(f"hop duration: {self.hop_size / SAMPLE_RATE}, win duration: {self.win_size / SAMPLE_RATE}")
+
     def condition(self, sig: AudioSignal):
         sig = sig.resample(SAMPLE_RATE)
-        sig = sig.to_mono()
+        sig.normalize(-16)
 
         loudness = []
         for _sig in sig.windows(
             window_duration=self.win_size / SAMPLE_RATE,
             hop_duration=self.hop_size / SAMPLE_RATE,
-            preprocess=True
+            preprocess=False
         ):
-            loudness.append(_sig.loudness().item())
+            loudness.append(_sig.loudness())
+
+        if len(loudness) == 0:
+            loudness = sig.loudness()
+        else:
+            loudness = torch.stack(loudness).float().squeeze(-1)
+        # normalize to (0, 1)
+        # loudness = (loudness - loudness.min()) / (loudness.max() - loudness.min())
         
         return {
-            "loudness": torch.tensor(loudness),
+            "loudness": (loudness),
             "meta": {
                 "sample_rate": SAMPLE_RATE,
                 "hop_size": self.hop_size,
@@ -363,7 +374,8 @@ class LoudnessConditioner(WaveformConditioner):
                 "original_length": sig.shape[-1],
             }
         }
-    
+
+
 class ConditionEmbedder(nn.Module):
 
     def __init__(self, 

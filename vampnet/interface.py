@@ -68,6 +68,11 @@ class Interface:
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
     
+    def reload(self, vampnet_ckpt):
+        if vampnet_ckpt != self.ckpts["vampnet"]:
+            self.vampnet = VampNet.load(vampnet_ckpt).to(self.device)
+            self.ckpts["vampnet"] = vampnet_ckpt
+
     def vamp(self, 
         z, 
         mask, 
@@ -166,9 +171,6 @@ class Interface:
         # expand z to batch size
         z = z.expand(batch_size, -1, -1)
 
-        # print(f"reloading to {data[model_choice]}")
-        # self.reload(MODEL_CHOICES[data[model_choice]])
-
         prev_zvs = []
         for i in tqdm(range(feedback_steps), desc="feedback steps"):
             print(z.shape)
@@ -179,6 +181,8 @@ class Interface:
 
             mask = mask.expand(batch_size, -1, -1)
 
+            vamp_kwargs.pop("mask", None)
+            vamp_kwargs.pop('return_mask', None)
             zv, mask_z = self.vamp(
                 z,
                 mask=mask,
@@ -197,7 +201,7 @@ class Interface:
         if return_mask:
             return sig, mask.cpu()
         else:
-            return sig.path_to_file
+            return sig
 
     def plot_sig_with_mask(self, sig, mask):
         import matplotlib.pyplot as plt

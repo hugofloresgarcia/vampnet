@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-500m-jan31
+save_path: runs/spotdl-500m-feb14-no-stemgen
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -8,10 +8,10 @@ val_idx: [0, 1, 2, 3, 4]
 sample_freq: 10000
 val_freq: 1000
 
-batch_size: 32
-val_batch_size: 24
+batch_size: 16
+val_batch_size: 16
 num_workers: 16
-grad_acc_steps: 1
+grad_acc_steps: 2
 
 # Optimizatio
 amp: false
@@ -39,7 +39,7 @@ DACDataset.metadata_csvs:
 # - ./data/metadata/fma_full.csv
 # - ./data/metadata/disco-1m.csv
 
-DACDataset.seq_len: 1024
+DACDataset.seq_len: 512
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
 val/DACDataset.length: 2000
