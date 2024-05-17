@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-500m-may17-hugo-random
+save_path: runs/spotdl-16l16h1280-may17-hugo-randomv2
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -8,10 +8,10 @@ val_idx: [0, 1, 2, 3, 4]
 sample_freq: 10000
 val_freq: 1000
 
-batch_size: 16
-val_batch_size: 16
+batch_size: 20
+val_batch_size: 20
 num_workers: 16
-grad_acc_steps: 2
+grad_acc_steps: 1
 
 # Optimizatio
 amp: false

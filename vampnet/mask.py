@@ -7,8 +7,8 @@ from .util import scalar_to_batch_tensor
 
 
 def _gamma(r):
-    # return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
-    return r
+    return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
+    # return r
 
 
 def _invgamma(y):
@@ -107,17 +107,28 @@ def hugo_random(x: torch.Tensor, r:torch.Tensor):
 
     probs = torch.ones_like(x) * r
     mask = torch.bernoulli(probs)
-    ignore_indices_mask = torch.zeros_like(x).long()
+    # alternatively, the mask level could be the cumsum of the mask
+    mask = mask.round().long()
+    mask_levels = nc - mask.sum(dim=1) - 1
 
-    for _b in range(nb):
-        for _t in range(nt):
-            for _c in range(nc):
-                if mask[_b, _c, _t] == 1:
-                    mask[_b, _c:, _t] = 1
-                    ignore_indices_mask[_b, _c + 1:, _t] = 1
-                    break
+    # create a new mask, where all levels below the mask level are masked
+    # shape (nb, nc, nt) where new_mask[i, CB:, t] = 1, CB = mask_level[i, t] 
+    # mask = mask_levels[:, :, None] > torch.arange(nc)[None, None, :]
+    mask = (mask_levels[:, None, :] < torch.arange(nc)[None, :, None]).long()
+
+    ignore_levels = mask_levels + 1
+    ignore_indices_mask = (ignore_levels[:, None, :] < torch.arange(nc)[None, :, None]).long()
+
+    # for _b in range(nb):
+    #     for _t in range(nt):
+    #         for _c in range(nc):
+    #             if mask[_b, _c, _t] == 1:
+    #                 mask[_b, _c:, _t] = 1
+    #                 ignore_indices_mask[_b, _c + 1:, _t] = 1
+    #                 break
     
-    return mask.long(), ignore_indices_mask.bool()
+    return mask.long(), ignore_indices_mask.long()
+
 def linear_random(
     x: torch.Tensor,
     r: torch.Tensor,
@@ -308,7 +319,7 @@ def onset_mask(
 if __name__ == "__main__":
     # test hugo random
     x = torch.rand(1, 9, 15)
-    r = 0.3
+    r = 0.05
 
     # print the whole thing
     torch.set_printoptions(threshold=1000)
@@ -317,6 +328,12 @@ if __name__ == "__main__":
     # print(mask)
 
     # test linear random
-    mask, ignore_indices_mask = hugo_random(x, r)
-    print(mask, "\n", ignore_indices_mask)
+    for r in [0.01, 0.05, 0.3, 0.5, 0.9, 0.99]:
+        mask, ignore_indices_mask = hugo_random(x, r)
+
+        print(r)
+        print(mask, "\n",)
+
+        print(random(x,r))
+
 
