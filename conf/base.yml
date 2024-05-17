@@ -1,6 +1,6 @@
 
 dac_path: ./models/codec.pth
-save_path: runs/spotdl-500m-feb14-no-stemgen
+save_path: runs/spotdl-500m-may17-hugo-random
 
 num_iters: 1000002
 save_iters: [100000, 200000, 400000, 600000, 1000000]
@@ -27,8 +27,8 @@ VampNet.vocab_size: 1024
 VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
 VampNet.embedding_dim: 1280
-VampNet.n_layers: 20
-VampNet.n_heads: 20
+VampNet.n_layers: 16
+VampNet.n_heads: 16
 VampNet.dropout: 0.05
 VampNet.max_seq_len: 1024
 VampNet.flash_attn: true
@@ -42,7 +42,7 @@ DACDataset.metadata_csvs:
 DACDataset.seq_len: 512
 train/DACDataset.split: "train"
 val/DACDataset.split: "val"
-val/DACDataset.length: 2000
+val/DACDataset.length: 1000
 test/DACDataset.split: "test"
 test/DACDataset.length: 4000
 

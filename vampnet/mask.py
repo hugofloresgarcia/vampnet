@@ -7,7 +7,8 @@ from .util import scalar_to_batch_tensor
 
 
 def _gamma(r):
-    return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
+    # return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
+    return r
 
 
 def _invgamma(y):
@@ -95,6 +96,28 @@ def stemgen_random(x: torch.Tensor, r: torch.Tensor):
 
     return mask, ignore_indices_mask.bool()
 
+def hugo_random(x: torch.Tensor, r:torch.Tensor):
+    assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
+    if not isinstance(r, torch.Tensor):
+        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device).float()
+    
+    r = _gamma(r)[:, None, None]
+    
+    nb, nc, nt = x.shape
+
+    probs = torch.ones_like(x) * r
+    mask = torch.bernoulli(probs)
+    ignore_indices_mask = torch.zeros_like(x).long()
+
+    for _b in range(nb):
+        for _t in range(nt):
+            for _c in range(nc):
+                if mask[_b, _c, _t] == 1:
+                    mask[_b, _c:, _t] = 1
+                    ignore_indices_mask[_b, _c + 1:, _t] = 1
+                    break
+    
+    return mask.long(), ignore_indices_mask.bool()
 def linear_random(
     x: torch.Tensor,
     r: torch.Tensor,
@@ -283,4 +306,17 @@ def onset_mask(
 
 
 if __name__ == "__main__":
-    pass
+    # test hugo random
+    x = torch.rand(1, 9, 15)
+    r = 0.3
+
+    # print the whole thing
+    torch.set_printoptions(threshold=1000)
+
+    mask, ignore_indices_mask = stemgen_random(x, r)
+    # print(mask)
+
+    # test linear random
+    mask, ignore_indices_mask = hugo_random(x, r)
+    print(mask, "\n", ignore_indices_mask)
+
