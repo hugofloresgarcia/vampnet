@@ -3,7 +3,7 @@ music generation via masked acoustic token modeling.
 
 ## take the tour! 
 to get started using pretrained vampnet models and fine-tuning your own, 
-check out the [tour](/tour.ipynb). 
+check out the [tour](notebooks/tour.ipynb). 
 
 ## install 
 <!-- (coming soon)
