@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from dac.model.dac import DAC
 import audiotools as at
+from typing import Optional
 
 import vampnet
 
@@ -139,12 +140,21 @@ class Interface:
             rand_mask_intensity: float = 1.0,
             prefix_s: float = 0.0,
             suffix_s: float = 0.0,
-            periodic_prompt: int = 7,
+            periodic_prompt: Optional[int] = 7,
             periodic_prompt_width: int = 1,
             onset_mask_width: int = 0, 
             dropout: float = 0.0,
-            upper_codebook_mask: int = 3
+            upper_codebook_mask: Optional[int] = None
     ):
+        """
+        todo: document: 
+            - periodic prompt: 0 is unconditional, 1 is full passthrough
+            - upper_codebook_mask: how many codebooks to mask
+        """
+        if upper_codebook_mask is None:
+            upper_codebook_mask = self.model.n_codebooks
+        if periodic_prompt is None:
+            periodic_prompt = self.model.n_codebooks
         
         mask = pmask.linear_random(z, rand_mask_intensity)
         mask = pmask.mask_and(
