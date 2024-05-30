@@ -105,11 +105,11 @@ def _vamp(data, return_mask=False):
     else:
         z_out = out
 
-    sig = interface.to_signal(z_out).cpu()
+    sig = interface.decode(z_out).cpu()
     sig.write(out_dir / "output.wav")
 
     if return_mask:
-        mask = interface.to_signal(mask.to(interface.device)).cpu()
+        mask = interface.decode(mask.to(interface.device)).cpu()
         mask.write(out_dir / "mask.wav")
         return sig.path_to_file, mask.path_to_file
     else:

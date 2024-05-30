@@ -60,7 +60,7 @@ output_tokens = interface.vamp(
 )
 
 # convert them to a signal
-output_signal = interface.to_signal(output_tokens)
+output_signal = interface.decode(output_tokens)
 
 # save the output signal
 output_signal.save("scratch/output.wav")

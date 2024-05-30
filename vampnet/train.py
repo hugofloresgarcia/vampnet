@@ -283,7 +283,7 @@ def save_sampled(state, z, cross_x, writer):
 
     for i in range(num_samples):
         cx = cross_x[i][None, ...] if cross_x is not None else None
-        sampled = state.interface.to_signal(
+        sampled = state.interface.decode(
             state.interface.model.generate(
             codec=state.codec,
             cross_x=cx,
@@ -308,14 +308,14 @@ def save_inpainting(state, z, val_idx, cross_x, writer):
     mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
     z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
 
-    inpainted_prompt = state.interface.to_signal(z_mask,silence_mask=True)
-    inpainted_gnd_truth = state.interface.to_signal(z, )
+    inpainted_prompt = state.interface.decode(z_mask,silence_mask=True)
+    inpainted_gnd_truth = state.interface.decode(z, )
 
     inpainted = []
     for i in range(len(z)):
         cx = cross_x[i][None, ...] if cross_x is not None else None
         inpainted.append(
-            state.interface.to_signal(
+            state.interface.decode(
                 state.interface.model.generate(
                 codec=state.codec,
                 cross_x=cx,
@@ -376,9 +376,9 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     state.interface = vampnet.interface.Interface(state.codec, accel.unwrap(state.model))
 
-    generated = state.interface.to_signal(z_pred, )
-    reconstructed = state.interface.to_signal(z_out, )
-    masked = state.interface.to_signal(z_mask, silence_mask=False)
+    generated = state.interface.decode(z_pred, )
+    reconstructed = state.interface.decode(z_out, )
+    masked = state.interface.decode(z_mask, silence_mask=False)
 
     for i in range(generated.batch_size):
         audio_dict = {

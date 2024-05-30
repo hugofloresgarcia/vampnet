@@ -52,7 +52,7 @@ class Interface:
         return self
 
     @torch.no_grad()
-    def to_signal(self, z,  silence_mask=True):
+    def decode(self, z,  silence_mask=True):
         """
         convert a sequence of latents to a signal.
         """
@@ -219,7 +219,7 @@ class Interface:
             prev_zvs.append(zv)
             z = zv
 
-        sig = self.to_signal(zv).cpu()
+        sig = self.decode(zv).cpu()
         print("done")
 
         sig = sig.normalize(loudness)
