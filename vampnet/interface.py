@@ -18,7 +18,7 @@ class Interface:
         device=vampnet.DEVICE
     ):
         self.codec = codec
-        self.d model
+        self.model = model
 
         self.device = device
         self.to(device)
