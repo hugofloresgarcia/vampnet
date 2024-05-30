@@ -99,14 +99,15 @@ def load_control_signal_extractors() -> List[Control]:
     load all control signal extractors that are specified in the vampnet config
     as vampnet.CTRL_KEYS.
     """
-    from vampnet.controls.loudness import Loudness
+    # from vampnet.controls.loudness import Loudness
     from vampnet.controls.codec import DACControl
     extractors = []
     extractors.append(DACControl) # add the codec by default
 
     for extractor in vampnet.CTRL_KEYS:
         if extractor == "loudness":
-            extractors.append(Loudness)
+            raise NotImplementedError
+            # extractors.append(Loudness)
         else:
             raise ValueError(f"unknown control signal extractor: {extractor}")
     return extractors
