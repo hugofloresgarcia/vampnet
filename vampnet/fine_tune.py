@@ -6,14 +6,14 @@ import audiotools as at
 from vampnet.train import train
 
 
-def fine_tune(dataset: str, model_name: str,  **kwargs):
+def fine_tune(dataset: str, base_model_name: str,  **kwargs):
     with at.ml.Accelerator(amp=vampnet.AMP) as accel:
         if accel.local_rank != 0:
             sys.tracebacklimit = 0
         return train(accel, 
             save_path=vampnet.RUNS_DIR / f"finetuned-{dataset}",
             dataset=dataset, 
-            model_name=model_name,
+            fine_tune_model_name=base_model_name,
             fine_tune=True, **kwargs)
 
 

@@ -22,8 +22,8 @@ LOUD_NORM = -16 # all audio is normalized to this by the codec
 
 # ~~ tensors ~~
 import torch
-# DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
-DEVICE = "cpu"
+DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+# DEVICE = "cpu"
 
 # ~~ model params ~~
 N_HEADS = 16

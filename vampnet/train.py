@@ -411,7 +411,7 @@ def load(
     grad_acc_steps: int = vampnet.GRAD_ACC_STEPS,
     compile: bool = vampnet.COMPILE,
     fine_tune: bool = False,
-    model_name: str = None, 
+    fine_tune_model_name: str = None, 
 ) -> State:
     
     # load the datasets
@@ -429,10 +429,10 @@ def load(
     
     if fine_tune:
         print(f"FINE TUNING!")
-        print(f"loading model from {model_name}")
-        assert model_name is not None, "need to specify a model name when fine tuning"
-        model = vampnet.load_model(model_name)
-    elif not fine_tune and model_name is not None:
+        print(f"loading model from {fine_tune_model_name}")
+        assert fine_tune_model_name is not None, "need to specify a model name when fine tuning"
+        model = vampnet.load_model(fine_tune_model_name)
+    elif not fine_tune and fine_tune_model_name is not None:
         assert False, "cannot specify a model name when not fine tuning"
 
 
@@ -526,7 +526,7 @@ def train(accel: at.ml.Accelerator,
     val_idx: list = vampnet.VAL_IDX,
     num_workers: int = vampnet.NUM_WORKERS,
     fine_tune: bool = False, 
-    model_name: str = None, 
+    fine_tune_model_name: str = None, 
     cli: bool = False, 
 ):
 
@@ -570,7 +570,7 @@ def train(accel: at.ml.Accelerator,
         resume=resume, 
         save_path=save_path,
         fine_tune=fine_tune,
-        model_name=model_name)
+        fine_tune_model_name=fine_tune_model_name)
     print("initialized state.")
 
     # need to throw if the batch size is bigger than 

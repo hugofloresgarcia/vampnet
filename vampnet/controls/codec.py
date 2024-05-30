@@ -44,6 +44,7 @@ def compress(model, device, audio, win_duration, n_quantizers=None):
     # (as the model's internal padding is short by one hop length)
     remainder = audio.shape[-1] % model.hop_length
     right_pad = model.hop_length - remainder if remainder else 0
+    model.to(device)
     if not win_duration:
         model.padding = True
         if right_pad:
@@ -134,7 +135,7 @@ class DACControl(vampnet.controls.Control):
     metadata: dict = None
 
     @classmethod
-    def from_signal(cls, sig: AudioSignal):
+    def from_signal(cls, sig: AudioSignal, device=vampnet.DEVICE):
 
         from dac.model.base import DACFile
         metadata = {}
@@ -147,7 +148,7 @@ class DACControl(vampnet.controls.Control):
 
         codes = compress(
                 load_codec(), 
-                vampnet.DEVICE, 
+                device, 
                 sig,
                 win_duration=metadata["win_duration"], # like 30s 
         ) # (nt, nch, nc
