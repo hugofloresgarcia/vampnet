@@ -131,3 +131,5 @@ duckdb
 config/vampnet.py
 
 gradio-outputs/
+
+notebooks/vampnet
