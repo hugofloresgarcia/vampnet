@@ -76,6 +76,12 @@ def load_local_model(name):
     return transformer.VampNet.load(ckpt)
 
 
+def save_model(model, name):
+    # save a model to the models directory
+    ckpt = MODELS_DIR / f"{name}.vampnet"
+    model.save(ckpt)
+    return ckpt
+
 def load_model(name):
     if name in list_local_models():
         print(f"loading model {name} from local models.")
