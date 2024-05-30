@@ -4,3 +4,6 @@
 [submodule "lib/x-transformers"]
 	path = lib/x-transformers
 	url = https://github.com/hugofloresgarcia/x-transformers
+[submodule "lib/audiotools"]
+	path = lib/audiotools
+	url = https://github.com/hugofloresgarcia/audiotools

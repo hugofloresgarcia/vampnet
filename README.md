@@ -1,92 +1,178 @@
-# VampNet
+# vampnet
+yet another sound synthesizer
 
-This repository contains recipes for training generative music models on top of the Descript Audio Codec.
-
-## try `unloop`
-you can try vampnet in a co-creative looper called unloop. see this link: https://github.com/hugofloresgarcia/unloop
-
-# Setting up
-
-**Requires Python 3.9**. 
-
-you'll need a Python 3.9 environment to run VampNet. This is due to a [known issue with madmom](https://github.com/hugofloresgarcia/vampnet/issues/15). 
-
-(for example, using conda)
-```bash
-conda create -n vampnet python=3.9
-conda activate vampnet
+## install 
+(coming soon)
+```bash 
+pip install vampnet
 ```
 
-
-install VampNet
-
+for now
 ```bash
-git clone --recurse-submodules https://github.com/hugofloresgarcia/vampnet.git 
+git clone --recursive https://github.com/hugofloresgarcia/vampnet
 pip install -e ./vampnet
 ```
 
-## A note on argbind
-This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files.
-Config files are stored in the `conf/` folder.
+### play with vampnet!
 
-## Getting the Pretrained Models
-
-### Licensing for Pretrained Models: 
-The weights for the models are licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml). Likewise, any VampNet models fine-tuned on the pretrained models are also licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml).
-
-Download the pretrained models from [this link](https://zenodo.org/record/8136629). Then, extract the models to the `models/` folder. 
-
-
-# Usage
-
-## Launching the Gradio Interface
-You can launch a gradio UI to play with vampnet. 
-
+try the gradio demo
 ```bash
-python app.py --args.load conf/interface.yml --Interface.device cuda
+python app.py 
 ```
 
-# Preprocessing
+or use it programatically
+```python
+import audiotools as at
+import vampnet
 
-### create a csv file of audio files
-First, create a csv file to index a folder of audio files to use for training. 
-```bash
-python scripts/pre/create_dataset.py --audio_folder path/to/audio --output_file path/to/metadata.csv
+# load the audio tokenizer
+codec = vampnet.load_codec()
+
+# load the default pretrained model
+model = vampnet.load_model("hugggof/vampnet:vampnet-base-best")
+
+# put them into an interface
+interface = vampnet.Interface(codec, model)
+
+# load an example audio file
+signal = at.AudioSignal("assets/example_audio/fountain.mp3")
+
+# get the tokens for the audio
+codes = interface.encode(signal)
+
+# build a mask for the audio
+mask = interface.build_mask(signal, 
+    periodic_prompt=7, 
+    upper_codebook_mask=2,
+)
+
+# generate the output tokens
+output_tokens = interface.vamp(
+    vamp, mask, return_mask=False,
+    temperature=1.0, 
+    typical_filtering=True, 
+    top_p=0.8,
+    sample_cutoff=1.0, 
+)
+
+# convert them to a signal
+output_signal = interface.to_signal(output_tokens)
+
+# save the output signal
+output_signal.save("scratch/output.wav")
 ```
 
-### compute dac tokens for your dataset
-Now, you can preprocess all the files in that csv with the Descript Audio Codec, to compress the dataset into dac tokens for training. 
-```bash
-python scripts/pre/condition_workers.py --input_csv /path/to/metadata.csv --output_folder /path/to/codec/files --conditioner_name "dac"
+
+## command line usage
+
+### note: creating a custom config
+if you want to use vampnet with a custom configuration, you will need a custom config file. 
+for an example config, see `config/example.py`
+
+for all available config variables, see `vampnet/config/defaults.py`
+
+### training // fine tuning vampnet 
+before we can add any data, we need to create a database. 
+```bash 
+python -m vampnet.db.init --config config/example.py
 ```
 
-### train/val/test split
-Finally, you can create a random train/val/test split for the dataset.
-```bash
-python scripts/pre/split.py --input_csv /path/to/metadata.csv --test_size 0.1 --val_size 0.1 --seed 123
+now, we can add a dataset (in the form of an audio folder) to the db.
+```bash 
+python -m vampnet.db.create --config config/example.py --audio_folder assets/example_audio/ --dataset_name example
 ```
 
-## extras
-
-### Inspect the dataset audio
-If you want to get information about your dataset such as total duration, statistics on sample_rate, num_channels, etc. as well as get a random sample of the files in your dataset:
+before we can train or fine-tune, we need to preprocess our dataset. 
 ```bash
-python scripts/pre/inspect_audio.py --input_csv /path/to/metadata.csv --output_dir /path/to/artifacts/folder --sample_files 100
+python -m vampnet.db.preprocess --config config/example.py --dataset example
 ```
 
-# Training / Fine-tuning 
-
-## download a DAC model to use as a tokenizer
+now, we can fine tune a model on our dataset. 
 ```bash
-python -m dac download
+python -m vampnet.fine_tune --config config/example.py --dataset example 
 ```
-this will download a `.pth` file to `~/.cache/descript/dac/` that you can copy to `models/vampnet/codec.pth`. 
 
-## Training a model
+or train it from scratch, though, with the example config, this will require a large dataset (20k ish hours at a minimum). 
+```bash
+python -m vampnet.train --config config/example.py --dataset example 
+```
 
-You can edit `conf/base.yml` to change the csv paths for your audio data, or any training hyperparameters. 
 
-See `python scripts/exp/train.py -h` for a list of options.
+## using with pyharp
 
-## Fine-tuning
-*todo*
+TODO
+
+
+## programmatic usage
+
+```python
+import yapecs
+
+# load vampnet with it's default config
+import vampnet
+
+# or alternatively, load from a custom config. 
+# REPLACE config/vampnet.py WITH YOUR OWN CONFIGURATION
+vampnet = yapecs.compose("vampnet", ["config/vampnet.py"])
+```
+
+### pretrained models
+view a list of locally available pretrained models, and load a local pretrained model
+
+```python
+available_local_models = vampnet.list_local_models()
+print(f"available_local_models: {available_local_models}")
+
+# load the local model
+model_name = available_local_models[0]
+model = vampnet.load_local_model(model_name)
+```
+
+view a list of available pretrained models in the HF hub, and load one
+```python
+available_hub_models = vampnet.list_hub_models()
+print(f"available hub models: {available_hub_models}")
+
+# load the hub model
+model_id = available_hub_models[0]
+model = vampnet.load_hub_model(model_id)
+```
+
+### custom configs
+you will need a custom config file to configure vampnet. 
+for an example config, see `config/example.py`
+
+for all available config variables, see `vampnet/config/defaults.py`
+
+```python
+# REPLACE config/vampnet.py WITH YOUR OWN CONFIGURATION
+vampnet = yapecs.compose("vampnet", ["config/example.py"])
+print("default config: ", vampnet.CONFIG)
+print("custom config: ", vampnet_custom.CONFIG)
+```
+
+
+
+## packaging and uploading to pypi
+
+install twine
+```bash
+pip install twine
+```
+
+build the package
+```bash
+python setup.py sdist
+```
+
+upload to test pypi
+```bash
+twine upload --repository testpypi dist/*
+```
+
+upload to pypi
+```bash
+twine upload dist/*
+```
+
+

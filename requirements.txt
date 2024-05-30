@@ -1,0 +1,14 @@
+argbind
+tdqm
+# -e ./lib/audiotools
+# -e ./lib/descript-audio-codec
+# -e ./lib/x-transformers
+duckdb
+pandas
+loralib
+# msclap
+yapecs
+descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git#egg=descript-audiotools
+x-transformers @ git+https://github.com/hugofloresgarcia/x-transformers.git#egg=x-transformers
+descript-audio-codec @ git+https://github.com/hugofloresgarcia/descript-audio-codec.git#egg=descript-audio-codec
+pyharp @ git+https://github.com/teamup-dev/pyharp.git#egg=pyharp

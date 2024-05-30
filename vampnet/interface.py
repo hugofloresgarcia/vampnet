@@ -1,27 +1,33 @@
 from audiotools import AudioSignal
 import torch
 import vampnet.mask as pmask
-from vampnet.modules.transformer import VampNet
-from dac.utils import load_model as load_dac
+from vampnet.model.transformer import VampNet
 import math
 import numpy as np
 from tqdm import tqdm
+from dac.model.dac import DAC
+import audiotools as at
+
+import vampnet
 
 class Interface:
 
     def __init__(self, 
-        vampnet_ckpt = "runs/spotdl-500m-jan19/latest/vampnet/weights.pth",
-        codec_ckpt = "models/codec.pth",
-        device = "cuda" if torch.cuda.is_available() else "cpu",
+        codec: DAC, 
+        model: VampNet, 
+        device=vampnet.DEVICE
     ):
-        self.device = device
+        self.codec = codec
+        self.model = model
 
-        self.vampnet = VampNet.load(vampnet_ckpt).to(self.device)
-        self.codec = load_dac(load_path=codec_ckpt).to(self.device)
-        self.ckpts = {
-            "vampnet": vampnet_ckpt,
-            "codec": codec_ckpt,
-        }
+        self.device = device
+        self.to(device)
+
+    def to(self, device):
+        self.device = device
+        self.codec.to(device)
+        self.model.to(device)
+        return self
 
     def s2t(self, seconds: float):
         """seconds to tokens"""
@@ -37,20 +43,36 @@ class Interface:
     def t2s(self, tokens: int):
         """tokens to seconds"""
         return tokens * self.codec.hop_length / self.codec.sample_rate
-    
-    def reload(self, vampnet_ckpt):
-        if vampnet_ckpt != self.ckpts["vampnet"]:
-            self.vampnet = VampNet.load(vampnet_ckpt).to(self.device)
-            self.ckpts["vampnet"] = vampnet_ckpt
 
     def to(self, device):
         self.device = device
-        self.vampnet.to(device)
+        self.model.to(device)
         self.codec.to(device)
         return self
 
-    def to_signal(self, z: torch.Tensor):
-        return self.vampnet.to_signal(z, self.codec, silence_mask=True)
+    @torch.no_grad()
+    def to_signal(self, z,  silence_mask=True):
+        """
+        convert a sequence of latents to a signal.
+        """
+        assert z.ndim == 3
+        codec = self.codec
+        _z = codec.quantizer.from_latents(self.model.embedding.from_codes(z, codec))[0]
+
+        signal = at.AudioSignal(
+            codec.decode(_z), 
+            codec.sample_rate,
+        )
+
+        if silence_mask:
+            # find where the mask token is and replace it with silence in the audio
+            for tstep in range(z.shape[-1]):
+                if torch.any(z[:, :, tstep] == self.model.special_tokens["MASK"]):
+                    sample_idx_0 = tstep * codec.hop_length
+                    sample_idx_1 = sample_idx_0 + codec.hop_length
+                    signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
+
+        return signal
 
     def preprocess(self, signal: AudioSignal):
         signal = (
@@ -68,10 +90,6 @@ class Interface:
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
     
-    def reload(self, vampnet_ckpt):
-        if vampnet_ckpt != self.ckpts["vampnet"]:
-            self.vampnet = VampNet.load(vampnet_ckpt).to(self.device)
-            self.ckpts["vampnet"] = vampnet_ckpt
 
     def vamp(self, 
         z, 
@@ -81,28 +99,27 @@ class Interface:
         **kwargs
     ):
         # coarse z
-        cz = z[:, : self.vampnet.n_codebooks, :].clone()
-        mask = mask[:, : self.vampnet.n_codebooks, :]
+        cz = z[:, : self.model.n_codebooks, :].clone()
+        mask = mask[:, : self.model.n_codebooks, :]
 
         seq_len = cz.shape[-1]
 
         # we need to split the sequence into chunks by max seq length
         # we need to split so that the sequence length is less than the max_seq_len
-        n_chunks = math.ceil(seq_len / self.vampnet.max_seq_len)
+        n_chunks = math.ceil(seq_len / self.model.max_seq_len)
         chunk_len = math.ceil(seq_len / n_chunks)
         print(f"will process {n_chunks} chunks of length {chunk_len}")
 
         z_chunks = torch.split(cz, chunk_len, dim=-1)
         mask_chunks = torch.split(mask, chunk_len, dim=-1)
 
-        gen_fn = gen_fn or self.vampnet.generate
+        gen_fn = gen_fn or self.model.generate
         c_vamp_chunks = [
             gen_fn(
                 codec=self.codec,
                 time_steps=chunk.shape[-1],
                 start_tokens=chunk,
                 mask=mask_chunk,
-                return_signal=False,
                 **kwargs,
             )
             for chunk, mask_chunk in tqdm(zip(z_chunks, mask_chunks), desc="vamping chunks")

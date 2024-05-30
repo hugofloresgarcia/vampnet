@@ -4,36 +4,28 @@ from setuptools import setup
 with open("README.md") as f:
     long_description = f.read()
 
+with open("requirements.txt") as f:
+    install_requires = f.read().splitlines()
+
+
 setup(
     name="vampnet",
-    version="0.0.1",
-    classifiers=[
-        "Intended Audience :: Developers",
-        "Natural Language :: English",
-        "Programming Language :: Python :: 3.7",
-        "Topic :: Artistic Software",
-        "Topic :: Multimedia",
-        "Topic :: Multimedia :: Sound/Audio",
-        "Topic :: Multimedia :: Sound/Audio :: Editors",
-        "Topic :: Software Development :: Libraries",
-    ],
-    description="Generative Music Modeling.",
+    version="1.0.0dev0",
+    classifiers=[],
+    description="yet another sound synthesizer.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Hugo Flores García, Prem Seetharaman",
-    author_email="hugofg@u.northwestern.edu",
-    url="https://github.com/hugofloresgarcia/vampnet",
+    author="hugo flores garcia",
+    author_email="hugggofloresgarcia@gmail.com",
     license="MIT",
     packages=find_packages(),
-    install_requires=[
-        "torch",
-        "argbind>=0.3.2",
-        "numpy==1.23",
-        "gradio", 
-        "loralib",
-        "madmom",
-        "x_transformers @ git+https://github.com/hugofloresgarcia/x-transformers.git@lora",
-        "dask", 
-        "pandas"
-    ],
+    package_data={"assets": ["assets/*", "assets/*/*"]},
+    install_requires=install_requires,
+    extras_require={
+        "tests": [
+            "pytest",
+            "pytest-cov",
+            "line_profiler",
+        ],
+    },
 )

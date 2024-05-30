@@ -1,9 +1,0 @@
-$include:
-  - conf/lora.yml
-
-
-DACDataset.seq_len: 512
-DACDataset.metadata_csvs:
-  - ./data/metadata/clack.csv
-
-save_path: models/fine-tuned/clack

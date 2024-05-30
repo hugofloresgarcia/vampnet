@@ -12,41 +12,34 @@ import numpy as np
 import yaml
 import torch
 
-from vampnet import mask as pmask
-from vampnet.interface import Interface
+import vampnet
 
 
 # populate the model choices with any interface.yml files in the generated confs
-MODEL_CHOICES = {
-    "default": "models/vampnet-1192.pth", 
-}
+MODEL_CHOICES = vampnet.list_hub_models() 
 
-generated_confs = Path("models/fine-tuned/")
-for model_file in generated_confs.glob("*/**/best/vampnet/weights.pth"):
-    print(f"adding {model_file}")
-    model_name = model_file.parent.parent.parent.name
-    MODEL_CHOICES[model_name] = str(model_file)
+# load the audio tokenizer
+codec = vampnet.load_codec()
 
-print(f"model choices: {MODEL_CHOICES}")
+# load the default pretrained model
+model = vampnet.load_model(MODEL_CHOICES[0])
+CURRENT_MODEL = MODEL_CHOICES[0]
 
-interface = Interface(
-    device="cuda" if torch.cuda.is_available() else "cpu",
-    vampnet_ckpt="models/vampnet.pth", 
-    codec_ckpt="models/codec.pth",
-)
+# put them into an interface
+interface = vampnet.interface.Interface(codec, model)
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-MAX_DURATION_S = 60
+MAX_DURATION_S = 10
 def load_audio(file):
     print(file)
     filepath = file.name
-    sig = at.AudioSignal.salient_excerpt(
+    sig = at.AudioSignal.excerpt(
         filepath, duration=MAX_DURATION_S
     )
     # sig = interface.preprocess(sig)
-    sig = at.AudioSignal(filepath)
+    # sig = at.AudioSignal(filepath)
 
     out_dir = OUT_DIR / "tmp" / str(uuid.uuid4())
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +48,11 @@ def load_audio(file):
 
 
 def load_example_audio():
-    return "./assets/example.wav"
+    class FakeFile:
+        def __init__(self, name):
+            self.name = name
+
+    return load_audio(FakeFile("assets/example_audio/fountain.mp3"))
 
 
 def _vamp(data, return_mask=False):
@@ -64,10 +61,20 @@ def _vamp(data, return_mask=False):
 
     sig = at.AudioSignal(data[input_audio])
 
-    print(f"reloading to {data[model_choice]}")
-    interface.reload(MODEL_CHOICES[data[model_choice]])
+    global CURRENT_MODEL, interface
+    if data[model_choice] != CURRENT_MODEL:
+        CURRENT_MODEL = data[model_choice]
+        print(f"reloading to {data[model_choice]}")
+        model = vampnet.load_model(data[model_choice])
+        interface = vampnet.interface.Interface(codec, model)
 
-    build_mask_kwargs = dict(
+    _seed = data[seed] if data[seed] > 0 else None
+
+    # encode
+    z = interface.encode(sig)
+
+    mask = interface.build_mask(
+        z,
         rand_mask_intensity=data[rand_mask_intensity],
         prefix_s=data[prefix_s],
         suffix_s=data[suffix_s],
@@ -78,8 +85,11 @@ def _vamp(data, return_mask=False):
         upper_codebook_mask=int(data[n_mask_codebooks])
     )
 
-    _seed = data[seed] if data[seed] > 0 else None
-    vamp_kwargs = dict(
+    # save the mask as a txt file
+    out = interface.vamp(
+        z, 
+        mask, 
+        return_mask=return_mask,
         # _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
@@ -90,21 +100,16 @@ def _vamp(data, return_mask=False):
         seed=_seed,
         sample_cutoff=data[sample_cutoff],
     )
+    if return_mask:
+        z_out, mask = out
+    else:
+        z_out = out
 
-    # save the mask as a txt file
-    sig, mask = interface.ez_vamp(
-        sig, 
-        batch_size=1,
-        feedback_steps=data[num_feedback_steps],
-        build_mask_kwargs=build_mask_kwargs,
-        vamp_kwargs=vamp_kwargs,
-        return_mask=return_mask,
-    )
-
+    sig = interface.to_signal(z_out).cpu()
     sig.write(out_dir / "output.wav")
 
     if return_mask:
-        mask = interface.to_signal(mask.cuda()).cpu()
+        mask = interface.to_signal(mask.to(interface.device)).cpu()
         mask.write(out_dir / "mask.wav")
         return sig.path_to_file, mask.path_to_file
     else:
@@ -175,7 +180,8 @@ with gr.Blocks() as demo:
                     minimum=0,
                     maximum=100,
                     step=1,
-                    value=5,
+                    value=0,
+                    visible=False
                 )
 
                 beat_mask_width = gr.Slider(
@@ -314,17 +320,9 @@ with gr.Blocks() as demo:
         with gr.Column():
             model_choice = gr.Dropdown(
                 label="model choice", 
-                choices=list(MODEL_CHOICES.keys()),
-                value="default", 
+                choices=MODEL_CHOICES,
+                value=MODEL_CHOICES[0], 
                 visible=True
-            )
-
-            num_feedback_steps = gr.Slider(
-                label="number of feedback steps (each one takes a while)",
-                minimum=1,
-                maximum=16,
-                step=1,
-                value=1
             )
 
             vamp_button = gr.Button("generate (vamp)!!!")
@@ -358,7 +356,6 @@ with gr.Blocks() as demo:
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
-            num_feedback_steps
         }
   
     # connect widgets

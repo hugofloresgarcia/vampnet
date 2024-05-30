@@ -3,7 +3,7 @@ from typing import Optional, Union
 import torch
 from audiotools import AudioSignal
 
-from .util import scalar_to_batch_tensor
+from vampnet.util import scalar_to_batch_tensor
 
 
 def _gamma(r):
@@ -25,6 +25,7 @@ def full_mask(x: torch.Tensor):
 def empty_mask(x: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     return torch.zeros_like(x).long()
+
 
 def apply_mask(
         x: torch.Tensor, 
@@ -96,6 +97,7 @@ def stemgen_random(x: torch.Tensor, r: torch.Tensor):
 
     return mask, ignore_indices_mask.bool()
 
+
 def hugo_random(x: torch.Tensor, r:torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     if not isinstance(r, torch.Tensor):
@@ -128,6 +130,7 @@ def hugo_random(x: torch.Tensor, r:torch.Tensor):
     #                 break
     
     return mask.long(), ignore_indices_mask.bool()
+
 
 def linear_random(
     x: torch.Tensor,
@@ -267,6 +270,7 @@ def time_stretch_mask(
     mask = periodic_mask(x, stretch_factor, width=1)
     return mask
 
+
 def onset_mask(
     sig: AudioSignal, 
     z: torch.Tensor,
@@ -313,6 +317,29 @@ def onset_mask(
             print(mask)
     
     return mask
+
+
+
+
+# class Mask:
+
+#     class Op:
+#         def __call__(self, x: torch.Tensor):
+#             raise NotImplementedError
+
+#     class And:
+#         def __init__(self, mask1: Mask.Op, mask2: Mask.Op):
+#             self.mask1 = mask1
+#             self.mask2 = mask2
+
+#         def __call__(self, x: torch.Tensor, **kwargs):
+#             mask1 = self.mask1(x)
+#             mask2 = self.mask2(x)
+#             return mask_and(mask1, mask2)
+
+        
+
+#     def __init__(self, )
 
 
 

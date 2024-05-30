@@ -5,6 +5,29 @@ from pathlib import Path
 import numpy as np
 
 
+def num_params_hook(o, p):
+    return o + f" {p/1e6:<.3f}M params."
+
+
+def add_num_params_repr_hook(model):
+    import numpy as np
+    from functools import partial
+
+    for n, m in model.named_modules():
+        o = m.extra_repr()
+        p = sum([np.prod(p.size()) for p in m.parameters()])
+
+        setattr(m, "extra_repr", partial(num_params_hook, o=o, p=p))
+
+
+def rand_float(shape, low, high, rng):
+    return rng.draw(shape)[:, 0] * (high - low) + low
+
+
+def flip_coin(shape, p, rng):
+    return rng.draw(shape)[:, 0] < p
+
+
 def scalar_to_batch_tensor(x, batch_size):
     return torch.tensor(x).repeat(batch_size)
 
