@@ -6,6 +6,8 @@ from typing import Optional
 
 def conn(read_only=True) -> duckdb.DuckDBPyConnection:
     if not hasattr(vampnet, '_conn'):
+        # make sure that vampnet.DB's parent directory exists
+        vampnet.DB.parent.mkdir(parents=True, exist_ok=True)
         conn = duckdb.connect(vampnet.DB, read_only=read_only)
         vampnet._conn = conn    
     
