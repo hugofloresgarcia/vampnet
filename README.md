@@ -1,13 +1,17 @@
-# vampnet
-yet another sound synthesizer
+# vampnet!
+music generation via masked acoustic token modeling. 
+
+## take the tour! 
+to get started using pretrained vampnet models and fine-tuning your own, 
+check out the [tour](/tour.ipynb). 
 
 ## install 
-(coming soon)
+<!-- (coming soon)
 ```bash 
 pip install vampnet
-```
+``` -->
 
-for now
+<!-- for now -->
 ```bash
 git clone --recursive https://github.com/hugofloresgarcia/vampnet
 pip install -e ./vampnet
