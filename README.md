@@ -1,9 +1,9 @@
 # vampnet!
 music generation via masked acoustic token modeling. 
 
-## take the tour! 
+## take the tour notebook! 
 to get started using pretrained vampnet models and fine-tuning your own, 
-check out the [tour](notebooks/tour.ipynb). 
+check out the [tour](notebooks/tour.ipynb) notebook.
 
 ## install 
 <!-- (coming soon)
