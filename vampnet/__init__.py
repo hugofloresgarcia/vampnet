@@ -33,6 +33,7 @@ from . import util
 from . import export
 from . import train
 from . import fine_tune
+from . import mask
 
 from pathlib import Path
 from huggingface_hub import hf_hub_download

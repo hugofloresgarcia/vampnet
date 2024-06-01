@@ -93,12 +93,23 @@ class Interface:
     
 
     def vamp(self, 
-        z, 
-        mask, 
-        return_mask=False, 
-        gen_fn=None, 
+        z: torch.Tensor, 
+        mask: torch.Tensor, 
+        return_mask:bool=False, 
+        gen_fn: callable=None, 
         **kwargs
     ):
+        """
+        vamp on a sequence of codes z, given a mask. 
+
+        Args:
+            z (torch.Tensor): a sequence of codes. shape (batch_size, n_codebooks, seq_len)
+            mask (torch.Tensor): a mask. shape (batch_size, n_codebooks, seq_len)
+            return_mask (bool, optional): return the mask. Defaults to False.
+            gen_fn (callable, optional): used for debugging only. a function to generate the codes.  Defaults to None.
+        Returns:
+            torch.Tensor: a vamped of codes. shape (batch_size, n_codebooks, seq_len)
+        """
         # coarse z
         cz = z[:, : self.model.n_codebooks, :].clone()
         mask = mask[:, : self.model.n_codebooks, :]
@@ -143,13 +154,23 @@ class Interface:
             periodic_prompt: Optional[int] = 7,
             periodic_prompt_width: int = 1,
             onset_mask_width: int = 0, 
-            dropout: float = 0.0,
             upper_codebook_mask: Optional[int] = None
+            dropout: float = 0.0,
     ):
         """
-        todo: document: 
-            - periodic prompt: 0 is unconditional, 1 is full passthrough
-            - upper_codebook_mask: how many codebooks to mask
+        Build a mask for the a sequence of codes z. 
+
+        Args:
+            z (torch.Tensor): a sequence of codes. shape (batch_size, n_codebooks, seq_len)
+            rand_mask_intensity (float, optional): intensity of the random mask. Defaults to 1.0. 
+            prefix_s (float, optional): length of the prefix mask in seconds. Defaults to 0.0.
+            suffix_s (float, optional): length of the suffix mask in seconds. Defaults to 0.0.
+            periodic_prompt (Optional[int], optional): periodic prompt. for a period of `p`, this will mask everything but every `p`th token. Defaults to 7.
+            periodic_prompt_width (int, optional): periodic prompt width. values larger than 1 will create a wider periodic prompt. Defaults to 1.
+            onset_mask_width (int, optional): DEPRECATED. Defaults to 0.
+            dropout (float, optional): perform any dropout on the final mask. Defaults to 0.0.
+            upper_codebook_mask (Optional[int], optional): if a number `n` is given, then any tokens above codebook level `n` will be masked. Defaults to None.
+
         """
         if upper_codebook_mask is None:
             upper_codebook_mask = self.model.n_codebooks
@@ -163,7 +184,7 @@ class Interface:
         )
         mask = pmask.mask_and(
             mask,
-            pmask.periodic_mask(z, periodic_prompt, periodic_prompt_width, random_roll=True),
+            pmask.periodic(z, periodic_prompt, periodic_prompt_width, random_roll=True),
         )
         if onset_mask_width > 0:
             raise NotImplementedError("onset mask not implemented. currently depends on sig which breaks the code structure.")

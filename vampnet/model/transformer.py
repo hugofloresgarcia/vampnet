@@ -129,9 +129,9 @@ class VampNet(at.ml.BaseModel):
     def generate(
         self,
         codec,
+        start_tokens: Optional[torch.Tensor] = None,
         time_steps: int = 300,
         _sampling_steps: List[int] = [16, 4, 4, 2, 2, 2, 2, 1, 1],
-        start_tokens: Optional[torch.Tensor] = None,
         cross_x: Optional[torch.Tensor] = None,
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
@@ -144,6 +144,31 @@ class VampNet(at.ml.BaseModel):
         sample_cutoff: float = 1.0,
         causal_weight: float = 0.0,
     ):
+        """
+        Generate a sequence of tokens from the model, 
+        given a prompt and a mask. 
+
+        Args:
+            codec: the codec to use for encoding // decoding tokens
+            start_tokens (Optional[torch.Tensor], optional): the starting tokens (aka prompt). 
+            time_steps (int, optional): number of tokens to generate. only used if start_tokens is None. Defaults to 300.
+            _sampling_steps (List[int], optional): number of sampling steps for each codebook level. Defaults to [16, 4, 4, 2, 2, 2, 2, 1, 1].
+            cross_x (Optional[torch.Tensor], optional): DEPRECATED. cross attention tokens. Defaults to None.
+            sampling_temperature (float, optional): sampling temperature. Defaults to 1.0.
+            mask (Optional[torch.Tensor], optional): mask for the tokens. Defaults to None.
+            mask_temperature (float, optional): temperature for mask sampling. note that this it NOT the same as sampling_temperature. You probably don't want to change this value, and instead change the sampling_temperature. . Defaults to 10.5. Refer to the vampnet paper for more information on this parameter: https://arxiv.org/abs/2307.04686
+            typical_filtering (bool, optional): whether to use locally typical sampling (https://arxiv.org/abs/2202.00666). Defaults to False.
+            typical_mass (float, optional): typical mass for typical filtering. Defaults to 0.2.
+            typical_min_tokens (int, optional): minimum number of tokens for typical filtering. Defaults to 1.
+            top_p ([type], optional): nucleus sampling: https://arxiv.org/abs/1904.09751. Defaults to None.
+            seed (int, optional): random seed. Defaults to None.
+            sample_cutoff (float, optional):  experimental feature. it's function is left as an exercise for the reader. use at your own risk. Defaults to 1.0. (off)
+            causal_weight (float, optional):  experimental feature, from the bytedance stemgen paper: https://arxiv.org/abs/2312.08723. use at your own risk. Defaults to 0.0. (off)
+
+        Returns:
+            torch.Tensor: the generated tokens
+
+        """
         
         if seed is not None:
             at.util.seed(seed)

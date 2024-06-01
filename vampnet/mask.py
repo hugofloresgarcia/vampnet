@@ -178,7 +178,7 @@ def inpaint(
     return mask
 
 
-def periodic_mask(
+def periodic(
     x: torch.Tensor,
     period: int,
     width: int = 1,
@@ -221,9 +221,17 @@ def codebook_unmask(mask: torch.Tensor, n_conditioning_codebooks: int):
     mask[:, :n_conditioning_codebooks, :] = 0
     return mask
 
+
 def codebook_mask(mask: torch.Tensor, start: int):
+    """ deprecated. use upper_codebook_mask instead"""
     mask = mask.clone()
     mask[:, start:, :] = 1
+    return mask
+
+
+def upper_codebook_mask(z: torch.Tensor, level: int):
+    mask = torch.zeros_like(z)
+    mask[:, level:, :] = 1
     return mask
 
 
@@ -243,6 +251,7 @@ def dropout(
     mask = torch.bernoulli(mask * (1 - p))
     mask = ~mask.round().bool()
     return mask.long()
+
 
 def mask_or(
     mask1: torch.Tensor, 
@@ -267,7 +276,7 @@ def time_stretch_mask(
     # trim cz to the original length
     x = x[:, :, :c_seq_len]
 
-    mask = periodic_mask(x, stretch_factor, width=1)
+    mask = periodic(x, stretch_factor, width=1)
     return mask
 
 
