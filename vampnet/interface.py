@@ -154,7 +154,7 @@ class Interface:
             periodic_prompt: Optional[int] = 7,
             periodic_prompt_width: int = 1,
             onset_mask_width: int = 0, 
-            upper_codebook_mask: Optional[int] = None
+            upper_codebook_mask: Optional[int] = None,
             dropout: float = 0.0,
     ):
         """
