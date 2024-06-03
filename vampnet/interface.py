@@ -170,7 +170,8 @@ class Interface:
             onset_mask_width (int, optional): DEPRECATED. Defaults to 0.
             dropout (float, optional): perform any dropout on the final mask. Defaults to 0.0.
             upper_codebook_mask (Optional[int], optional): if a number `n` is given, then any tokens above codebook level `n` will be masked. Defaults to None.
-
+        
+        Returns: a mask the same size as z shape (batch_size, n_codebooks, seq_len)
         """
         if upper_codebook_mask is None:
             upper_codebook_mask = self.model.n_codebooks
