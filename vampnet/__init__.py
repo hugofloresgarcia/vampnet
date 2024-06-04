@@ -43,7 +43,11 @@ from huggingface_hub import hf_hub_download
 # TODO: models dir should be there. 
 # TODO: rename to vampnet. 
 
-HF_MODELS = ["hugggof/vampnet-models:vampnet-base-best"]
+HF_MODELS = [
+    "hugggof/vampnet-models:vampnet-9codebook-linear-sched-best",
+    "hugggof/vampnet-models:vampnet-base-best"
+]
+DEFAULT_MODEL = HF_MODELS[0]
 # download a model from the huggingface hub
 def load_hub_model(model_id = HF_MODELS[0]):
     repo_id, model_name = model_id.split(":")

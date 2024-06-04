@@ -85,7 +85,7 @@ IGNORE_INDEX = -100
 
 # ~ huggingface export ~
 HF_USERNAME = "hugggof"
-HF_REPO_NAME = "yass"
+HF_REPO_NAME = "vampnet-models"
 EXPORT_MODEL_TAG = "best"
 MODEL_EXT = ".vampnet"
 SCHEDULE = "cosine"
