@@ -3,12 +3,18 @@ from typing import Optional, Union
 import torch
 from audiotools import AudioSignal
 
+import vampnet
 from vampnet.util import scalar_to_batch_tensor
 
 
 def _gamma(r):
-    return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
-    # return r
+    if vampnet.SCHEDULE == "cosine":
+        return (r * torch.pi / 2).cos().clamp(1e-10, 1.0)
+    elif vampnet.SCHEDULE == "linear":
+        return (1-r)
+    else:
+        raise NotImplementedError(f"schedule {vampnet.SCHEDULE} not implemented")
+
 
 
 def _invgamma(y):

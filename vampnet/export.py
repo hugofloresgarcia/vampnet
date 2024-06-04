@@ -43,4 +43,4 @@ def export_model():
     print(f"you may now use the model in the interface by running `vampnet.load_hf_model('{repo_id}:{vampnet.MODEL_FILE.stem}')`")
 
 if __name__ == "__main__":
-    export()
+    export_model()

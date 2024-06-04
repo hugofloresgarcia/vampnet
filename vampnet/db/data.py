@@ -116,7 +116,13 @@ class VampNetDataset(torch.utils.data.Dataset):
         
         # load from the path
         from vampnet.controls.codec import DACControl
-        codes = DACControl.load(vampnet.CACHE_PATH / self.dataset_name / code_data["path"], offset=offset, num_frames=self.seq_len)
+        try:
+            codes = DACControl.load(vampnet.CACHE_PATH / self.dataset_name / code_data["path"], offset=offset, num_frames=self.seq_len)
+        except Exception as e:
+            print(f"Error loading {vampnet.CACHE_PATH / self.dataset_name / code_data['path']}")
+            # load another random file
+            return self.__getitem__(idx)
+            
 
         # load the control signals
         ctrls = {}

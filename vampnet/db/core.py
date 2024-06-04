@@ -89,11 +89,12 @@ def create_audio_file_table(conn):
     )
 
 def _denull(d):
-    # replace none with "null" string
-    for k, _v in d.__dict__.items():
-        if _v is None:
-            d.__dict__[k] = "null"
     return d
+    # # replace none with "null" string
+    # for k, _v in d.__dict__.items():
+    #     if _v is None:
+    #         d.__dict__[k] = None
+    # return d
 
 def insert_audio_file(conn, audio_file: AudioFile):
     _denull(audio_file)

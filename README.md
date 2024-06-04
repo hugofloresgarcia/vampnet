@@ -158,7 +158,7 @@ print("custom config: ", vampnet_custom.CONFIG)
 
 
 ## packaging and uploading to pypi
-
+(coming soon)
 install twine
 ```bash
 pip install twine
