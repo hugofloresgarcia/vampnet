@@ -88,4 +88,7 @@ HF_USERNAME = "hugggof"
 HF_REPO_NAME = "vampnet-models"
 EXPORT_MODEL_TAG = "best"
 MODEL_EXT = ".vampnet"
-SCHEDULE = "cosine"
+
+# TODO: this flag should be tied to a checkpoint, 
+# yet it is not. how can we amend this?
+SCHEDULE = "linear"
