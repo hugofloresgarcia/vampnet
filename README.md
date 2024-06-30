@@ -33,7 +33,7 @@ import vampnet
 codec = vampnet.load_codec()
 
 # load the default pretrained model
-model = vampnet.load_model("hugggof/vampnet:vampnet-base-best")
+model = vampnet.load_model("hugggof/vampnet-models:vampnet-9codebook-cosine-sched-best")
 
 # put them into an interface
 interface = vampnet.Interface(codec, model)
