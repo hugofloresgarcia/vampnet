@@ -230,17 +230,51 @@ def insert_split(conn, split: Split):
     )
 
 
+@dataclass
+class Caption:
+    text: str
+    audio_file_id: int
+
+def create_caption_table(conn):
+    conn.sql(
+        """
+        CREATE SEQUENCE seq_caption_id START 1
+        """
+    )
+    conn.sql(
+        """
+        CREATE TABLE caption (
+            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_caption_id'),
+            text STRING NOT NULL,
+            audio_file_id INTEGER NOT NULL,
+            FOREIGN KEY (audio_file_id) REFERENCES audio_file(id),
+        )
+        """
+    )
+
+def insert_caption(conn, caption: Caption):
+    # conn.sql(
+    #     f"""
+    #     INSERT INTO caption ( text, audio_file_id ) 
+    #     VALUES ('{caption.text}', {caption.audio_file_id})
+    #     """
+    # )
+    conn.execute(
+        """
+        INSERT INTO caption ( text, audio_file_id ) 
+        VALUES (?, ?)
+        """,
+        (caption.text, caption.audio_file_id)
+    )
+
 
 def init():
-    from vampnet.db import (
-        create_dataset_table, create_audio_file_table,
-        create_ctrl_sig_table, create_split_table
-    )
     for fn in [
         create_dataset_table,
         create_audio_file_table,
         create_ctrl_sig_table,
-        create_split_table
+        create_split_table, 
+        create_caption_table
     ]:
         conn = vampnet.db.conn(read_only=False)
         try: 

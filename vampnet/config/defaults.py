@@ -92,3 +92,6 @@ MODEL_EXT = ".vampnet"
 # TODO: this flag should be tied to a checkpoint, 
 # yet it is not. how can we amend this?
 SCHEDULE = "linear"
+
+## captioning
+NUM_CAPTIONS = 1
