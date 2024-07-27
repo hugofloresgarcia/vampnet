@@ -1,4 +1,3 @@
-from audiotools import AudioSignal
 import torch
 import vampnet.mask as pmask
 from vampnet.model.transformer import VampNet
@@ -10,6 +9,7 @@ import audiotools as at
 from typing import Optional
 
 import vampnet
+from vampnet.signal import Signal
 
 class Interface:
 
@@ -60,7 +60,7 @@ class Interface:
         codec = self.codec
         _z = codec.quantizer.from_latents(self.model.embedding.from_codes(z, codec))[0]
 
-        signal = at.AudioSignal(
+        signal = Signal(
             codec.decode(_z), 
             codec.sample_rate,
         )
@@ -75,7 +75,7 @@ class Interface:
 
         return signal
 
-    def preprocess(self, signal: AudioSignal):
+    def preprocess(self, signal: Signal):
         signal = (
             signal.clone()
             .resample(self.codec.sample_rate)
@@ -86,7 +86,7 @@ class Interface:
         return signal
 
     @torch.inference_mode()
-    def encode(self, signal: AudioSignal):
+    def encode(self, signal: Signal):
         signal = self.preprocess(signal).to(self.device)
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
@@ -201,7 +201,7 @@ class Interface:
 
     def ez_vamp(
         self, 
-        sig: AudioSignal,
+        sig: Signal,
         batch_size: int = 4,
         feedback_steps: int = 1,
         return_mask: bool = False,

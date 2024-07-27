@@ -14,11 +14,12 @@ import torch.nn.functional as F
 from einops import rearrange
 from x_transformers import ContinuousTransformerWrapper
 from x_transformers import Encoder
+import wandb
 
 
 import vampnet
 from vampnet.mask import (
-    _gamma, scalar_to_batch_tensor, 
+    _gamma, scalar_to_batch_tensor, full_mask, empty_mask
 )
 from vampnet.util import (
     codebook_flatten, codebook_unflatten
@@ -35,6 +36,21 @@ from .layers import WNConv1d
 # set the logging level to info
 logging.basicConfig(level=logging.INFO)
 
+
+class ClassifierFreeGuidanceDropout(nn.Module):
+
+    def __init__(self, dropout: float = 0.0):
+        super().__init__()
+        self.dropout = dropout
+
+    def forward(self, x):
+        if self.training and self.dropout > 0:
+            mask = torch.rand(x.shape[0], 1, 1, device=x.device) > self.dropout
+        else: 
+            mask = torch.ones(x.shape[0], 1, 1, device=x.device)    
+        
+        return mask.bool()
+
 class VampNet(at.ml.BaseModel):
     def __init__(
         self,
@@ -46,7 +62,8 @@ class VampNet(at.ml.BaseModel):
         embedding_dim: int = vampnet.EMBEDDING_DIM,
         vocab_size: int = vampnet.VOCAB_SIZE,
         dropout: float = vampnet.DROPOUT,
-        cross_attend_dim: bool = vampnet.CROSS_ATTEND_DIM, 
+        d_ctrl: int = vampnet.D_CTRL,
+        cfg_dropout: float = 0.2,
         max_seq_len: int = vampnet.MAX_SEQ_LEN,
         num_reg_tokens: int = vampnet.NUM_REG_TOKENS,
     ):
@@ -59,8 +76,10 @@ class VampNet(at.ml.BaseModel):
         self.vocab_size = vocab_size
         self.latent_dim = latent_dim
         self.max_seq_len = max_seq_len
-        self.cross_attend_dim = cross_attend_dim
         self.num_reg_tokens = num_reg_tokens
+        self.d_ctrl = d_ctrl
+        self.dropout = dropout
+        self.cfg_dropout = cfg_dropout
 
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
@@ -79,21 +98,21 @@ class VampNet(at.ml.BaseModel):
                 depth=self.n_layers,
                 heads=self.n_heads,
                 attn_flash=True,
-                rotary_pos_emb=True,
                 ff_glu=True, 
                 use_rmsnorm=True, 
-                cross_attend=cross_attend_dim > 0, 
             ),
             emb_dropout=dropout,
             num_memory_tokens=num_reg_tokens,
         )
 
-        if cross_attend_dim > 0:
-            self.cross_attend_proj = lora.Linear(
-                self.cross_attend_dim,
+        if d_ctrl > 0:
+            self.ctrl_proj = lora.Linear(
+                self.d_ctrl,
                 self.embedding_dim,
                 r=vampnet.LORA_R,
             )
+            self.ctrl_dropout = ClassifierFreeGuidanceDropout(cfg_dropout)
+            self.ctrl_mask_emb = nn.Parameter(torch.randn(1, 1, self.embedding_dim), requires_grad=True)
 
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks
@@ -104,20 +123,38 @@ class VampNet(at.ml.BaseModel):
 
 
 
-    def forward(self, x, pad_mask=None, cross_x=None, cross_pad_mask=None,):
-        pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
-        cross_pad_mask = cross_pad_mask.bool() if isinstance(cross_pad_mask, torch.Tensor) else cross_pad_mask
-        x = self.embedding(x)
+    def forward(self, x, pad_mask=None, ctrl=None, ctrl_mask=None):
+        if ctrl_mask is None and ctrl is not None:
+            ctrl_mask = torch.zeros_like(ctrl[:, 0, :]).bool()
+        if pad_mask is None:
+            pad_mask = torch.zeros_like(x[:, 0, :]).bool()
 
+        pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
+        ctrl_mask = ctrl_mask.bool() if isinstance(ctrl_mask, torch.Tensor) else ctrl_mask
+        x = self.embedding(x)
         x = rearrange(x, "b d n -> b n d")
-        if cross_x is not None:
-            cross_x = rearrange(cross_x, "b d n -> b n d")
-            cross_x = self.cross_attend_proj(cross_x)
+
+        if self.d_ctrl > 0:
+            assert ctrl is not None, "ctrl is required if d_ctrl > 0"
+            ctrl = rearrange(ctrl, "b d n -> b n d")
+            ctrl_mask = rearrange(ctrl_mask, "b n -> b n 1")
+
+            # apply the control projection
+            ctrl = self.ctrl_proj(ctrl)
+
+            # replace the control with the mask embedding where the mask is true
+            ctrl = torch.where(ctrl_mask, self.ctrl_mask_emb, ctrl)
+
+            # apply dropout to the control
+            ctrl_dropout_mask = self.ctrl_dropout(ctrl)
+            ctrl = torch.where(ctrl_dropout_mask, ctrl, self.ctrl_mask_emb)
+
+            # add the control to the input
+            x = x + ctrl
+
         out = self.lm(
             x, return_mems=False, 
             mask=pad_mask, 
-            context=cross_x, 
-            context_mask=cross_pad_mask
         )
         out = self.classifier(out)
         out = rearrange(out, "b n d -> b d n")
@@ -131,8 +168,9 @@ class VampNet(at.ml.BaseModel):
         codec,
         start_tokens: Optional[torch.Tensor] = None,
         time_steps: int = 300,
-        _sampling_steps: List[int] = [16, 4, 4, 2, 2, 2, 2, 1, 1],
-        cross_x: Optional[torch.Tensor] = None,
+        _sampling_steps: List[int] = [64, 32, 16, 8, 4, 2, 2, 1, 1],
+        ctrl: Optional[torch.Tensor] = None,
+        ctrl_mask: Optional[torch.Tensor] = None,
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
@@ -169,6 +207,10 @@ class VampNet(at.ml.BaseModel):
             torch.Tensor: the generated tokens
 
         """
+
+        # TODO: add cond, cond mask
+        # if ctrl is not None:
+        #     raise ValueError(f"cond is not supported yet")
         
         if seed is not None:
             at.util.seed(seed)
@@ -251,7 +293,7 @@ class VampNet(at.ml.BaseModel):
                 # infer from latents
                 # NOTE: this collapses the codebook dimension into the sequence dimension
                 logits = self.forward(
-                    latents, cross_x=cross_x
+                    latents, ctrl=ctrl, ctrl_mask=ctrl_mask
                 )  # b, prob, seq
                 logits = logits.permute(0, 2, 1)  # b, seq, prob
                 # logging.debug(f"permuted logits with shape: {logits.shape}")

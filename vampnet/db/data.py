@@ -25,7 +25,7 @@ class VampNetDataset(torch.utils.data.Dataset):
         split: Optional[str] = None, 
         max_len: Optional[int] = None
     ):
-        conn = vampnet.db.conn(read_only=True)
+        conn = vampnet.db.cursor()
         # get the dataset id
         # breakpoint()
         print(f"Loading dataset {dataset}")
@@ -47,15 +47,15 @@ class VampNetDataset(torch.utils.data.Dataset):
                 """, 
             ).df()
         else:
-            df = conn.execute(
+            df = pd.read_sql_query(
                 f"""
                 SELECT cs.id, cs.path, cs.audio_file_id, cs.name, cs.hop_size, cs.num_frames, s.split 
                 FROM ctrl_sig as cs
                 JOIN audio_file as af ON af.id = cs.audio_file_id
                 JOIN split as s ON s.audio_file_id = af.id
                 WHERE af.dataset_id = {dataset_id} and s.split = '{split}'
-                """, 
-            ).df()
+                """, vampnet.db.conn()
+            )
             print(f"Loaded {len(df)} rows from the database for split {split}")
         self.split = split
 
@@ -72,6 +72,7 @@ class VampNetDataset(torch.utils.data.Dataset):
         self.dfs = {}
         for key in [codes_key] + ctrl_keys:
             self.dfs[key] = df[df["name"] == key].set_index("audio_file_id")
+        # make sure to keep only the audio_file_ids that are in all of the dfs
 
         # make pd dataframe with just the audio_file_id column that we'll scramble and sample from
         self.index_df = pd.DataFrame({"audio_file_id": df["audio_file_id"].unique()})

@@ -1,5 +1,5 @@
 
-from audiotools import AudioSignal
+from audiotools import AudioSignal, STFTParams
 from pathlib import Path
 from typing import List
 import torch
@@ -10,6 +10,12 @@ from dataclasses import dataclass
 import vampnet
 
 SUFFIX = ".ctrl"
+
+STFT_PARAMS = STFTParams(
+    window_length=vampnet.HOP_SIZE * 4, 
+    hop_length=vampnet.HOP_SIZE,
+    match_stride=True
+)
 
 class Control:
     name: str 
@@ -105,8 +111,9 @@ def load_control_signal_extractors() -> List[Control]:
     extractors.append(DACControl) # add the codec by default
 
     for extractor in vampnet.CTRL_KEYS:
-        if extractor == "loudness":
-            raise NotImplementedError
+        if extractor == "rms":
+            from vampnet.controls.rms import RMS
+            extractors.append(RMS)
             # extractors.append(Loudness)
         else:
             raise ValueError(f"unknown control signal extractor: {extractor}")

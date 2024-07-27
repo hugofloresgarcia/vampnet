@@ -34,6 +34,7 @@ from . import export
 from . import train
 from . import fine_tune
 from . import mask
+from . import signal
 
 from pathlib import Path
 from huggingface_hub import hf_hub_download
@@ -44,7 +45,6 @@ from huggingface_hub import hf_hub_download
 # TODO: rename to vampnet. 
 
 HF_MODELS = [
-    "hugggof/vampnet-models:vampnet-9codebook-linear-sched-best",
     "hugggof/vampnet-models:vampnet-base-best"
 ]
 DEFAULT_MODEL = HF_MODELS[0]

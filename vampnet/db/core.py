@@ -1,34 +1,33 @@
 import vampnet
-import duckdb
+import sqlite3
 import pandas as pd
 from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
 
-def conn(read_only=True) -> duckdb.DuckDBPyConnection:
+def conn() -> sqlite3.Connection:
     if not hasattr(vampnet, '_conn'):
         # make sure that vampnet.DB's parent directory exists
         Path(vampnet.DB).parent.mkdir(parents=True, exist_ok=True)
-        conn = duckdb.connect(vampnet.DB, read_only=read_only)
-        vampnet._conn = conn    
+        conn = sqlite3.connect(vampnet.DB)
+        vampnet.db._conn = conn    
     
-    return vampnet._conn
+    return vampnet.db._conn
+
+
+def cursor():
+    conn = vampnet.db.conn()
+    return conn.cursor()
 
 @dataclass
 class Dataset:
     name: str
     root: str
-def create_dataset_table(conn):
-    # create a table for datasets
-    conn.sql(
-        """
-        CREATE SEQUENCE seq_dataset_id START 1
-        """
-    )
-    conn.sql(
+def create_dataset_table(cur):
+    cur.execute(
         """
         CREATE TABLE dataset (
-            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_dataset_id'),
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             name STRING NOT NULL UNIQUE,
             root STRING,
             UNIQUE (name, root)
@@ -36,8 +35,8 @@ def create_dataset_table(conn):
         """
     )
 
-def insert_dataset(conn, dataset: Dataset):
-    return conn.sql(
+def insert_dataset(cur, dataset: Dataset):
+    return cur.execute(
         f"""
         INSERT INTO dataset (
             name, root
@@ -48,12 +47,21 @@ def insert_dataset(conn, dataset: Dataset):
         """
     ).fetchone()[0]
 
-def get_dataset(conn, name: str) -> Dataset:
-    return conn.execute(f"""
+def get_dataset(cur, name: str) -> Dataset:
+    return cur.execute(f"""
         SELECT id, root
         FROM dataset
         WHERE name = '{name}'
     """).fetchone()
+
+def dataset_exists(cur, name: str) -> bool:
+    return cur.execute(f"""
+        SELECT EXISTS(
+            SELECT 1
+            FROM dataset
+            WHERE name = '{name}'
+        )
+    """).fetchone()[0]
 
 # create a table for audio files
 @dataclass
@@ -65,16 +73,11 @@ class AudioFile:
     num_channels: Optional[int] = None
     bit_depth: Optional[int] = None
     encoding: Optional[str] = None
-def create_audio_file_table(conn):
-    conn.sql(
-        """
-        CREATE SEQUENCE seq_audio_file_id START 1
-        """
-    )
-    conn.sql(
+def create_audio_file_table(cur):
+    cur.execute(
         """
         CREATE TABLE audio_file (
-            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_audio_file_id'),
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             path STRING,
             dataset_id INTEGER NOT NULL,
             num_frames INTEGER,
@@ -88,32 +91,11 @@ def create_audio_file_table(conn):
         """
     )
 
-def _denull(d):
-    return d
-    # # replace none with "null" string
-    # for k, _v in d.__dict__.items():
-    #     if _v is None:
-    #         d.__dict__[k] = None
-    # return d
 
-def insert_audio_file(conn, audio_file: AudioFile):
-    _denull(audio_file)
-    # return conn.sql(
-    #     f"""
-    #     INSERT INTO audio_file  BY POSITION (
-    #         path, dataset_id, num_frames, sample_rate, num_channels, bit_depth, encoding
-    #     ) VALUES (
-    #         '{audio_file.path}', {audio_file.dataset_id}, {audio_file.num_frames}, 
-    #         {audio_file.sample_rate}, {audio_file.num_channels}, {audio_file.bit_depth}, 
-    #         '{audio_file.encoding}'
-    #     )
-    #     RETURNING id
-    #     """
-    # ).fetchone()[0]
-    # use ? instead of f-string
-    return conn.execute(
+def insert_audio_file(cur, audio_file: AudioFile):
+    return cur.execute(
         """
-        INSERT INTO audio_file  BY POSITION (
+        INSERT INTO audio_file (
             path, dataset_id, num_frames, sample_rate, num_channels, bit_depth, encoding
         ) VALUES (
             ?, ?, ?, ?, ?, ?, ?
@@ -127,15 +109,25 @@ def insert_audio_file(conn, audio_file: AudioFile):
 
     # convert to a dataframe and insert with dataframe
     df = pd.DataFrame([audio_file.__dict__])
-    conn.insert("audio_file", df)
+    cur.insert("audio_file", df)
 
 
-def get_audio_file_table(conn, dataset_id: int) -> pd.DataFrame:
-    return conn.execute(f"""
+def get_audio_file_table(cur, dataset_id: int) -> pd.DataFrame:
+    return cur.execute(f"""
         SELECT *
         FROM audio_file
         WHERE dataset_id = {dataset_id}
     """).df()
+
+def audio_file_exists(cur, path: str, dataset_id: int) -> bool:
+    return cur.execute(f"""
+        SELECT EXISTS(
+            SELECT 1
+            FROM audio_file
+            WHERE path = '{path}'
+            AND dataset_id = {dataset_id}
+        )
+    """).fetchone()[0]
 
 # a table for control signals
 @dataclass
@@ -143,58 +135,53 @@ class ControlSignal:
     path: str
     audio_file_id: int
     name: str
+    sample_rate: int
     hop_size: int
     num_frames: int
     num_channels: int
-def create_ctrl_sig_table(conn):
-    conn.sql(
-        """
-        CREATE SEQUENCE seq_ctrl_sig_id START 1
-        """
-    )
-    conn.sql(
+def create_ctrl_sig_table(cur):
+    cur.execute(
         """
         CREATE TABLE ctrl_sig (
-            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_ctrl_sig_id'),
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             path STRING NOT NULL UNIQUE,
             audio_file_id INTEGER NOT NULL,
             name STRING NOT NULL,
+            sample_rate INTEGER NOT NULL,
             hop_size INTEGER NOT NULL,
             num_frames INTEGER NOT NULL,
             num_channels INTEGER NOT NULL,
-            FOREIGN KEY (audio_file_id) REFERENCES audio_file(id),
-            UNIQUE (audio_file_id, name)
+            FOREIGN KEY (audio_file_id) REFERENCES audio_file(id)
         )
         """
     )
 
-def insert_ctrl_sig(conn, ctrl_sig: ControlSignal):
-    _denull(ctrl_sig)
-    # return conn.sql(
-    #     f"""
-    #     INSERT INTO ctrl_sig BY POSITION (
-    #         path, audio_file_id, name, hop_size, num_frames, num_channels
-    #     ) VALUES (
-    #         '{ctrl_sig.path}', {ctrl_sig.audio_file_id}, '{ctrl_sig.name}', 
-    #         {ctrl_sig.hop_size}, {ctrl_sig.num_frames}, {ctrl_sig.num_channels}
-    #     )
-    #     RETURNING id
-    #     """
-    # ).fetchone()[0]
-
-    # use ? instead of f-string
-    return conn.execute(
+def insert_ctrl_sig(cur, ctrl_sig: ControlSignal):
+    return cur.execute(
         """
-        INSERT INTO ctrl_sig BY POSITION (
-            path, audio_file_id, name, hop_size, num_frames, num_channels
+        INSERT INTO ctrl_sig (
+            path, audio_file_id, name, sample_rate, hop_size, num_frames, num_channels
         ) VALUES (
-            ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?
         )
         RETURNING id
         """,
-        (ctrl_sig.path, ctrl_sig.audio_file_id, ctrl_sig.name,
+        (ctrl_sig.path, ctrl_sig.audio_file_id, ctrl_sig.name, ctrl_sig.sample_rate,
         ctrl_sig.hop_size, ctrl_sig.num_frames, ctrl_sig.num_channels)
     ).fetchone()[0]
+
+def ctrl_sig_exists(cur, path: str, audio_file_id: int) -> bool:
+    # print(f'looking for ctrl_sig {path} for audio_file_id {audio_file_id}')
+    out =  cur.execute(f"""
+        SELECT EXISTS(
+            SELECT 1
+            FROM ctrl_sig
+            WHERE path = '{path}'
+            AND audio_file_id = {audio_file_id}
+        )
+    """).fetchone()[0]
+    # print(f'ctrl_sig exists: {out}')
+    return out
 
 # a table for train/test splits
 @dataclass
@@ -202,16 +189,11 @@ class Split:
     audio_file_id: int
     split: str
 
-def create_split_table(conn):
-    conn.sql(
-        """
-        CREATE SEQUENCE seq_split_id START 1
-        """
-    )
-    conn.sql(
+def create_split_table(cur):
+    cur.execute(
         """
         CREATE TABLE split (
-            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_split_id'),
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             audio_file_id INTEGER NOT NULL,
             split STRING NOT NULL,
             FOREIGN KEY (audio_file_id) REFERENCES audio_file(id),
@@ -220,9 +202,9 @@ def create_split_table(conn):
         """
     )
 
-def insert_split(conn, split: Split):
+def insert_split(cur, split: Split):
     # breakpoint()
-    conn.sql(
+    cur.execute(
         f"""
         INSERT INTO split ( audio_file_id, split ) 
         VALUES ({split.audio_file_id}, '{split.split}')
@@ -235,31 +217,20 @@ class Caption:
     text: str
     audio_file_id: int
 
-def create_caption_table(conn):
-    conn.sql(
-        """
-        CREATE SEQUENCE seq_caption_id START 1
-        """
-    )
-    conn.sql(
+def create_caption_table(cur):
+    cur.execute(
         """
         CREATE TABLE caption (
-            id INTEGER NOT NULL PRIMARY KEY DEFAULT nextval('seq_caption_id'),
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             text STRING NOT NULL,
             audio_file_id INTEGER NOT NULL,
-            FOREIGN KEY (audio_file_id) REFERENCES audio_file(id),
+            FOREIGN KEY (audio_file_id) REFERENCES audio_file(id)
         )
         """
     )
 
-def insert_caption(conn, caption: Caption):
-    # conn.sql(
-    #     f"""
-    #     INSERT INTO caption ( text, audio_file_id ) 
-    #     VALUES ('{caption.text}', {caption.audio_file_id})
-    #     """
-    # )
-    conn.execute(
+def insert_caption(cur, caption: Caption):
+    cur.execute(
         """
         INSERT INTO caption ( text, audio_file_id ) 
         VALUES (?, ?)
@@ -276,11 +247,11 @@ def init():
         create_split_table, 
         create_caption_table
     ]:
-        conn = vampnet.db.conn(read_only=False)
+        cur = cursor()
         try: 
             print(f"running {fn.__name__}")
-            fn(conn)
-        except duckdb.Error as e:
+            fn(cur)
+        except Exception as e:
             print(f"error: {e}")
 
     print("done! :)")

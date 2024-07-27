@@ -141,7 +141,7 @@ class DACControl(vampnet.controls.Control):
         metadata = {}
         metadata["original_length"] = int(sig.samples.shape[-1])
         metadata["input_db"] = float(sig.ffmpeg_loudness())
-        metadata["win_duration"] = vampnet.HOP_SIZE * 2500 / vampnet.SAMPLE_RATE
+        metadata["win_duration"] = vampnet.HOP_SIZE * 10000 / vampnet.SAMPLE_RATE
 
         sig = sig.normalize(vampnet.LOUD_NORM).ensure_max_of_audio()
         sig.samples = sig.samples.view(-1, 1, sig.samples.shape[-1])

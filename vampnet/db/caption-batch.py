@@ -7,7 +7,7 @@ import audiotools as at
 
 import argbind
 import tqdm
-import duckdb
+import sqlite3
 import pandas as pd
 
 import vampnet
@@ -57,9 +57,9 @@ def preprocess(
     assert dataset is not None
 
     # connect to our datasets table
-    conn = vampnet.db.conn(read_only=False)
+    conn = vampnet.db.cursor()
     # begin a transatcion
-    conn.sql("BEGIN TRANSACTION")
+    conn.execute("BEGIN TRANSACTION")
 
     # get the dataset id and root
     dataset_id, root = conn.execute(f"""
@@ -164,7 +164,7 @@ def preprocess(
     
     print("committing changes to the db.")
     breakpoint()
-    conn.sql("COMMIT")
+    conn.execute("COMMIT")
 
 
 

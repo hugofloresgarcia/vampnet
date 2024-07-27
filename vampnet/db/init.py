@@ -1,10 +1,10 @@
 """
 initialize the vampnet database. 
 
-creates an empty duckdb database with 
+creates an empty sqlite3 database with 
 tables for datasets, audio files, control signals, and splits.
 """
-import duckdb
+import sqlite3
 import vampnet
 
 

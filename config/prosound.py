@@ -1,4 +1,8 @@
 MODULE = 'vampnet'
-DB_FILE = "prosound_redacted.db"
-DATASET = "prosound_redacted"
-CONFIG = "prosound_redacted"
+
+AUDIO_FOLDER = "/media/CHONK2/prosound_core_complete"
+DB_FILE = "prosound.db"
+DATASET = "prosound"
+CONFIG = "prosound"
+
+RUNS_DIR = "prosound"

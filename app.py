@@ -90,7 +90,6 @@ def _vamp(data, return_mask=False):
         z, 
         mask, 
         return_mask=return_mask,
-        # _sampling_steps=[data[num_steps], 8, 8, 4, 4, 2, 2, 1, 1],
         mask_temperature=data[masktemp]*10,
         sampling_temperature=data[sampletemp],
         typical_filtering=data[typical_filtering], 
@@ -298,13 +297,6 @@ with gr.Blocks() as demo:
                     step=0.01
                 )
 
-            num_steps = gr.Slider(
-                label="number of steps (should normally be between 12 and 36)",
-                minimum=1,
-                maximum=128,
-                step=1,
-                value=36,
-            )
 
             dropout = gr.Slider(
                 label="mask dropout", minimum=0.0, maximum=1.0, step=0.01, value=0.0
@@ -335,7 +327,6 @@ with gr.Blocks() as demo:
 
     _inputs = {
             input_audio, 
-            num_steps,
             masktemp,
             sampletemp,
             top_p,
@@ -375,4 +366,4 @@ with gr.Blocks() as demo:
     )
 
 
-demo.launch(share=True, enable_queue=True, debug=True)
+demo.launch(share=True, debug=True).queue()

@@ -13,13 +13,12 @@ import torch.nn as nn
 from audiotools import AudioSignal
 from dac.model.dac import DAC
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from einops import rearrange
 from rich import pretty
 from rich.traceback import install
 from torch.distributed.elastic.multiprocessing.errors import record
-
-from torch.utils.tensorboard import SummaryWriter
 
 import vampnet
 from vampnet import mask as pmask
@@ -27,7 +26,9 @@ from vampnet.model.scheduler import NoamScheduler
 from vampnet.model.transformer import VampNet
 from vampnet.util import codebook_flatten
 from vampnet.util import codebook_unflatten
+from vampnet.signal import Signal, plt2pil, horizontal_pil_stack
 import vampnet.util
+import wandb
 
 from audiotools.ml.decorators import (
     timer, Tracker, when
@@ -70,20 +71,30 @@ class State:
     grad_acc_steps: int = 1
     compute_loss_on_masked_tokens_only: bool = True
 
+def random(low, high, size):
+    return (high - low) * torch.rand(size) + low
 
 def preprocess(state: State, accel, batch: dict, stage: str):
     z_in = batch["codes"]
     z_out = batch["codes"]
-    z_cond = batch["ctrls"]
+    z_ctrl = batch["ctrls"]
     ctx_mask = batch["ctx_mask"]
 
-    # if z_cond is a list of Nones, let's make it a single None
-    if z_cond is not None and all([z is None for z in z_cond]):
-        z_cond = None
+    # apply random lowpass to ctrls
+    if z_ctrl is not None:
+        sig_ctrl = Signal(z_ctrl, state.codec.sample_rate / state.codec.hop_length)
+        lowpass_hz = random(1.0, 10, (z_ctrl.shape[0],))
+        sig_ctrl = sig_ctrl.low_pass(lowpass_hz)
+        z_ctrl = sig_ctrl.samples
+        assert z_ctrl.shape[-1] == z_in.shape[-1], "ctrl and z_in must have the same length!"
+
+    # if z_ctrl is a list of Nones, let's make it a single None
+    if z_ctrl is not None and all([z is None for z in z_ctrl]):
+        z_ctrl = None
 
     z_in = z_in[:, :accel.unwrap(state.model).n_codebooks, :]
     z_out = z_out[:, :accel.unwrap(state.model).n_codebooks, :]
-    return z_in, z_out, ctx_mask, z_cond
+    return z_in, z_out, ctx_mask, z_ctrl
 
 
 @timer()
@@ -91,7 +102,7 @@ def train_loop(state: State, batch: dict, accel: at.ml.Accelerator):
     state.model.train()
     batch = at.util.prepare_batch(batch, accel.device)
 
-    z_in, z_out, ctx_mask, z_cond = preprocess(state, accel, batch, "train")
+    z_in, z_out, ctx_mask, z_ctrl = preprocess(state, accel, batch, "train")
 
     output = {}
     vn = accel.unwrap(state.model)
@@ -108,8 +119,8 @@ def train_loop(state: State, batch: dict, accel: at.ml.Accelerator):
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        # TODO: need to run z cond through and embedding model AND CLIP THE RANGE TO (0, 1) for the dataset
-        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, cross_x=z_cond, cross_pad_mask=ctx_mask)
+        # TODO: need to run z ctrl through and embedding model AND CLIP THE RANGE TO (0, 1) for the dataset
+        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, ctrl=z_ctrl, ctrl_mask=ctx_mask)
 
         target = codebook_flatten(
             z_out[:, vn.n_conditioning_codebooks :, :],
@@ -161,8 +172,9 @@ def train_loop(state: State, batch: dict, accel: at.ml.Accelerator):
         accel.update()
 
 
-    return {k: v for k, v in sorted(output.items())}
-
+    mets = {f"{k}/train": v for k, v in output.items()}
+    wandb.log({k: v for k, v in sorted(mets.items())})
+    return output
 
 @timer()
 @torch.no_grad()
@@ -171,7 +183,7 @@ def val_loop(state: State, batch: dict, accel: at.ml.Accelerator):
     state.codec.eval()
 
     batch = at.util.prepare_batch(batch, accel.device)
-    z_in, z_out, ctx_mask, z_cond = preprocess(state, accel, batch, "val")
+    z_in, z_out, ctx_mask, z_ctrl = preprocess(state, accel, batch, "val")
 
     vn = accel.unwrap(state.model)
     
@@ -187,7 +199,7 @@ def val_loop(state: State, batch: dict, accel: at.ml.Accelerator):
 
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, cross_x=z_cond, cross_pad_mask=ctx_mask)
+        z_hat = state.model(z_mask_latent, pad_mask=ctx_mask, ctrl=z_ctrl, ctrl_mask=ctx_mask)
 
         target = codebook_flatten(
             z_out[:, vn.n_conditioning_codebooks :, :],
@@ -224,6 +236,8 @@ def val_loop(state: State, batch: dict, accel: at.ml.Accelerator):
             output=output,
         )
 
+    mets = {f"{k}/val": v for k, v in output.items()}
+    wandb.log({k: v for k, v in sorted(mets.items())})
     return output
 
 
@@ -278,77 +292,45 @@ def checkpoint(state, save_iters, save_path, fine_tune):
         )
 
 
-def save_sampled(state, z, cross_x, writer):
+def save_sampled(state, z, ctrl, reconstructed):
     num_samples = z.shape[0]
 
+    columns = ["input", "generated", "viz"]
+    rows = []
+
     for i in range(num_samples):
-        cx = cross_x[i][None, ...] if cross_x is not None else None
+        cx = ctrl[i][None, ...] if ctrl is not None else None
         sampled = state.interface.decode(
             state.interface.model.generate(
             codec=state.codec,
-            cross_x=cx,
+            ctrl=cx,
             time_steps=z.shape[-1],
             start_tokens=z[i : i + 1],
+        )).detach().cpu()
+
+        row = []
+        row.append(wandb.Audio(
+            reconstructed[i].cpu().numpy()[0][0], 
+            sample_rate=state.codec.sample_rate
         ))
-        sampled.cpu().write_audio_to_tb(
-            f"sampled/{i}",
-            writer,
-            step=state.tracker.step,
-            plot_fn=None,
-        )
+        row.append(wandb.Audio(
+            sampled.cpu().numpy()[0][0], 
+            sample_rate=state.codec.sample_rate
+        ))
+        imgs = []
+        for _s, name in zip((reconstructed, sampled), columns[:-1]):
+            _s.visualize()
+            plt.title(name)
+            imgs.append(plt2pil())
+        row.append(wandb.Image(vampnet.signal.horizontal_pil_stack(imgs)))
+        rows.append(row)
 
+    tbl = wandb.Table(data=rows, columns=columns)
+    wandb.log({"samples": tbl})
 
-def save_inpainting(state, z, val_idx, cross_x, writer):
-    n_prefix = int(z.shape[-1] * 0.25)
-    n_suffix = int(z.shape[-1] *  0.25)
-
-    vn = accel.unwrap(state.model)
-
-    mask = pmask.inpaint(z, n_prefix, n_suffix)
-    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-    z_mask, mask = pmask.apply_mask(z, mask, vn.special_tokens["MASK"])
-
-    inpainted_prompt = state.interface.decode(z_mask,silence_mask=True)
-    inpainted_gnd_truth = state.interface.decode(z, )
-
-    inpainted = []
-    for i in range(len(z)):
-        cx = cross_x[i][None, ...] if cross_x is not None else None
-        inpainted.append(
-            state.interface.decode(
-                state.interface.model.generate(
-                codec=state.codec,
-                cross_x=cx,
-                time_steps=z.shape[-1],
-                start_tokens=z[i][None, ...],
-                mask=mask[i][None, ...],
-            ))   
-        )   
-    inpainted = AudioSignal.batch(inpainted)
-
-    for i in range(len(val_idx)):
-        inpainted_prompt[i].cpu().write_audio_to_tb(
-            f"inpainted_prompt/{i}",
-            writer,
-            step=state.tracker.step,
-            plot_fn=None,
-        )
-        inpainted[i].cpu().write_audio_to_tb(
-            f"inpainted/{i}",
-            writer,
-            step=state.tracker.step,
-            plot_fn=None,
-        )
-        inpainted_gnd_truth[i].cpu().write_audio_to_tb(
-            f"inpainted_gnd_truth/{i}",
-            writer,
-            step=state.tracker.step,
-            plot_fn=None,
-        )
-
-
+        
 @torch.no_grad()
-def save_samples(state: State, val_idx: int, writer: SummaryWriter):
+def save_samples(state: State, val_idx: int):
     state.model.eval()
     state.codec.eval()
     vn = accel.unwrap(state.model)
@@ -356,7 +338,7 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
     batch = [state.val_data[i] for i in val_idx]
     batch = at.util.prepare_batch(state.val_data.collate(batch), accel.device)
 
-    z_in, z_out, ctx_mask, z_cond = preprocess(state,accel,  batch, "sample")
+    z_in, z_out, ctx_mask, z_ctrl = preprocess(state,accel,  batch, "sample")
     z_in = z_in[:, : vn.n_codebooks, :]
 
     r = torch.linspace(0.1, 0.95, len(val_idx)).to(accel.device)
@@ -367,7 +349,12 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    z_hat = state.model(z_mask_latent, cross_x=z_cond)
+    # apply a 5Hz lowpass to the control signals
+    sig_ctrl = Signal(z_ctrl, state.codec.sample_rate / state.codec.hop_length)
+    sig_ctrl = sig_ctrl.low_pass(5)
+    z_ctrl = sig_ctrl.samples
+
+    z_hat = state.model(z_mask_latent, ctrl=z_ctrl)
 
     z_pred = torch.softmax(z_hat, dim=1).argmax(dim=1)
     z_pred = codebook_unflatten(z_pred, n_c=vn.n_predict_codebooks)
@@ -376,27 +363,33 @@ def save_samples(state: State, val_idx: int, writer: SummaryWriter):
 
     state.interface = vampnet.interface.Interface(state.codec, accel.unwrap(state.model))
 
-    generated = state.interface.decode(z_pred, )
-    reconstructed = state.interface.decode(z_out, )
-    masked = state.interface.decode(z_mask, silence_mask=False)
+    generated = state.interface.decode(z_pred, ).detach().cpu()
+    reconstructed = state.interface.decode(z_out, ).detach().cpu()
+    masked = state.interface.decode(z_mask, silence_mask=False).detach().cpu()
 
+    columns = ["reconstructed", "masked", "generated",  "viz"]
+    rows = []    
+    plt.close('all')
     for i in range(generated.batch_size):
-        audio_dict = {
-            # "original": signal[i],
-            "masked": masked[i],
-            "generated": generated[i],
-            "reconstructed": reconstructed[i],
-        }
-        for k, v in audio_dict.items():
-            v.cpu().write_audio_to_tb(
-                f"samples/_{i}.r={r[i]:0.2f}/{k}",
-                writer,
-                step=state.tracker.step,
-                plot_fn=None,
-            )
+        row = []
+        imgs = []
+        for _s, name in zip((reconstructed, masked, generated), columns[:-1]):
+            row.append(wandb.Audio(
+                    _s[i].cpu().numpy()[0][0], 
+                    sample_rate=state.codec.sample_rate
+            ))
+            
+            _s.visualize()
+            plt.title(name)
+            imgs.append(plt2pil())
+        
+        row.append(wandb.Image(vampnet.signal.horizontal_pil_stack(imgs)))
+        rows.append(row)
+    
+    tbl = wandb.Table(data=rows, columns=columns)
+    wandb.log({"samples": tbl})
 
-    save_sampled(state=state, z=z_in, cross_x=z_cond, writer=writer)
-    save_inpainting(state=state, z=z_in, val_idx=val_idx, cross_x=z_cond, writer=writer)
+    save_sampled(state=state, z=z_in, ctrl=z_ctrl, reconstructed=reconstructed)
 
 
 def load(
@@ -548,16 +541,20 @@ def train(accel: at.ml.Accelerator,
     print(f"seed: {seed}")
     seed = seed + accel.local_rank
     at.util.seed(seed)
-    writer = None
 
     Path(save_path).mkdir(parents=True, exist_ok=True)
 
     if accel.local_rank == 0:
-        writer = SummaryWriter(log_dir=f"{save_path}/logs/")
-
+        run = wandb.init(
+            # Set the project where this run will be logged
+            project="vampnet-training",
+            # Track hyperparameters and run metadata
+            config=args,
+            name=f"{vampnet.CONFIG}-{save_path.stem}",
+        )
 
     tracker = Tracker(
-        writer=writer, log_file=f"{save_path}/tracker.txt", 
+        writer=None, log_file=f"{save_path}/tracker.txt", 
         rank=accel.local_rank
     )
 
@@ -649,7 +646,7 @@ def train(accel: at.ml.Accelerator,
 
                 if tracker.step % sample_freq == 0 or last_iter:
                     tracker.print(f"Saving samples at iteration {tracker.step}")
-                    save_samples(state, val_idx, writer)
+                    save_samples(state, val_idx)
 
                     # Reset validation progress bar, print summary since last validation.
                     tracker.done("val", f"Iteration {tracker.step}")
@@ -735,6 +732,7 @@ if __name__ == "__main__":
     with at.ml.Accelerator(amp=vampnet.AMP) as accel:
         if accel.local_rank != 0:
             sys.tracebacklimit = 0
+        wandb.login()
         train(accel, resume=args.resume, cli=True)
 
 
