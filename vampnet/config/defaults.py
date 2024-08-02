@@ -5,7 +5,6 @@ COMPILE = False
 
 # ~~ debug ~~
 VERBOSE = False
-RESUME = False
 
 # ~~ data ~~ 
 from pathlib import Path
@@ -13,8 +12,8 @@ ROOT = Path(__file__).parent.parent.parent
 MODELS_DIR = ROOT / "models"
 
 # ~~ audio ~~
-HOP_SIZE = 512
 SAMPLE_RATE = 44100
+HOP_SIZE = 512
 CODEC_PATH = MODELS_DIR / "codec.pth"
 LOUD_NORM = -16 # all audio is normalized to this by the codec
 
@@ -45,7 +44,7 @@ CROSS_ATTEND_DIM = 0
 MAX_SEQ_LEN = 1024
 NUM_REG_TOKENS = 0
 LORA_R = 8
-D_CTRL = 1
+D_CTRL = 0
 
 DATASET = "anns-animals"
 CONFIG = "anns-animals"
@@ -85,7 +84,7 @@ SCHED_FACTOR = 2.0
 SCHED_WARMUP = 10_000
 
 GRAD_ACC_STEPS = 1
-GRAD_CLIP_VAL = 10.0
+GRAD_CLIP_VAL = 1.0
 
 # datasets
 VAL_BATCH_SIZE = 36

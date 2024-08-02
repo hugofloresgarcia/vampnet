@@ -1,8 +1,7 @@
 MODULE = 'vampnet'
-CONFIG = "spotdl-16l-d1280"
+CONFIG = "spotdl"
 
-from pathlib import Path
-RUNS_DIR = Path(f"runs/{CONFIG}")
+RUNS_DIR = "runs/d1280-12l"
 
 # ~~ debug ~~
 VERBOSE = False
@@ -30,7 +29,7 @@ TEST_PROPORTION = 0.1
 
 # ~~ model params ~~
 N_HEADS = 8
-N_LAYERS = 16
+N_LAYERS = 12
 N_CODEBOOKS = 9
 N_CONDITIONING_CODEBOOKS = 0
 LATENT_DIM = 8

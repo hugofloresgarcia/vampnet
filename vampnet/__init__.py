@@ -45,7 +45,8 @@ from huggingface_hub import hf_hub_download
 # TODO: rename to vampnet. 
 
 HF_MODELS = [
-    "hugggof/vampnet-models:vampnet-base-best"
+    "hugggof/vampnet-models:spotdl-8l-d1280-best",
+    "hugggof/vampnet-models:vampnet-base-best", 
 ]
 DEFAULT_MODEL = HF_MODELS[0]
 # download a model from the huggingface hub

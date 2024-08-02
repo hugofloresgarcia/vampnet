@@ -11,6 +11,13 @@ def conn() -> sqlite3.Connection:
         Path(vampnet.DB).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(vampnet.DB)
         vampnet.db._conn = conn    
+
+        # print all the tables in the database
+        print(f"loaded database from {vampnet.DB}")
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        print("tables in the database:")
+        print(cur.fetchall())
     
     return vampnet.db._conn
 

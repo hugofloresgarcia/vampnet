@@ -100,6 +100,7 @@ class VampNet(at.ml.BaseModel):
                 attn_flash=True,
                 ff_glu=True, 
                 use_rmsnorm=True, 
+                rotary_pos_emb=True
             ),
             emb_dropout=dropout,
             num_memory_tokens=num_reg_tokens,
@@ -112,7 +113,7 @@ class VampNet(at.ml.BaseModel):
                 r=vampnet.LORA_R,
             )
             self.ctrl_dropout = ClassifierFreeGuidanceDropout(cfg_dropout)
-            self.ctrl_mask_emb = nn.Parameter(torch.randn(1, 1, self.embedding_dim), requires_grad=True)
+            # self.ctrl_mask_emb = nn.Parameter(torch.randn(1, 1, self.embedding_dim), requires_grad=True)
 
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks
@@ -125,9 +126,9 @@ class VampNet(at.ml.BaseModel):
 
     def forward(self, x, pad_mask=None, ctrl=None, ctrl_mask=None):
         if ctrl_mask is None and ctrl is not None:
-            ctrl_mask = torch.zeros_like(ctrl[:, 0, :]).bool()
+            ctrl_mask = torch.ones_like(ctrl[:, 0, :]).bool()
         if pad_mask is None:
-            pad_mask = torch.zeros_like(x[:, 0, :]).bool()
+            pad_mask = torch.ones_like(x[:, 0, :]).bool()
 
         pad_mask = pad_mask.bool() if isinstance(pad_mask, torch.Tensor) else pad_mask
         ctrl_mask = ctrl_mask.bool() if isinstance(ctrl_mask, torch.Tensor) else ctrl_mask
@@ -143,11 +144,11 @@ class VampNet(at.ml.BaseModel):
             ctrl = self.ctrl_proj(ctrl)
 
             # replace the control with the mask embedding where the mask is true
-            ctrl = torch.where(ctrl_mask, self.ctrl_mask_emb, ctrl)
 
             # apply dropout to the control
             ctrl_dropout_mask = self.ctrl_dropout(ctrl)
-            ctrl = torch.where(ctrl_dropout_mask, ctrl, self.ctrl_mask_emb)
+            ctrl = torch.where(ctrl_mask, ctrl, torch.zeros_like(ctrl))
+            ctrl = torch.where(ctrl_dropout_mask, ctrl, torch.zeros_like(ctrl))
 
             # add the control to the input
             x = x + ctrl
@@ -174,10 +175,10 @@ class VampNet(at.ml.BaseModel):
         sampling_temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
-        typical_filtering=False,
+        typical_filtering=True,
         typical_mass=0.2,
-        typical_min_tokens=1,
-        top_p=None,
+        typical_min_tokens=16,
+        top_p=0.8,
         seed: int = None, 
         sample_cutoff: float = 1.0,
         causal_weight: float = 0.0,

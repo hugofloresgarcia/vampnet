@@ -72,10 +72,18 @@ class VampNetDataset(torch.utils.data.Dataset):
         self.dfs = {}
         for key in [codes_key] + ctrl_keys:
             self.dfs[key] = df[df["name"] == key].set_index("audio_file_id")
-        # make sure to keep only the audio_file_ids that are in all of the dfs
+
+        # rmove all indices that are not at the intersection of all keys
+        indices = set(self.dfs[codes_key].index)
+        for key in ctrl_keys:
+            indices = indices.intersection(set(self.dfs[key].index))
+        print(f"found {len(indices)} indices in the intersection")
+        for key in [codes_key] + ctrl_keys:
+            self.dfs[key] = self.dfs[key].loc[list(indices)]
 
         # make pd dataframe with just the audio_file_id column that we'll scramble and sample from
-        self.index_df = pd.DataFrame({"audio_file_id": df["audio_file_id"].unique()})
+
+        self.index_df = pd.DataFrame({"audio_file_id": list(indices)})
         self.index_df_samples = self.index_df.copy().sample(frac=1)
         
         self.seq_len = seq_len
@@ -106,7 +114,7 @@ class VampNetDataset(torch.utils.data.Dataset):
             self.index_df_samples = self.index_df.copy().sample(frac=1)
         
         # load our codes key, sample an offset and return the slice
-        code_data = self.dfs[vampnet.CODES_KEY].loc[audio_file_id]
+        code_data = self.dfs[vampnet.CODES_KEY].loc[audio_file_id] 
         # get the total number of frames
         n_frames = code_data["num_frames"]
         # sample a random offset

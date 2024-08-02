@@ -1,26 +1,14 @@
 MODULE = 'vampnet'
 CONFIG = "prosound"
 
-RUNS_DIR = "prosound-rms"
-
-
+RUNS_DIR = "runs/norms-d1280-prosound-8h-rot"
 
 # ~~ debug ~~
 VERBOSE = False
-RESUME = False
 
 # ~~ data ~~ 
 from pathlib import Path
-ROOT = Path(__file__).parent.parent.parent
-MODELS_DIR = ROOT / "models"
 AUDIO_FOLDER = "/media/CHONK2/prosound_core_complete"
-
-
-# ~~ audio ~~
-HOP_SIZE = 512
-SAMPLE_RATE = 44100
-CODEC_PATH = MODELS_DIR / "codec.pth"
-LOUD_NORM = -16 # all audio is normalized to this by the codec
 
 # ~~ tensors ~~
 import torch 
@@ -28,10 +16,9 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # datasets
 SEQ_LEN = 512
-AUDIO_FOLDER = "/media/CHONK2/prosound_core_complete/Anns Animals"
 DATASET = "prosound"
 CODES_KEY = "dac"
-CTRL_KEYS = ["rms"]
+CTRL_KEYS = []
 DB_FILE = "prosound.db"
 AUDIO_LOOKUP_MAX_AUDIO_CHANNELS = 2
 
@@ -41,7 +28,7 @@ VAL_PROPORTION = 0.1
 TEST_PROPORTION = 0.1
 
 # ~~ model params ~~
-N_HEADS = 16
+N_HEADS = 8
 N_LAYERS = 8
 N_CODEBOOKS = 9
 N_CONDITIONING_CODEBOOKS = 0
@@ -76,7 +63,7 @@ NUM_CAPTIONS = 1
 # TRANING
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-SEED = 10110100
+SEED = 102345
 AMP = True
 COMPILE = False
 
@@ -87,18 +74,18 @@ SCHED_FACTOR = 2.0
 SCHED_WARMUP = 10_000
 
 GRAD_ACC_STEPS = 1
-GRAD_CLIP_VAL = 10.0
+GRAD_CLIP_VAL = 1.0
 
 # datasets
 VAL_BATCH_SIZE = 36
 BATCH_SIZE = 36
 
 VAL_FREQ = 1000
-SAMPLE_FREQ = 10_000
+SAMPLE_FREQ = 3000
 
 import os
 # NUM_WORKERS = 16
-VAL_IDX = [0, 1, 2, 3, 4]
+VAL_IDX = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]
 SAVE_ITERS = [50_000, 100_000, 200_000, 400_000, 800_000, 1_000_000]
 NUM_ITERS = 250_000
 

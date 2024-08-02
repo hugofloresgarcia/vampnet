@@ -80,6 +80,8 @@ def preprocess(state: State, accel, batch: dict, stage: str):
     z_ctrl = batch["ctrls"]
     ctx_mask = batch["ctx_mask"]
 
+    z_ctrl = z_ctrl if not any([_z is None for _z in z_ctrl]) else None
+
     # apply random lowpass to ctrls
     if z_ctrl is not None:
         sig_ctrl = Signal(z_ctrl, state.codec.sample_rate / state.codec.hop_length)
@@ -173,7 +175,9 @@ def train_loop(state: State, batch: dict, accel: at.ml.Accelerator):
 
 
     mets = {f"{k}/train": v for k, v in output.items()}
-    wandb.log({k: v for k, v in sorted(mets.items())})
+
+    if accel.local_rank == 0:
+        wandb.log({k: v for k, v in sorted(mets.items())}, step=state.tracker.step)
     return output
 
 @timer()
@@ -237,7 +241,8 @@ def val_loop(state: State, batch: dict, accel: at.ml.Accelerator):
         )
 
     mets = {f"{k}/val": v for k, v in output.items()}
-    wandb.log({k: v for k, v in sorted(mets.items())})
+    if accel.local_rank == 0:
+        wandb.log({k: v for k, v in sorted(mets.items())}, step=state.tracker.step)
     return output
 
 
@@ -310,7 +315,7 @@ def save_sampled(state, z, ctrl, reconstructed):
 
         row = []
         row.append(wandb.Audio(
-            reconstructed[i].cpu().numpy()[0][0], 
+            reconstructed.cpu().numpy()[i][0], 
             sample_rate=state.codec.sample_rate
         ))
         row.append(wandb.Audio(
@@ -318,7 +323,8 @@ def save_sampled(state, z, ctrl, reconstructed):
             sample_rate=state.codec.sample_rate
         ))
         imgs = []
-        for _s, name in zip((reconstructed, sampled), columns[:-1]):
+        for _s, name in zip((reconstructed[i], sampled), columns[:-1]):
+            plt.clf()
             _s.visualize()
             plt.title(name)
             imgs.append(plt2pil())
@@ -326,7 +332,8 @@ def save_sampled(state, z, ctrl, reconstructed):
         rows.append(row)
 
     tbl = wandb.Table(data=rows, columns=columns)
-    wandb.log({"samples": tbl})
+    wandb.log({"generated": tbl})
+    plt.close('all')
 
         
 @torch.no_grad()
@@ -349,10 +356,11 @@ def save_samples(state: State, val_idx: int):
 
     z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
-    # apply a 5Hz lowpass to the control signals
-    sig_ctrl = Signal(z_ctrl, state.codec.sample_rate / state.codec.hop_length)
-    sig_ctrl = sig_ctrl.low_pass(5)
-    z_ctrl = sig_ctrl.samples
+    # apply a 15Hz lowpass to the control signals
+    if z_ctrl is not None:
+        sig_ctrl = Signal(z_ctrl, state.codec.sample_rate / state.codec.hop_length)
+        sig_ctrl = sig_ctrl.low_pass(15)
+        z_ctrl = sig_ctrl.samples
 
     z_hat = state.model(z_mask_latent, ctrl=z_ctrl)
 
@@ -388,7 +396,6 @@ def save_samples(state: State, val_idx: int):
     
     tbl = wandb.Table(data=rows, columns=columns)
     wandb.log({"samples": tbl})
-
     save_sampled(state=state, z=z_in, ctrl=z_ctrl, reconstructed=reconstructed)
 
 
@@ -506,7 +513,7 @@ def load(
 
 @record
 def train(accel: at.ml.Accelerator,
-    resume: bool = vampnet.RESUME, 
+    resume: bool = False, 
     seed: int = vampnet.SEED, 
     save_path: str = vampnet.RUNS_DIR,
     num_iters: int = vampnet.NUM_ITERS,
@@ -522,8 +529,6 @@ def train(accel: at.ml.Accelerator,
     fine_tune_model_name: str = None, 
     cli: bool = False, 
 ):
-
-
     # Enable cudnn autotuner to speed up training
     # (can be altered by the funcs.seed function)
     torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
@@ -542,7 +547,8 @@ def train(accel: at.ml.Accelerator,
     seed = seed + accel.local_rank
     at.util.seed(seed)
 
-    Path(save_path).mkdir(parents=True, exist_ok=True)
+    save_path = Path(save_path)
+    save_path.mkdir(parents=True, exist_ok=True)
 
     if accel.local_rank == 0:
         run = wandb.init(
@@ -550,8 +556,11 @@ def train(accel: at.ml.Accelerator,
             project="vampnet-training",
             # Track hyperparameters and run metadata
             config=args,
-            name=f"{vampnet.CONFIG}-{save_path.stem}",
+            name=f"{save_path.stem}",
         )
+
+    if accel.world_size > 1:
+        batch_size = batch_size * accel.world_size
 
     tracker = Tracker(
         writer=None, log_file=f"{save_path}/tracker.txt", 
