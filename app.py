@@ -19,38 +19,11 @@ from vampnet import mask as pmask
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 interface = Interface.default()
-
-# populate the model choices with any interface.yml files in the generated confs
-MODEL_CHOICES = {
-    "default": {
-        "Interface.coarse_ckpt": str(interface.coarse_path), 
-        "Interface.coarse2fine_ckpt": str(interface.c2f_path),
-        "Interface.codec_ckpt": str(interface.codec_path),
-    }
-}
-generated_confs = Path("conf/generated")
-for conf_file in generated_confs.glob("*/interface.yml"):
-    with open(conf_file) as f:
-        _conf = yaml.safe_load(f)
-
-        # check if the coarse, c2f, and codec ckpts exist
-        # otherwise, dont' add this model choice
-        if not (
-            Path(_conf["Interface.coarse_ckpt"]).exists() and 
-            Path(_conf["Interface.coarse2fine_ckpt"]).exists() and 
-            Path(_conf["Interface.codec_ckpt"]).exists()
-        ):
-            continue
-
-        MODEL_CHOICES[conf_file.parent.name] = _conf
-
     
 def to_output(sig):
     return sig.sample_rate, sig.cpu().detach().numpy()[0][0]
 
-
-
-MAX_DURATION_S = 5
+MAX_DURATION_S = 10
 def load_audio(file):
     print(file)
     if isinstance(file, str):
@@ -91,6 +64,7 @@ def _vamp(
         typical_mass, typical_min_tokens, top_p, 
         sample_cutoff, stretch_factor, api=False
     ):
+
     t0 = time.time()
     interface.to("cuda" if torch.cuda.is_available() else "cpu")
     print(f"using device {interface.device}")
@@ -105,15 +79,15 @@ def _vamp(
     sig = at.AudioSignal(input_audio, sr)
 
     # reload the model if necessary
-    interface.reload(
-        coarse_ckpt=MODEL_CHOICES[model_choice]["Interface.coarse_ckpt"],
-        c2f_ckpt=MODEL_CHOICES[model_choice]["Interface.coarse2fine_ckpt"],
-    )
+    interface.load_finetuned(model_choice)
 
     if pitch_shift_amt != 0:
         sig = shift_pitch(sig, pitch_shift_amt)
 
-    build_mask_kwargs = dict(
+    codes = interface.encode(sig)
+
+    mask = interface.build_mask(
+        codes, sig,
         rand_mask_intensity=1.0,
         prefix_s=0.0,
         suffix_s=0.0,
@@ -124,7 +98,15 @@ def _vamp(
         upper_codebook_mask=int(n_mask_codebooks), 
     )
 
-    vamp_kwargs = dict(
+
+    # save the mask as a txt file
+    interface.set_chunk_size(10.0)
+    codes, mask = interface.vamp(
+        codes, mask,
+        batch_size=1 if api else 1,
+        feedback_steps=1,
+        time_stretch_factor=stretch_factor,
+        return_mask=True,
         temperature=sampletemp,
         typical_filtering=typical_filtering, 
         typical_mass=typical_mass, 
@@ -133,20 +115,9 @@ def _vamp(
         seed=_seed,
         sample_cutoff=1.0,
     )
-
-    # save the mask as a txt file
-    interface.set_chunk_size(10.0)
-    sig, mask, codes = interface.ez_vamp(
-        sig, 
-        batch_size=1 if api else 1,
-        feedback_steps=1,
-        time_stretch_factor=stretch_factor,
-        build_mask_kwargs=build_mask_kwargs,
-        vamp_kwargs=vamp_kwargs,
-        return_mask=True,
-    )
     print(f"vamp took {time.time() - t0} seconds")
 
+    sig = interface.decode(codes)
 
     return to_output(sig)
 
@@ -352,7 +323,7 @@ with gr.Blocks() as demo:
 
             model_choice = gr.Dropdown(
                 label="model choice", 
-                choices=list(MODEL_CHOICES.keys()),
+                choices=list(interface.available_models()),
                 value="default", 
                 visible=True
             )

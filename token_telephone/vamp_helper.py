@@ -136,7 +136,7 @@ def ez_variation(
 
     # save the mask as a txt file
     interface.set_chunk_size(10.0)
-    sig, mask, codes = interface.ez_vamp(
+    sig, mask, codes = interface.vamp(
         sig, 
         batch_size=1,
         feedback_steps=1,

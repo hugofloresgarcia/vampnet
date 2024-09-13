@@ -128,13 +128,16 @@ class Interface(torch.nn.Module):
     @classmethod
     def available_models(cls):
         from . import list_finetuned
-        return list_finetuned()
+        return list_finetuned() + ["default"]
 
 
     def load_finetuned(self, name: str):
         assert name in self.available_models(), f"{name} is not a valid model name"
-        from . import download_finetuned
-        coarse_path, c2f_path = download_finetuned(name)
+        from . import download_finetuned, download_default
+        if name == "default":
+            coarse_path, c2f_path = download_default()
+        else:
+            coarse_path, c2f_path = download_finetuned(name)
         self.reload(
             coarse_ckpt=coarse_path,
             c2f_ckpt=c2f_path,
