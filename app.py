@@ -15,7 +15,6 @@ import gradio as gr
 from vampnet.interface import Interface, signal_concat
 from vampnet import mask as pmask
 
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 interface = Interface.default()
@@ -165,7 +164,41 @@ def api_vamp(data):
     )
 
 
+OUT_DIR = Path("gradio-outputs")
+OUT_DIR.mkdir(exist_ok=True)
+def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
+    sig = at.AudioSignal(input_audio_file)
+    sr, samples = sig.sample_rate, sig.samples[0][0].detach().cpu().numpy()
+    # convert to int32
+    samples = (samples * np.iinfo(np.int32).max).astype(np.int32)
+    sr, samples =  _vamp(
+        seed=0,
+        input_audio=(sr, samples),
+        model_choice="default",
+        pitch_shift_amt=pitch_shift_amt,
+        periodic_p=periodic_p,
+        n_mask_codebooks=n_mask_codebooks,
+        periodic_w=1,
+        onset_mask_width=0,
+        dropout=0.0,
+        sampletemp=1.0,
+        typical_filtering=True,
+        typical_mass=0.15,
+        typical_min_tokens=64,
+        top_p=0.0,
+        sample_cutoff=1.0,
+        stretch_factor=1,
+    )
     
+    sig = at.AudioSignal(samples, sr)
+    # write to file
+    # clear the outdir
+    for p in OUT_DIR.glob("*"):
+        p.unlink()
+    OUT_DIR.mkdir(exist_ok=True)
+    outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
+    sig.write(outpath)
+    return outpath 
     
 
 with gr.Blocks() as demo:
@@ -211,7 +244,7 @@ with gr.Blocks() as demo:
                     minimum=0,
                     maximum=13, 
                     step=1,
-                    value=3, 
+                    value=7, 
                 )
 
                 onset_mask_width = gr.Slider(
@@ -384,6 +417,29 @@ with gr.Blocks() as demo:
         outputs=[audio_outs[0]], 
         api_name="vamp"
     )
+
+    from pyharp import ModelCard, build_endpoint
+    card = ModelCard(
+        name="vampnet", 
+        description="vampnet is a model for generating audio from audio",
+        author="hugo flores garcía", 
+        tags=["music generation"], 
+        midi_in=False, 
+        midi_out=False
+    )
+
+    harp_in = gr.Audio(label="input audio", type="filepath", visible=False)
+    harp_out = gr.Audio(label="output audio", type="filepath", visible=False)
+    build_endpoint(
+        components=[
+            periodic_p, 
+            n_mask_codebooks,
+            pitch_shift_amt,
+        ],
+        process_fn=harp_vamp,
+        model_card=card
+    )
+    
 
     for i, btn in enumerate(use_as_input_btns):
         btn.click(
