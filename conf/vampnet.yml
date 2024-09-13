@@ -1,0 +1,49 @@
+
+codec_ckpt: ./models/vampnet/codec.pth
+save_path: ckpt
+
+num_iters: 1000000000
+save_iters: [10000, 50000, 100000, 300000, 500000]
+val_idx: [0,1,2,3,4,5,6,7,8,9]
+sample_freq: 10000
+val_freq: 1000
+
+batch_size: 8
+num_workers: 10
+
+# Optimization
+amp: false
+
+CrossEntropyLoss.label_smoothing: 0.1
+
+AdamW.lr: 0.001
+
+NoamScheduler.factor: 2.0
+NoamScheduler.warmup: 10000
+
+VampNet.vocab_size: 1024
+VampNet.n_codebooks: 4
+VampNet.n_conditioning_codebooks: 0
+VampNet.r_cond_dim: 0
+VampNet.noise_mode: mask
+VampNet.embedding_dim: 1280
+VampNet.n_layers: 20
+VampNet.n_heads: 20
+VampNet.flash_attn: false
+VampNet.dropout: 0.1
+
+AudioLoader.relative_path: ""
+AudioDataset.loudness_cutoff: -30.0
+AudioDataset.without_replacement: true
+AudioLoader.shuffle: true
+
+AudioDataset.duration: 10.0
+
+train/AudioDataset.n_examples: 10000000
+train/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/audio-train
+
+val/AudioDataset.n_examples: 2000
+val/AudioLoader.sources:
+  - /media/CHONK/hugo/spotdl/audio-val
+
