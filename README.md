@@ -149,6 +149,9 @@ python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml
 This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
 Config files are stored in the `conf/` folder. 
 
+### Take a look at the pretrained models
+All the pretrained models (trained by hugo) are stored here: https://huggingface.co/hugggof/vampnet 
+
 ### Licensing for Pretrained Models: 
 The weights for the models are licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml). Likewise, any VampNet models fine-tuned on the pretrained models are also licensed [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.ml).
 
