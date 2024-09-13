@@ -537,7 +537,7 @@ class Interface(torch.nn.Module):
             zv, 
             mask=mask,
             typical_filtering=True,
-            _sampling_steps=[2],
+            _sampling_steps=2,
             return_mask=True
         )
         mask_z = torch.cat(

@@ -105,6 +105,7 @@ def _vamp(
         codes, mask,
         batch_size=1 if api else 1,
         feedback_steps=1,
+        _sampling_steps=12 if sig.duration <6.0 else 24,
         time_stretch_factor=stretch_factor,
         return_mask=True,
         temperature=sampletemp,

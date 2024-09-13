@@ -595,13 +595,13 @@ class VampNet(at.ml.BaseModel):
         self, 
         codec,
         time_steps: int = 300,
-        _sampling_steps: List[int] = [12],
+        _sampling_steps: int = 12,
         start_tokens: Optional[torch.Tensor] = None,
         temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
         typical_filtering=True,
-        typical_mass=0.2,
+        typical_mass=0.15,
         typical_min_tokens=64,
         top_p=None,
         seed: int = None,
@@ -613,7 +613,7 @@ class VampNet(at.ml.BaseModel):
     ):
         if seed is not None:
             at.util.seed(seed)
-        sampling_steps = sum(_sampling_steps)
+        sampling_steps = _sampling_steps
         logging.debug(f"beginning generation with {sampling_steps} steps")
 
         ##################### 

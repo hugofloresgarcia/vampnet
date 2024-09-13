@@ -55,8 +55,9 @@ def download_finetuned(name):
     filenames = ["coarse.pth", "c2f.pth"]
     paths = []
     for filename in filenames:
-        path = f"{MODELS_DIR}/{name}/loras/{filename}"
+        path = f"{MODELS_DIR}/loras/{name}/{filename}"
         if not Path(path).exists():
+            print(f"{path} does not exist, downloading")
             path = hf_hub_download(
                 repo_id=repo_id,
                 filename=filename,
