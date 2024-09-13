@@ -36,14 +36,8 @@ def download_default():
     for filename in filenames:
         path = f"{MODELS_DIR}/{filename}"
         if not Path(path).exists():
-            path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                subfolder=None, 
-                local_dir=MODELS_DIR,
-                local_dir_use_symlinks=False,
-                local_files_only=False
-            )
+            print(f"{path} does not exist, downloading")
+            FS.download(f"{repo_id}/{filename}", path)
         paths.append(path)
     
     # load the models
@@ -58,14 +52,7 @@ def download_finetuned(name):
         path = f"{MODELS_DIR}/loras/{name}/{filename}"
         if not Path(path).exists():
             print(f"{path} does not exist, downloading")
-            path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                subfolder=f"loras/{name}", 
-                local_dir=MODELS_DIR, 
-                local_dir_use_symlinks=False,
-                local_files_only=False
-            )
+            FS.download(f"{repo_id}/loras/{name}/{filename}", path)
         paths.append(path)
     
     # load the models

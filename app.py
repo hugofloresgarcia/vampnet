@@ -18,7 +18,7 @@ from vampnet import mask as pmask
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 interface = Interface.default()
-init_model_choice = open("DEFAULT_MODEL.txt").read().strip()
+init_model_choice = open("DEFAULT_MODEL").read().strip()
 # load the init model
 interface.load_finetuned(init_model_choice)
     
