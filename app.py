@@ -166,7 +166,6 @@ def api_vamp(data):
         api=True, 
     )
 
-
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True)
 def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
@@ -177,7 +176,7 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
     sr, samples =  _vamp(
         seed=0,
         input_audio=(sr, samples),
-        model_choice="default",
+        model_choice=init_model_choice,
         pitch_shift_amt=pitch_shift_amt,
         periodic_p=periodic_p,
         n_mask_codebooks=n_mask_codebooks,
@@ -186,7 +185,7 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
         dropout=0.0,
         sampletemp=1.0,
         typical_filtering=True,
-        typical_mass=0.15,
+        typical_mass=0.15,  
         typical_min_tokens=64,
         top_p=0.0,
         sample_cutoff=1.0,
