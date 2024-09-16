@@ -194,7 +194,7 @@ EXP_REGISTRY["musical-sampling"] = {
 @argbind.bind(without_prefix=True)
 def main(
         sources=[
-            "/media/CHONK/hugo/spotdl/val",
+            "/media/CHONK/hugo/audio/val",
         ], 
         output_dir: str = "./samples",
         max_excerpts: int = 2000,
