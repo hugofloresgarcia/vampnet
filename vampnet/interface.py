@@ -261,3 +261,5 @@ class Interface:
         # plot the mask (which is a matrix)
         plt.imshow(mask[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r')
         plt.show()
+
+

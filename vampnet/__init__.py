@@ -26,6 +26,7 @@ from .config.static import *
 # Your imports go here
 from . import controls
 from .controls.codec import load_codec
+from .interface import Interface
 from .model import transformer
 from . import interface
 from . import db
@@ -35,7 +36,6 @@ from . import train
 from . import fine_tune
 from . import mask
 from . import signal
-
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 

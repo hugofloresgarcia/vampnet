@@ -52,7 +52,7 @@ def load_example_audio():
         def __init__(self, name):
             self.name = name
 
-    return load_audio(FakeFile("assets/example_audio/fountain.mp3"))
+    return load_audio(FakeFile("assets/example_audio/example.wav"))
 
 
 def _vamp(data, return_mask=False):

@@ -39,20 +39,20 @@ model = vampnet.load_model("hugggof/vampnet-models:vampnet-9codebook-cosine-sche
 interface = vampnet.Interface(codec, model)
 
 # load an example audio file
-signal = at.AudioSignal("assets/example_audio/fountain.mp3")
+signal = at.AudioSignal("assets/example_audio/example.wav")
 
 # get the tokens for the audio
 codes = interface.encode(signal)
 
 # build a mask for the audio
-mask = interface.build_mask(signal, 
+mask = interface.build_mask(codes, 
     periodic_prompt=7, 
     upper_codebook_mask=2,
 )
 
 # generate the output tokens
 output_tokens = interface.vamp(
-    vamp, mask, return_mask=False,
+    codes, mask, return_mask=False,
     temperature=1.0, 
     typical_filtering=True, 
     top_p=0.8,
@@ -63,7 +63,7 @@ output_tokens = interface.vamp(
 output_signal = interface.decode(output_tokens)
 
 # save the output signal
-output_signal.save("scratch/output.wav")
+output_signal.write("scratch/output.wav")
 ```
 
 

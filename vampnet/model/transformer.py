@@ -164,69 +164,43 @@ class VampNet(at.ml.BaseModel):
         return out
 
 
+    @torch.inference_mode()
     def generate(
-        self,
+        self, 
         codec,
-        start_tokens: Optional[torch.Tensor] = None,
         time_steps: int = 300,
-        _sampling_steps: List[int] = [64, 32, 16, 8, 4, 2, 2, 1, 1],
-        ctrl: Optional[torch.Tensor] = None,
-        ctrl_mask: Optional[torch.Tensor] = None,
-        sampling_temperature: float = 1.0,
+        _sampling_steps: List[int] = [24],
+        start_tokens: Optional[torch.Tensor] = None,
+        temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
         typical_filtering=True,
         typical_mass=0.2,
-        typical_min_tokens=16,
-        top_p=0.8,
-        seed: int = None, 
+        typical_min_tokens=64,
+        top_p=None,
+        seed: int = None,
         sample_cutoff: float = 1.0,
         causal_weight: float = 0.0,
+        cfg_guidance: Optional[float] = None,
     ):
-        """
-        Generate a sequence of tokens from the model, 
-        given a prompt and a mask. 
-
-        Args:
-            codec: the codec to use for encoding // decoding tokens
-            start_tokens (Optional[torch.Tensor], optional): the starting tokens (aka prompt). 
-            time_steps (int, optional): number of tokens to generate. only used if start_tokens is None. Defaults to 300.
-            _sampling_steps (List[int], optional): number of sampling steps for each codebook level. Defaults to [16, 4, 4, 2, 2, 2, 2, 1, 1].
-            cross_x (Optional[torch.Tensor], optional): DEPRECATED. cross attention tokens. Defaults to None.
-            sampling_temperature (float, optional): sampling temperature. Defaults to 1.0.
-            mask (Optional[torch.Tensor], optional): mask for the tokens. Defaults to None.
-            mask_temperature (float, optional): temperature for mask sampling. note that this it NOT the same as sampling_temperature. You probably don't want to change this value, and instead change the sampling_temperature. . Defaults to 10.5. Refer to the vampnet paper for more information on this parameter: https://arxiv.org/abs/2307.04686
-            typical_filtering (bool, optional): whether to use locally typical sampling (https://arxiv.org/abs/2202.00666). Defaults to False.
-            typical_mass (float, optional): typical mass for typical filtering. Defaults to 0.2.
-            typical_min_tokens (int, optional): minimum number of tokens for typical filtering. Defaults to 1.
-            top_p ([type], optional): nucleus sampling: https://arxiv.org/abs/1904.09751. Defaults to None.
-            seed (int, optional): random seed. Defaults to None.
-            sample_cutoff (float, optional):  experimental feature. it's function is left as an exercise for the reader. use at your own risk. Defaults to 1.0. (off)
-            causal_weight (float, optional):  experimental feature, from the bytedance stemgen paper: https://arxiv.org/abs/2312.08723. use at your own risk. Defaults to 0.0. (off)
-
-        Returns:
-            torch.Tensor: the generated tokens
-
-        """
-
-        # TODO: add cond, cond mask
-        # if ctrl is not None:
-        #     raise ValueError(f"cond is not supported yet")
+        return_signal = False
+        debug=False
         
         if seed is not None:
             at.util.seed(seed)
+        sampling_steps = sum(_sampling_steps)
+        logging.debug(f"beginning generation with {sampling_steps} steps")
 
-        #####################
+        ##################### 
         # resolve initial z #
         #####################
         z = start_tokens
+        nb = z.shape[0]
 
         if z is None:
             z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
                 self.device
             )
-
-        logging.debug(f"created z with shape {z.shape}")
 
         #################
         # resolve mask #
@@ -237,169 +211,122 @@ class VampNet(at.ml.BaseModel):
             mask[:, : self.n_conditioning_codebooks, :] = 0.0
         if mask.ndim == 2:
             mask = mask[:, None, :].repeat(1, z.shape[1], 1)
-        orig_mask = mask
-        logging.debug(f"created mask with shape {mask.shape}")
-
+        # init_mask = mask.clone()
+    
         ###########
         # set up #
         ##########
         # apply the mask to z
         z_masked = z.masked_fill(mask.bool(), self.mask_token)
+        # logging.debug(f"z_masked: {z_masked}")
+
+        # how many mask tokens to begin with?
+        num_mask_tokens_at_start = (z_masked == self.mask_token).sum()
 
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
-        logging.debug(f"n infer codebooks: {n_infer_codebooks}")
+
+        if cfg_guidance is not None:
+            # we need to repeat our tensors
+            z_uncond = torch.full_like(z, self.mask_token)
+
+            z_masked = torch.cat(
+                (z_masked, z_uncond), dim=0
+            )
+            z = torch.cat(
+                (z, z_uncond), dim=0
+            )
+            mask = torch.cat(
+                (mask, torch.full_like(mask, 1)), dim=0
+            )
 
         #################
         # begin sampling #
         #################
-        # add one sampling step for each codebook level
-        logging.debug(f"initial mask: {mask}")
-        logging.debug(f"adding {n_infer_codebooks} sampling steps")
-        steps = _sampling_steps + [1 for _ in range(n_infer_codebooks - len(_sampling_steps))]
-        # truncate if we have too many
-        steps = steps[:n_infer_codebooks]
-        for codebook_level, nsteps in enumerate(steps):
+        from tqdm import tqdm
+        for i in range(sampling_steps):
 
-            # apply the orig mask to z_masked, only in the current codebook level
-            # this is crucial due to the stemgen random masking we did during training
-            # which ensures all upper codebooks are masked while inferring the bottom ones.
-            z_masked[:, codebook_level, :] = torch.where(
-                orig_mask[:, codebook_level, :].bool(), 
-                self.mask_token, 
-                z_masked[:, codebook_level, :]
+            # our current schedule step
+            r = scalar_to_batch_tensor(
+                (i + 1) / sampling_steps, 
+                z.shape[0]
+            ).to(z.device)
+
+            # get latents
+            latents = self.embedding.from_codes(z_masked, codec)
+
+
+            # infer from latents
+            # NOTE: this collapses the codebook dimension into the sequence dimension
+            logits = self.forward(latents) # b, prob, seq
+
+            if cfg_guidance is not None:
+                logits_cond, logits_uncond = logits[:nb], logits[nb:]
+                logits_cond = cfg_guidance * logits_cond + cfg_guidance * (1 - logits_uncond)
+
+            logits = logits.permute(0, 2, 1)  # b, seq, prob
+            b = logits.shape[0]
+
+            sampled_z, selected_probs = sample_from_logits(
+                logits, sample=(
+                   (i / sampling_steps) <= sample_cutoff
+                ), 
+                temperature=temperature,
+                typical_filtering=typical_filtering, typical_mass=typical_mass,
+                typical_min_tokens=typical_min_tokens,
+                top_k=None, top_p=top_p, return_probs=True,
             )
 
-            # how many mask tokens to begin with?
-            num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.mask_token).sum(dim=-1)
-            logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
-            for i in range(nsteps):
-                logging.debug(f"processing cb level {codebook_level} of {len(steps)}")
-                logging.debug(f"step {i} of {nsteps}")
+            # flatten z_masked and mask, so we can deal with the sampling logic
+            # we'll unflatten them at the end of the loop for the next forward pass
+            # remove conditioning codebooks, we'll add them back at the end
+            z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])           
 
-                # our current schedule step
-                r = scalar_to_batch_tensor(
-                    (i + 1) / nsteps, 
-                    z.shape[0]
-                ).to(z.device)
-                logging.debug(f"r: {r}")
-
-                # get latents
-                # logging.debug("z_masked before forward", z_masked)
-                _debug_z_masked_before_forward = z_masked.clone()
-                latents = self.embedding.from_codes(z_masked, codec)
-                # logging.debug(f"computed latents with shape: {latents.shape}")
-
-                # infer from latents
-                # NOTE: this collapses the codebook dimension into the sequence dimension
-                logits = self.forward(
-                    latents, ctrl=ctrl, ctrl_mask=ctrl_mask
-                )  # b, prob, seq
-                logits = logits.permute(0, 2, 1)  # b, seq, prob
-                # logging.debug(f"permuted logits with shape: {logits.shape}")
-
-                sampled_z, selected_probs = sample_from_logits(
-                    logits, sample=(
-                    (i / nsteps) <= sample_cutoff
-                    ), 
-                    temperature=sampling_temperature,
-                    typical_filtering=typical_filtering, typical_mass=typical_mass,
-                    typical_min_tokens=typical_min_tokens,
-                    top_k=None, top_p=top_p, return_probs=True,
-                )
-
-                # fill selected probs with -inf if we're not in the codebook level we are sampling from
-                # find out which codebook we are sampling from
-                selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
-                selected_probs[:,  codebook_level+1:, :,] = -float("inf") # all the ones above
-                # selected_probs[:, :codebook_level, :,] = -float("inf")
-                logging.debug(f"masking all but codebook {codebook_level}")
-                logging.debug(f"selected probs: {selected_probs}")
-                logging.debug(mask)
-                selected_probs = codebook_flatten(selected_probs)
-
-                logging.debug(f"sampled z with shape: {sampled_z.shape}")
-
-                # flatten z_masked and mask, so we can deal with the sampling logic
-                # we'll unflatten them at the end of the loop for the next forward pass
-                # remove conditioning codebooks, we'll add them back at the end
-                z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])      
-
-                mask = (z_masked == self.mask_token).int()
-                logging.debug(f"mask now: {mask}")
-                
-                # update the mask, remove conditioning codebooks from the mask
-                logging.debug(f"updated mask with shape: {mask.shape}")
-                
-                # add z back into sampled z where the mask was false
-                sampled_z = torch.where(
-                    mask.bool(), sampled_z, z_masked
-                )
-                logging.debug(f"added z back into sampled z with shape: {sampled_z.shape}")
-
-                # get the num tokens to mask, according to the schedule
-                num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
-                # num_to_mask = torch.floor(r * num_mask_tokens_at_start).unsqueeze(1).long() # doesn't work at all this way
-                logging.debug(f"num to mask: {num_to_mask}")
-                logging.debug(f"masking {num_to_mask.sum()} tokens")
-
-                if i != (nsteps - 1):
-                    mask = codebook_unflatten(mask, n_infer_codebooks)
-                    num_to_mask = torch.maximum(
-                        torch.tensor(1),
-                        torch.minimum(
-                            mask[:, codebook_level, :].sum(dim=-1, keepdim=True) - 1,
-                            num_to_mask
-                        )
-                    )
-                    logging.debug(f"will mask {num_to_mask.sum()} tokens")
-                    mask = codebook_flatten(mask)
+            mask = (z_masked == self.mask_token).int()
             
-                # ignore any tokens that weren't masked
-                selected_probs = torch.where(
-                    mask.bool(), selected_probs, torch.inf
+            # update the mask, remove conditioning codebooks from the mask
+            # add z back into sampled z where the mask was false
+            sampled_z = torch.where(
+                mask.bool(), sampled_z, z_masked
+            )
+
+            # ignore any tokens that weren't masked
+            selected_probs = torch.where(
+                mask.bool(), selected_probs, torch.inf
+            )
+
+            # get the num tokens to mask, according to the schedule
+            num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
+            logging.debug(f"num to mask: {num_to_mask}")
+
+            if i != (sampling_steps - 1):
+                num_to_mask = torch.maximum(
+                    torch.tensor(1),
+                    torch.minimum(
+                        mask.sum(dim=-1, keepdim=True) - 1,
+                        num_to_mask
+                    )
                 )
 
-                # add a causal weight to the selected probs
-                # NOTE: some experiments i did showed that this didn't help. 
-                # set it to 0 until further eval
-                causal_probs = torch.linspace(1, 0, z_masked.shape[-1], device=z_masked.device)
-                causal_probs = causal_probs.repeat(z_masked.shape[0], 1)
-                selected_probs = selected_probs + causal_probs * causal_weight
 
-                # # get our new mask
-                ############
-                mask = codebook_unflatten(mask, n_infer_codebooks)
-                selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
+            # get our new mask
+            mask = mask_by_random_topk(
+                num_to_mask, selected_probs, mask_temperature * (1-r)
+            )  
 
-                # only consider probs at current level
-                selected_probs_cur_level = selected_probs[:, codebook_level, :]
-                mask_cur_level = mask_by_random_topk(
-                    num_to_mask, selected_probs_cur_level, mask_temperature * (1-r.unsqueeze(1))
-                )  
-                mask[:, codebook_level, :] = mask_cur_level
+            # update the mask
+            z_masked = torch.where(
+                mask.bool(), self.mask_token, sampled_z
+            )
 
-                mask = codebook_flatten(mask)
-                selected_probs = codebook_flatten(selected_probs)
-                ###############
+            z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
+            mask = codebook_unflatten(mask, n_infer_codebooks)
 
-                # update the mask
-                z_masked = torch.where(
-                    mask.bool(), self.mask_token, sampled_z
-                )
-                logging.debug(f"updated z_masked with shape: {z_masked.shape}")
-
-                z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
-                mask = codebook_unflatten(mask, n_infer_codebooks)
-                logging.debug(f"unflattened z_masked with shape: {z_masked.shape}")
-
-                # add conditioning codebooks back to z_masked
-                z_masked = torch.cat(
-                    (z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1
-                )
-                logging.debug(f"added conditioning codebooks back to z_masked with shape: {z_masked.shape}")
-                logging.debug(f"\n\n\n")
+            # add conditioning codebooks back to z_masked
+            z_masked = torch.cat(
+                (z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1
+            )
 
         # add conditioning codebooks back to sampled_z
         sampled_z = codebook_unflatten(sampled_z, n_infer_codebooks)
@@ -407,11 +334,13 @@ class VampNet(at.ml.BaseModel):
             (z[:, :self.n_conditioning_codebooks, :], sampled_z), dim=1
         )
 
-        logging.debug(f"finished sampling")
+        if cfg_guidance is not None:
+            sampled_z = sampled_z[:nb]
 
-
-        return sampled_z
-
+        if return_signal:
+            return self.to_signal(sampled_z, codec)
+        else:
+            return sampled_z
 
 def sample_from_logits(
         logits, 
