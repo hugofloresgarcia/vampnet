@@ -200,7 +200,10 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
     OUT_DIR.mkdir(exist_ok=True)
     outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
     sig.write(outpath)
-    return outpath, []
+    from pyharp import OutputLabel
+    output_labels = list()
+    output_labels.append(OutputLabel(label='~', t=0.0, description='generated audio'))
+    return outpath, output_labels
     
 
 with gr.Blocks() as demo:
