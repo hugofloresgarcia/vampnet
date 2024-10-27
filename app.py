@@ -436,19 +436,18 @@ with gr.Blocks() as demo:
         components=[
             periodic_p, 
             n_mask_codebooks,
-            pitch_shift_amt,
         ],
         process_fn=harp_vamp,
         model_card=card
     )
-    
+# Build a HARP-compatible endpoint
+app = build_endpoint(model_card=model_card,
+                     components=components,
+                     process_fn=process_fn)
 
-    for i, btn in enumerate(use_as_input_btns):
-        btn.click(
-            fn=load_audio,
-            inputs=[audio_outs[i]],
-            outputs=[input_audio]
-        )
+app.queue()
+app.launch(share=True)
+    
 
 try:
     demo.queue()
