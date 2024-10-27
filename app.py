@@ -200,8 +200,8 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks):
     OUT_DIR.mkdir(exist_ok=True)
     outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
     sig.write(outpath)
-    from pyharp import OutputLabel
-    output_labels = list()
+    from pyharp import OutputLabel, LabelList
+    output_labels = LabelList()
     output_labels.append(OutputLabel(label='~', t=0.0, description='generated audio'))
     return outpath, output_labels
     
