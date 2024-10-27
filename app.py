@@ -200,7 +200,7 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
     OUT_DIR.mkdir(exist_ok=True)
     outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
     sig.write(outpath)
-    return outpath 
+    return outpath, []
     
 
 with gr.Blocks() as demo:
@@ -420,30 +420,23 @@ with gr.Blocks() as demo:
         api_name="vamp"
     )
 
-    from pyharp import ModelCard, build_endpoint
-    card = ModelCard(
-        name="vampnet", 
-        description="vampnet is a model for generating audio from audio",
-        author="hugo flores garcía", 
-        tags=["music generation"], 
-        midi_in=False, 
-        midi_out=False
-    )
-
-    harp_in = gr.Audio(label="input audio", type="filepath", visible=False)
-    harp_out = gr.Audio(label="output audio", type="filepath", visible=False)
-    build_endpoint(
-        components=[
-            periodic_p, 
-            n_mask_codebooks,
-        ],
-        process_fn=harp_vamp,
-        model_card=card
-    )
+from pyharp import ModelCard, build_endpoint
+card = ModelCard(
+    name="vampnet", 
+    description="vampnet is a model for generating audio from audio",
+    author="hugo flores garcía", 
+    tags=["music generation"], 
+    midi_in=False, 
+    midi_out=False
+)
+    
 # Build a HARP-compatible endpoint
-app = build_endpoint(model_card=model_card,
-                     components=components,
-                     process_fn=process_fn)
+app = build_endpoint(model_card=card,
+                     components=[
+                        periodic_p, 
+                        n_mask_codebooks,
+                    ],
+                     process_fn=harp_vamp)
 
 app.queue()
 app.launch(share=True)
