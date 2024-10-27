@@ -168,7 +168,7 @@ def api_vamp(data):
 
 OUT_DIR = Path("gradio-outputs")
 OUT_DIR.mkdir(exist_ok=True)
-def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
+def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks):
     sig = at.AudioSignal(input_audio_file)
     sr, samples = sig.sample_rate, sig.samples[0][0].detach().cpu().numpy()
     # convert to int32
@@ -177,7 +177,7 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks, pitch_shift_amt):
         seed=0,
         input_audio=(sr, samples),
         model_choice=init_model_choice,
-        pitch_shift_amt=pitch_shift_amt,
+        pitch_shift_amt=0,
         periodic_p=periodic_p,
         n_mask_codebooks=n_mask_codebooks,
         periodic_w=1,
@@ -426,7 +426,7 @@ with gr.Blocks() as demo:
     from pyharp import ModelCard, build_endpoint
     card = ModelCard(
         name="vampnet", 
-        description="vampnet is a model for generating audio from audio",
+        description="vampnet! is a model for generating audio from audio",
         author="hugo flores garcía", 
         tags=["music generation"], 
         midi_in=False, 
