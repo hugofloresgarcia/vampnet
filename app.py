@@ -420,27 +420,25 @@ with gr.Blocks() as demo:
         api_name="vamp"
     )
 
-from pyharp import ModelCard, build_endpoint
-card = ModelCard(
-    name="vampnet", 
-    description="vampnet is a model for generating audio from audio",
-    author="hugo flores garcía", 
-    tags=["music generation"], 
-    midi_in=False, 
-    midi_out=False
-)
-    
-# Build a HARP-compatible endpoint
-app = build_endpoint(model_card=card,
-                     components=[
-                        periodic_p, 
-                        n_mask_codebooks,
-                    ],
-                     process_fn=harp_vamp)
+    from pyharp import ModelCard, build_endpoint
+    card = ModelCard(
+        name="vampnet", 
+        description="vampnet is a model for generating audio from audio",
+        author="hugo flores garcía", 
+        tags=["music generation"], 
+        midi_in=False, 
+        midi_out=False
+    )
+        
+    # Build a HARP-compatible endpoint
+    app = build_endpoint(model_card=card,
+                         components=[
+                            periodic_p, 
+                            n_mask_codebooks,
+                        ],
+                         process_fn=harp_vamp)
 
-app.queue()
-app.launch(share=True)
-    
+
 
 try:
     demo.queue()
