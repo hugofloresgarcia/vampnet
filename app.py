@@ -113,7 +113,10 @@ def _vamp(
     if pitch_shift_amt != 0:
         sig = shift_pitch(sig, pitch_shift_amt)
 
-    build_mask_kwargs = dict(
+    codes = interface.encode(sig)
+
+    mask = interface.build_mask(
+        codes,
         rand_mask_intensity=1.0,
         prefix_s=0.0,
         suffix_s=0.0,
@@ -124,28 +127,34 @@ def _vamp(
         upper_codebook_mask=int(n_mask_codebooks), 
     )
 
-    vamp_kwargs = dict(
-        temperature=sampletemp,
-        typical_filtering=typical_filtering, 
-        typical_mass=typical_mass, 
-        typical_min_tokens=typical_min_tokens, 
-        top_p=None,
-        seed=_seed,
-        sample_cutoff=1.0,
-    )
+    codes = interface.encode(sig)
 
-    # save the mask as a txt file
-    interface.set_chunk_size(10.0)
-    sig, mask, codes = interface.ez_vamp(
-        sig, 
-        batch_size=1 if api else 1,
-        feedback_steps=1,
-        time_stretch_factor=stretch_factor,
-        build_mask_kwargs=build_mask_kwargs,
-        vamp_kwargs=vamp_kwargs,
-        return_mask=True,
+
+
+    output_codes = interface.vamp(
+        codes, 
+        mask,
+        temperature=sampletemp,
+        typical_filtering=typical_filtering,
+        typical_mass=typical_mass,
+        typical_min_tokens=typical_min_tokens,
+        top_p=top_p,
+        sample_cutoff=sample_cutoff,
     )
-    print(f"vamp took {time.time() - t0} seconds")
+    # # save the mask as a txt file
+    # interface.set_chunk_size(10.0)
+    # sig, mask, codes = interface.vamp(
+    #     sig, 
+    #     batch_size=1 if api else 1,
+    #     feedback_steps=1,
+    #     time_stretch_factor=stretch_factor,
+    #     build_mask_kwargs=build_mask_kwargs,
+    #     vamp_kwargs=vamp_kwargs,
+    #     return_mask=True,
+    # )
+    # print(f"vamp took {time.time() - t0} seconds")
+
+    sig = interface.decode(output_codes)
 
 
     return to_output(sig)

@@ -8,3 +8,4 @@ descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git
 -e git+https://github.com/audacitorch/pyharp.git#egg=pyharp
 torch_pitch_shift
 gradio==4.37.2
+pip install spaces
