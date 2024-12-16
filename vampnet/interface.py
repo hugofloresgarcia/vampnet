@@ -617,6 +617,20 @@ if __name__ == "__main__":
 
     #~~~~ embedded
     print(f"exporting embedded interface")
+    # move stuff to cpu before exporting
+    z = z.cpu()
+    mask = mask.cpu()
+    zv = zv.cpu()
+    interface.codec.to("cpu")
+    interface.coarse.to("cpu")
+    sig = sig.to("cpu")
+
+    print(f"expected z shape is {z.shape}")
+    print(f"expected mask shape is {mask.shape}")
+    print(f"expected zv shape is {zv.shape}")
+    print(f"expected wav shape is {sig.samples.shape}")
+
+
     eiface = EmbeddedInterface(
         codec=interface.codec, 
         coarse=interface.coarse,
