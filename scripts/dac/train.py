@@ -20,7 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import soundmaterial as sm
 
-import dac
+import vampnet.dac as dac
 
 warnings.filterwarnings("ignore", category=UserWarning)
 

@@ -5,7 +5,6 @@ name = run_dir.name
 
 repo_dir = Path("models/vampnet")
 
-
 for part in ("coarse", "c2f"):
     outdir = repo_dir / "loras" / name 
     outdir.mkdir(parents=True, exist_ok=True)

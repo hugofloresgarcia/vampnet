@@ -15,11 +15,11 @@ def _invgamma(y):
 
 def full_mask(x: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
-    return torch.ones_like(x).long()
+    return torch.ones_like(x).int()
 
 def empty_mask(x: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
-    return torch.zeros_like(x).long()
+    return torch.zeros_like(x).int()
 
 def apply_mask(
         x: torch.Tensor, 
@@ -28,7 +28,7 @@ def apply_mask(
     ):
     assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq), but got {mask.ndim}"
     assert mask.shape == x.shape, f"mask must be same shape as x, but got {mask.shape} and {x.shape}" 
-    assert mask.dtype == torch.long, "mask must be long dtype, but got {mask.dtype}"
+    assert mask.dtype == torch.int, "mask must be int dtype, but got {mask.dtype}"
     assert ~torch.any(mask > 1), "mask must be binary"
     assert ~torch.any(mask < 0), "mask must be binary"
 
@@ -49,7 +49,7 @@ def random(
     probs = torch.ones_like(x) * r
 
     mask = torch.bernoulli(probs)
-    mask = mask.round().long()
+    mask = mask.round().int()
 
     return mask
 
@@ -69,7 +69,7 @@ def linear_random(
     probs = probs * r
 
     mask = torch.bernoulli(probs)
-    mask = mask.round().long()
+    mask = mask.round().int()
 
     return mask
 
@@ -176,7 +176,7 @@ def dropout(
     # mask = mask.bool()
     # back to bool
     mask = ~(mask != 0)
-    return mask.long()
+    return mask.int()
 
 def mask_or(
     mask1: torch.Tensor, 

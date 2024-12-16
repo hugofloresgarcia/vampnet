@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import torch 
 from torch import nn
 import numpy as np
+from torch import Tensor
 
 import soundfile as sf
 
@@ -49,12 +50,16 @@ def random_state(seed: int | np.random.RandomState):
         )
 
 @torch.jit.script_if_tracing
-def cut_to_hop_length(wav: torch.Tensor, hop_length: int) -> torch.Tensor:
+def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
     length = wav.shape[-1]
     right_cut = length % hop_length
     if right_cut > 0:
         wav = wav[..., :-right_cut]
     return wav
+
+def trim_to_s(wav: Tensor, sr: int, duration: float) -> Tensor:
+    length = int(duration * sr)
+    return wav[..., :length]
 
 # ~ i/o ~
 
@@ -103,7 +108,103 @@ def find_audio(folder: str, ext: list[str] = AUDIO_EXTENSIONS):
         print(f"found {len(new_files)} files with extension {x}")
     return files
 
+def info(audio_path: str):
+    """Shim for torchaudio.info to make 0.7.2 API match 0.8.0.
 
+    Parameters
+    ----------
+    audio_path : str
+        Path to audio file.
+    """
+    info = torch_info(audio_path)
+
+    if isinstance(info, tuple):  # pragma: no cover
+        signal_info = info[0]
+        info = Info(sample_rate=signal_info.rate, num_frames=signal_info.length)
+    else:
+        info = Info(sample_rate=info.sample_rate, num_frames=info.num_frames)
+
+    return info
+
+def write(wav: torch.Tensor, sr: int, path: Path | str):
+    if wav[0].abs().max() > 1:
+        warnings.warn("Audio amplitude > 1 clipped when saving")
+
+    sf.write(str(path), wav[0].detach().cpu().numpy().T, sr)
+
+def read_from_file(
+        path: Path | str, 
+        offset: float, 
+        duration: float, 
+        device: str = "cpu",
+    ):
+        import librosa
+        try:
+            data, sample_rate = librosa.load(
+                path,
+                offset=offset,
+                duration=duration,
+                sr=None,
+                mono=False,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Error loading {path}: {e}")
+
+        data = ensure_tensor(data)
+        if data.shape[-1] == 0:
+            raise RuntimeError(
+                f"Audio file {path} with offset {offset} and duration {duration} is empty!"
+            )
+
+        if data.ndim < 2:
+            data = data.unsqueeze(0)
+        if data.ndim < 3:
+            data = data.unsqueeze(0)
+        
+        self.path_to_file = audio_path
+        return self.to(device)
+
+def excerpt(
+    audio_path: str | Path,
+    offset: float = None,
+    duration: float = None,
+    state: np.random.RandomState | int = None,
+    **kwargs,
+):
+    total_duration = fast_get_duration(audio_path)
+    if total_duration is None:
+        print(f"had to to slow info fall back for {audio_path}")
+        info = util.info(audio_path)
+        total_duration = info.duration
+    try: 
+        # Hugo: I think this only works on wav files?
+        total_duration = util.fast_get_duration(audio_path)
+
+        util_time = time.time() - t0
+        # if we took more them 0.5s,log into a debug.txt file
+        if util_time > 0.5:
+            with open("debug.txt", "a") as f:
+                f.write(f"wave_info took {util_time} seconds for {audio_path} \n")
+    except Exception as e:
+        print(e)
+        print(f"failed to get fast duration. had to resort to slow info...")
+        info = util.info(audio_path)
+        total_duration = info.duration
+
+    info_time = time.time() - t0
+
+    if duration is None:
+        duration = total_duration
+        
+    state = util.random_state(state)
+    lower_bound = 0 if offset is None else offset
+    upper_bound = max(total_duration - duration, 0)
+    offset = state.uniform(lower_bound, upper_bound)
+
+    wav, sr = read_from_file(audio_path, offset, duration, **kwargs)
+    return wav, sr
+
+# ~ io utils ~
 
 def fast_get_audio_channels(path: str) -> dict:
     process = subprocess.Popen(
@@ -174,100 +275,3 @@ def torch_info(audio_path: str):
     except:  # pragma: no cover
         info = torchaudio.backend.soundfile_backend.info(str(audio_path))
     return info
-
-def info(audio_path: str):
-    """Shim for torchaudio.info to make 0.7.2 API match 0.8.0.
-
-    Parameters
-    ----------
-    audio_path : str
-        Path to audio file.
-    """
-    info = torch_info(audio_path)
-
-    if isinstance(info, tuple):  # pragma: no cover
-        signal_info = info[0]
-        info = Info(sample_rate=signal_info.rate, num_frames=signal_info.length)
-    else:
-        info = Info(sample_rate=info.sample_rate, num_frames=info.num_frames)
-
-    return info
-
-def write(wav: torch.Tensor, sr: int, path: Path | str):
-    if wav[0].abs().max() > 1:
-        warnings.warn("Audio amplitude > 1 clipped when saving")
-
-    sf.write(str(path), wav[0].detach().cpu().numpy().T, sr)
-
-def read_from_file(
-        path: Path | str, 
-        offset: float, 
-        duration: float, 
-        device: str = "cpu",
-    ):
-        import librosa
-        try:
-            data, sample_rate = librosa.load(
-                path,
-                offset=offset,
-                duration=duration,
-                sr=None,
-                mono=False,
-            )
-        except Exception as e:
-            raise RuntimeError(f"Error loading {path}: {e}")
-
-        data = ensure_tensor(data)
-        if data.shape[-1] == 0:
-            raise RuntimeError(
-                f"Audio file {path} with offset {offset} and duration {duration} is empty!"
-            )
-
-        if data.ndim < 2:
-            data = data.unsqueeze(0)
-        if data.ndim < 3:
-            data = data.unsqueeze(0)
-        
-        self.path_to_file = audio_path
-        return self.to(device)
-
-
-def excerpt(
-    audio_path: str | Path,
-    offset: float = None,
-    duration: float = None,
-    state: np.random.RandomState | int = None,
-    **kwargs,
-):
-    total_duration = fast_get_duration(audio_path)
-    if total_duration is None:
-        print(f"had to to slow info fall back for {audio_path}")
-        info = util.info(audio_path)
-        total_duration = info.duration
-    try: 
-        # Hugo: I think this only works on wav files?
-        total_duration = util.fast_get_duration(audio_path)
-
-        util_time = time.time() - t0
-        # if we took more them 0.5s,log into a debug.txt file
-        if util_time > 0.5:
-            with open("debug.txt", "a") as f:
-                f.write(f"wave_info took {util_time} seconds for {audio_path} \n")
-    except Exception as e:
-        print(e)
-        print(f"failed to get fast duration. had to resort to slow info...")
-        info = util.info(audio_path)
-        total_duration = info.duration
-
-    info_time = time.time() - t0
-
-    if duration is None:
-        duration = total_duration
-        
-    state = util.random_state(state)
-    lower_bound = 0 if offset is None else offset
-    upper_bound = max(total_duration - duration, 0)
-    offset = state.uniform(lower_bound, upper_bound)
-
-    wav, sr = read_from_file(audio_path, offset, duration, **kwargs)
-    return wav, sr

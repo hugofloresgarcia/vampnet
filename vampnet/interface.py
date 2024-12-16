@@ -12,7 +12,7 @@ import tqdm
 
 from .modules.transformer import VampNet
 from .mask import *
-from .signal import cut_to_hop_length, write
+from .signal import cut_to_hop_length, write, trim_to_s
 
 # from vampnet.dac.model.dac import DAC
 # from vampnet.dac.model.dac import DAC
@@ -272,7 +272,7 @@ class Interface(torch.nn.Module):
         if n_codebooks_to_append > 0:
             z = torch.cat([
                 z,
-                torch.zeros(z.shape[0], n_codebooks_to_append, z.shape[-1]).long().to(self.device)
+                torch.zeros(z.shape[0], n_codebooks_to_append, z.shape[-1]).int().to(self.device)
             ], dim=1)
             logging.debug(f"appended {n_codebooks_to_append} codebooks to z")
 
@@ -431,7 +431,7 @@ class Interface(torch.nn.Module):
             added_mask = torch.ones_like(mask)
             added_mask[:, :, ::time_stretch_factor] = 0
             mask = mask.bool() | added_mask.bool()
-            mask = mask.long()
+            mask = mask.int()
             
         # the forward pass
         logging.debug(z.shape)
@@ -537,14 +537,15 @@ class EmbeddedInterface(nn.Module):
         print(f"chopping off {self.coarse.n_codebooks} codebooks")
         z = z[:, : self.coarse.n_codebooks, :]
         mask = mask[:, : self.coarse.n_codebooks, :]
-        zv = self.coarse.generate(
-            start_tokens=z,
-            mask=mask,
-            temperature=temperature,
-            typical_mass=typical_mass,
-            typical_min_tokens=typical_min_tokens,
-            seed=seed,
-        )
+        with torch.autocast(z.device.type,  dtype=torch.bfloat16):
+            zv = self.coarse.generate(
+                start_tokens=z,
+                mask=mask,
+                temperature=temperature,
+                typical_mass=typical_mass,
+                typical_min_tokens=typical_min_tokens,
+                seed=seed,
+            )
 
         return zv
 
@@ -625,18 +626,14 @@ if __name__ == "__main__":
     interface.coarse.to("cpu")
     sig = sig.to("cpu")
 
-    print(f"expected z shape is {z.shape}")
-    print(f"expected mask shape is {mask.shape}")
-    print(f"expected zv shape is {zv.shape}")
-    print(f"expected wav shape is {sig.samples.shape}")
-
-
     eiface = EmbeddedInterface(
         codec=interface.codec, 
         coarse=interface.coarse,
     )
+    eiface.eval()
 
     # handle roughly 10 seconds
+    sig.samples = trim_to_s(sig.samples, sig.sample_rate, 5.0)
     sig.samples = cut_to_hop_length(sig.samples, eiface.hop_length)
     sig.write("scratch/out_embedded.wav")
     wav = sig.samples.to(eiface.codec.device)
@@ -673,5 +670,11 @@ if __name__ == "__main__":
     write(out, eiface.sample_rate, "scratch/out_embedded_vamp_traced.wav")
 
     torch.jit.save(traced, "models/vampnet-embedded.pt")
+
+    print(f"expected z shape is {z.shape}")
+    print(f"expected mask shape is {mask.shape}")
+    print(f"expected zv shape is {zv.shape}")
+    print(f"expected wav shape is {sig.samples.shape}")
+
 
         

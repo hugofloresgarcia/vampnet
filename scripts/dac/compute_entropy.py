@@ -4,8 +4,7 @@ import numpy as np
 import torch
 import tqdm
 
-import dac
-
+import vampnet.dac as dac
 
 @argbind.bind(without_prefix=True, positional=True)
 def main(

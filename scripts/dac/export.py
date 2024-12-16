@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import cached_conv as cc
 import nn_tilde
-import dac
+import vampnet.dac as dac
 
 class DummyRTTest(nn_tilde.Module):
 
