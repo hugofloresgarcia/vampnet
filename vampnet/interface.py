@@ -4,15 +4,18 @@ import math
 import logging
 
 import torch
-import numpy as np
+from torch import nn
+from torch import Tensor
+from torch import tensor as tt
 from audiotools import AudioSignal
 import tqdm
 
 from .modules.transformer import VampNet
-from .beats import WaveBeat
 from .mask import *
+from .signal import cut_to_hop_length, write
 
-# from dac.model.dac import DAC
+# from vampnet.dac.model.dac import DAC
+# from vampnet.dac.model.dac import DAC
 from lac.model.lac import LAC as DAC
 
 
@@ -20,7 +23,6 @@ def signal_concat(
     audio_signals: list,
 ):
     audio_data = torch.cat([x.audio_data for x in audio_signals], dim=-1)
-
     return AudioSignal(audio_data, sample_rate=audio_signals[0].sample_rate)
 
 
@@ -59,7 +61,6 @@ class Interface(torch.nn.Module):
         coarse2fine_ckpt: str = None,
         coarse2fine_lora_ckpt: str = None,
         codec_ckpt: str = None,
-        wavebeat_ckpt: str = None,
         device: str = "cpu",
         coarse_chunk_size_s: int =  10, 
         coarse2fine_chunk_size_s: int =  3,
@@ -94,12 +95,9 @@ class Interface(torch.nn.Module):
             self.c2f_path = None
             self.c2f = None
 
-        if wavebeat_ckpt is not None:
-            logging.debug(f"loading wavebeat from {wavebeat_ckpt}")
-            self.beat_tracker = WaveBeat(wavebeat_ckpt)
-            self.beat_tracker.model.to(device)
-        else:
-            self.beat_tracker = None
+        # PATCH: the embedding layer has an unintitialized quantizer 
+        self.coarse.embedding.quantizer = self.codec.quantizer
+        self.c2f.embedding.quantizer = self.codec.quantizer
 
         self.device = device
         self.loudness = -24.0
@@ -113,6 +111,7 @@ class Interface(torch.nn.Module):
 
 
     @classmethod
+    @torch.jit.ignore
     def default(cls):
         from . import download_codec, download_default
         print(f"loading default vampnet")
@@ -126,11 +125,13 @@ class Interface(torch.nn.Module):
         )
 
     @classmethod
+    @torch.jit.ignore
     def available_models(cls):
         from . import list_finetuned
         return list_finetuned() + ["default"]
 
 
+    @torch.jit.ignore
     def load_finetuned(self, name: str):
         assert name in self.available_models(), f"{name} is not a valid model name"
         from . import download_finetuned, download_default
@@ -143,6 +144,7 @@ class Interface(torch.nn.Module):
             c2f_ckpt=c2f_path,
         )
 
+    @torch.jit.ignore
     def reload(
         self, 
         coarse_ckpt: str = None,
@@ -173,12 +175,10 @@ class Interface(torch.nn.Module):
                 self.c2f_path = Path(c2f_ckpt)
                 logging.debug(f"loaded {c2f_ckpt}")
         
+    
     def s2t(self, seconds: float):
         """seconds to tokens"""
-        if isinstance(seconds, np.ndarray):
-            return np.ceil(seconds * self.codec.sample_rate / self.codec.hop_length)
-        else:
-            return math.ceil(seconds * self.codec.sample_rate / self.codec.hop_length)
+        return math.floor(seconds * self.codec.sample_rate / self.codec.hop_length)
 
     def s2t2s(self, seconds: float):
         """seconds to tokens to seconds"""
@@ -199,9 +199,6 @@ class Interface(torch.nn.Module):
         if self.beat_tracker is not None:
             self.beat_tracker.model.to(device)
         return self
-
-    def decode(self, z: torch.Tensor):
-        return self.coarse.decode(z, self.codec)
     
     def _preprocess(self, signal: AudioSignal):
         signal = (
@@ -212,7 +209,7 @@ class Interface(torch.nn.Module):
             .ensure_max_of_audio(1.0)
         )
         logging.debug(f"length before codec preproc: {signal.samples.shape}")
-        signal.samples, length = self.codec.preprocess(signal.samples, signal.sample_rate)
+        signal.samples = self.codec.preprocess(signal.samples, signal.sample_rate)
         logging.debug(f"length after codec preproc: {signal.samples.shape}")
         return signal
     
@@ -223,111 +220,40 @@ class Interface(torch.nn.Module):
         z = self.codec.encode(signal.samples, signal.sample_rate)["codes"]
         return z
 
-    def snap_to_beats(
-        self, 
-        signal: AudioSignal
-    ):
-        assert hasattr(self, "beat_tracker"), "No beat tracker loaded"
-        beats, downbeats = self.beat_tracker.extract_beats(signal)
-        
-        # trim the signa around the first beat time
-        samples_begin = int(beats[0] * signal.sample_rate )
-        samples_end = int(beats[-1] * signal.sample_rate)
-        logging.debug(beats[0])
-        signal = signal.clone().trim(samples_begin, signal.length - samples_end)
+    @torch.inference_mode()
+    def decode(self, z):
+        """
+        convert a sequence of latents to a signal. 
+        """
+        assert z.ndim == 3
+        codec = self.codec
+
+        # remove mask token
+        z = z.masked_fill(z == self.coarse.mask_token, 0)
+        signal = at.AudioSignal(
+            codec.decode(
+                codec.quantizer.from_latents(self.coarse.embedding.from_codes(z))[0]
+            ),
+            codec.sample_rate,
+        )
+
+        # find where the mask token is and replace it with silence in the audio
+        for tstep in range(z.shape[-1]):
+            if torch.all(z[:, :, tstep] == self.coarse.mask_token):
+                sample_idx_0 = tstep * codec.hop_length
+                sample_idx_1 = sample_idx_0 + codec.hop_length
+                signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
 
         return signal
 
-    def make_beat_mask(self, 
-            signal: AudioSignal, 
-            before_beat_s: float = 0.0,
-            after_beat_s: float = 0.02,
-            mask_downbeats: bool = True,
-            mask_upbeats: bool = True,
-            downbeat_downsample_factor: int = None,
-            beat_downsample_factor: int = None,
-            dropout: float = 0.0,
-            invert: bool = True,
-    ):
-        """make a beat synced mask. that is, make a mask that 
-        places 1s at and around the beat, and 0s everywhere else. 
-        """
-        assert self.beat_tracker is not None, "No beat tracker loaded"
-
-        # get the beat times
-        beats, downbeats = self.beat_tracker.extract_beats(signal)
-
-        # get the beat indices in z
-        beats_z, downbeats_z = self.s2t(beats), self.s2t(downbeats)
-
-        # remove downbeats from beats
-        beats_z = torch.tensor(beats_z)[~torch.isin(torch.tensor(beats_z), torch.tensor(downbeats_z))]
-        beats_z = beats_z.tolist()
-        downbeats_z = downbeats_z.tolist()
-
-        # make the mask 
-        seq_len = self.s2t(signal.duration)
-        mask = torch.zeros(seq_len, device=self.device)
-        
-        mask_b4 = self.s2t(before_beat_s)
-        mask_after = self.s2t(after_beat_s)
-
-        if beat_downsample_factor is not None:
-            if beat_downsample_factor < 1:
-                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
-        else:
-            beat_downsample_factor = 1
-
-        if downbeat_downsample_factor is not None:
-            if downbeat_downsample_factor < 1:
-                raise ValueError("mask_beat_downsample_factor must be >= 1 or None")
-        else:
-            downbeat_downsample_factor = 1
-
-        beats_z = beats_z[::beat_downsample_factor]
-        downbeats_z = downbeats_z[::downbeat_downsample_factor]
-        logging.debug(f"beats_z: {len(beats_z)}")
-        logging.debug(f"downbeats_z: {len(downbeats_z)}")
-    
-        if mask_upbeats:
-            for beat_idx in beats_z:
-                _slice = int(beat_idx - mask_b4), int(beat_idx + mask_after)
-                num_steps = mask[_slice[0]:_slice[1]].shape[0]
-                _m = torch.ones(num_steps, device=self.device)
-                _m_mask = torch.bernoulli(_m * (1 - dropout))
-                _m = _m * _m_mask.long()
-                
-                mask[_slice[0]:_slice[1]] = _m
-
-        if mask_downbeats:
-            for downbeat_idx in downbeats_z:
-                _slice = int(downbeat_idx - mask_b4), int(downbeat_idx + mask_after)
-                num_steps = mask[_slice[0]:_slice[1]].shape[0]
-                _m = torch.ones(num_steps, device=self.device)
-                _m_mask = torch.bernoulli(_m * (1 - dropout))
-                _m = _m * _m_mask.long()
-                
-                mask[_slice[0]:_slice[1]] = _m
-        
-        mask = mask.clamp(0, 1)
-        if invert:
-            mask = 1 - mask
-        
-        mask = mask[None, None, :].bool().long()
-        if self.c2f is not None:
-            mask = mask.repeat(1, self.c2f.n_codebooks, 1)
-        else:
-            mask = mask.repeat(1, self.coarse.n_codebooks, 1)
-        return mask
-    
     def set_chunk_size(self, chunk_size_s: float):
         self.coarse.chunk_size_s = chunk_size_s
         
     @torch.inference_mode()
     def coarse_to_fine(
         self, 
-        z: torch.Tensor,
-        mask: torch.Tensor = None,
+        z: Tensor,
+        mask: Tensor = None,
         return_mask: bool = False,
         **kwargs
     ):
@@ -362,10 +288,7 @@ class Interface(torch.nn.Module):
             
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 chunk = self.c2f.generate(
-                    codec=self.codec,
-                    time_steps=chunk_len,
                     start_tokens=chunk,
-                    return_signal=False,
                     mask=mask_chunk,
                     cfg_guidance=None,
                     **kwargs
@@ -425,10 +348,7 @@ class Interface(torch.nn.Module):
             gen_fn = gen_fn or self.coarse.generate
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 c_vamp_chunk = gen_fn(
-                    codec=self.codec,
-                    time_steps=chunk_len,
                     start_tokens=cz_masked_chunk,
-                    return_signal=False,
                     mask=mask_chunk,
                     **kwargs
                 )
@@ -450,7 +370,7 @@ class Interface(torch.nn.Module):
         return c_vamp
     
     def build_mask(self, 
-        z: torch.Tensor,
+        z: Tensor,
         sig: AudioSignal = None,
         rand_mask_intensity: float = 1.0,
         prefix_s: float = 0.0,
@@ -488,8 +408,8 @@ class Interface(torch.nn.Module):
 
     def vamp(
         self, 
-        codes: torch.Tensor,
-        mask: torch.Tensor,
+        codes: Tensor,
+        mask: Tensor,
         batch_size: int = 1,
         feedback_steps: int = 1,
         time_stretch_factor: int = 1,
@@ -552,7 +472,8 @@ class Interface(torch.nn.Module):
         else:
             return z
 
-    def visualize_codes(self, z: torch.Tensor):
+    @torch.jit.ignore
+    def visualize_codes(self, z: Tensor):
         import matplotlib.pyplot as plt
         # make sure the figsize is square when imshow is called
         fig = plt.figure(figsize=(10, 7))
@@ -565,12 +486,82 @@ class Interface(torch.nn.Module):
         # set the xticks to seconds
 
 
+# an interface suitable for tracing 
+class EmbeddedInterface(nn.Module):
+
+    def __init__(self,
+        codec: DAC, 
+        coarse: VampNet, 
+        chunk_size_s: int = 10,
+    ):
+        super().__init__()
+        self.codec = codec
+        self.coarse = coarse
+
+        self.register_buffer("sample_rate", tt(self.codec.sample_rate))
+        self.register_buffer("hop_length", tt(self.codec.hop_length))
+
+    @torch.inference_mode()
+    def encode(self, wav):
+        nt = wav.shape[-1]
+        wav = self.codec.preprocess(wav, self.sample_rate)
+        assert nt == wav.shape[-1], f"preprocess function cut off the signal. make sure your input signal is a multiple of hop length"
+        return self.codec.encode(wav)["codes"]
+
+    @torch.inference_mode()
+    def build_mask(self, 
+            periodic_prompt: Tensor = 7, 
+            upper_codebook_mask: Tensor = 3, 
+            dropout_amt: Tensor = 0.0,
+        ):
+        mask = linear_random(z, tt(1.0))
+        pmask = periodic_mask(z, periodic_prompt, 1, random_roll=True)
+        mask = mask_and(mask, pmask)
+
+        mask = dropout(mask, dropout_amt)
+
+        mask = codebook_mask(mask, upper_codebook_mask, None)
+        return mask
+
+    @torch.inference_mode()
+    def vamp(self, 
+        z: Tensor, 
+        mask: Tensor,
+        temperature: Tensor = 1.0,
+        typical_mass: Tensor = 0.0,
+        typical_min_tokens: Tensor = 0,
+        seed: Tensor = 42,
+        ):
+
+        # chop off, leave only the top  codebooks
+        print(f"chopping off {self.coarse.n_codebooks} codebooks")
+        z = z[:, : self.coarse.n_codebooks, :]
+        mask = mask[:, : self.coarse.n_codebooks, :]
+        zv = self.coarse.generate(
+            start_tokens=z,
+            mask=mask,
+            temperature=temperature,
+            typical_mass=typical_mass,
+            typical_min_tokens=typical_min_tokens,
+            seed=seed,
+        )
+
+        return zv
+
+    @torch.inference_mode()
+    def decode(self, z):
+        return self.codec.decode(
+            self.codec.quantizer.from_latents(self.coarse.embedding.from_codes(z))[0]
+        )
+
+
 if __name__ == "__main__":
     import audiotools as at
     import logging
+    from torch.export import export
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    torch.set_logging.debugoptions(threshold=10000)
+    # torch.set_logging.debugoptions(threshold=10000)
     at.util.seed(42)
 
     interface = Interface(
@@ -578,13 +569,16 @@ if __name__ == "__main__":
         coarse2fine_ckpt="./models/vampnet/c2f.pth", 
         codec_ckpt="./models/vampnet/codec.pth",
         device="cuda", 
-        wavebeat_ckpt="./models/wavebeat.pth"
+        compile=False
     )
-
 
     sig = at.AudioSignal('assets/example.wav')
 
     z = interface.encode(sig)
+
+    for m in interface.modules():
+        if hasattr(m, "weight_g"):
+            torch.nn.utils.remove_weight_norm(m)
 
 
     mask = interface.build_mask(
@@ -594,13 +588,10 @@ if __name__ == "__main__":
         prefix_s=0.0,
         suffix_s=0.0,
         periodic_prompt=7,
-        periodic_prompt2=7,
         periodic_prompt_width=1,
         onset_mask_width=5, 
         _dropout=0.0,
         upper_codebook_mask=3,
-        upper_codebook_mask_2=None,
-        ncc=0,
     )
 
     zv, mask_z = interface.coarse_vamp(
@@ -609,18 +600,64 @@ if __name__ == "__main__":
         return_mask=True, 
         gen_fn=interface.coarse.generate
     )
-    
 
     use_coarse2fine = True
     if use_coarse2fine: 
         zv = interface.coarse_to_fine(zv, mask=mask)
-        breakpoint()
-
-    mask = interface.decode(mask_z).cpu()
-
+    
     sig = interface.decode(zv).cpu()
+    mask = interface.decode(mask_z).cpu()
+    recons = interface.decode(z).cpu()
 
+    sig.write("scratch/out.wav")
+    mask.write("scratch/mask.wav")
+    recons.write("scratch/recons.wav")
 
     logging.debug("done")
+
+    #~~~~ embedded
+    print(f"exporting embedded interface")
+    eiface = EmbeddedInterface(
+        codec=interface.codec, 
+        coarse=interface.coarse,
+    )
+
+    # handle roughly 10 seconds
+    sig.samples = cut_to_hop_length(sig.samples, eiface.hop_length)
+    sig.write("scratch/out_embedded.wav")
+    wav = sig.samples.to(eiface.codec.device)
+
+    z = eiface.encode(wav)
+    mask = eiface.build_mask(7, 3, 0.3)
+    zv = eiface.vamp(z, mask, 1.0, 0.15, 42, 1)
+
+    recons = eiface.decode(z)
+    out = eiface.decode(zv)
+
+    write(recons, eiface.sample_rate, "scratch/recons_embedded.wav")
+    write(out, eiface.sample_rate, "scratch/out_embedded_vamp.wav")
+
+    print(f"exporting embedded interface")
+    traced = torch.jit.trace_module(
+        mod=eiface, 
+        inputs={
+            "encode": (wav), 
+            "build_mask": (tt(7), tt(3), tt(0.3)),
+            "vamp": (z, mask, tt(1.0), tt(0.15), tt(42), tt(1)),
+            "decode": (zv),
+        }
+    )
+    print("yay! exported without any critical errors.")
+
+    # redo the test with the traced model
+    z = traced.encode(wav)
+    mask = traced.build_mask(tt(7), tt(3), tt(0.3))
+    zv = traced.vamp(z, mask, tt(1.0), tt(0.15), tt(42), tt(1))
+    out = traced.decode(zv)
+
+    write(recons, eiface.sample_rate, "scratch/recons_embedded_traced.wav")
+    write(out, eiface.sample_rate, "scratch/out_embedded_vamp_traced.wav")
+
+    torch.jit.save(traced, "models/vampnet-embedded.pt")
 
         

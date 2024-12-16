@@ -30,7 +30,6 @@ setup(
         "argbind>=0.3.2",
         "numpy==1.23",
         "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat",
-        "lac @ git+https://github.com/hugofloresgarcia/lac.git",
         "descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git",
         "gradio", 
         "loralib",

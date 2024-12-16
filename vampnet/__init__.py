@@ -1,10 +1,10 @@
 
 from . import modules
+# from . import dac
 from pathlib import Path
 from . import scheduler
 from .interface import Interface
 from .modules.transformer import VampNet
-
 
 __version__ = "0.0.1"
 
@@ -16,8 +16,8 @@ DEFAULT_HF_MODEL_REPO = "hugggof/vampnet"
 FS = HfFileSystem()
 
 def download_codec():
-    # from dac.model.dac import DAC
-    from lac.model.lac import LAC as DAC
+    # from vampnet.dac.model.dac import DAC
+    from  dac.model.dac import DAC
     repo_id = DEFAULT_HF_MODEL_REPO
     filename = "codec.pth"
     codec_path = hf_hub_download(

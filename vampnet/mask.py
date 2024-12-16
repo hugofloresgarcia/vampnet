@@ -53,6 +53,7 @@ def random(
 
     return mask
 
+@torch.jit.script_if_tracing
 def linear_random(
     x: torch.Tensor,
     r: torch.Tensor,
@@ -72,10 +73,7 @@ def linear_random(
 
     return mask
 
-def inpaint(x: torch.Tensor, 
-    n_prefix,
-    n_suffix,
-):
+def inpaint(x: torch.Tensor, n_prefix: int, n_suffix: int,):
     assert n_prefix is not None
     assert n_suffix is not None
     
@@ -98,16 +96,19 @@ def inpaint(x: torch.Tensor,
     
     return mask
 
-def periodic_mask(x: torch.Tensor, 
-                period: int,width: int = 1, 
-                random_roll=False,
-    ):
+#
+@torch.jit.script_if_tracing
+def periodic_mask(x: torch.Tensor, period: int,
+                  width: int = 1, random_roll: bool = False,):
     mask = full_mask(x)
     if period == 0:
         return mask
 
     if not isinstance(period, torch.Tensor):
         period = scalar_to_batch_tensor(period, x.shape[0])
+    if period.ndim == 0:
+        period = period[None]
+        
     for i, factor in enumerate(period):
         if factor == 0:
             continue
@@ -126,7 +127,7 @@ def periodic_mask(x: torch.Tensor,
     if random_roll:
         # add a random offset to the mask
         offset = torch.randint(0, period[0], (1,))
-        mask = torch.roll(mask, offset.item(), dims=-1)
+        mask = torch.roll(mask, int(offset.item()), dims=-1)
 
     return mask
 
@@ -152,6 +153,7 @@ def codebook_mask(mask: torch.Tensor, val1: int, val2: int = None):
 
     return mask
 
+@torch.jit.script_if_tracing
 def mask_and(
     mask1: torch.Tensor, 
     mask2: torch.Tensor
@@ -159,16 +161,21 @@ def mask_and(
     assert mask1.shape == mask2.shape, "masks must be same shape"
     return torch.min(mask1, mask2)
 
+@torch.jit.script_if_tracing
 def dropout(
-    mask: torch.Tensor,
+    mask: torch.BoolTensor,
     p: float,
 ):
     assert 0 <= p <= 1, "p must be between 0 and 1"
     assert mask.max() <= 1, "mask must be binary"
     assert mask.min() >= 0, "mask must be binary"
-    mask = (~mask.bool()).float()
+    mask = (~(mask != 0)).float()
+    # mask = (~mask.bool()).float() # not compatible with torchscript
     mask = torch.bernoulli(mask * (1 - p))
-    mask = ~mask.round().bool()
+    # mask = ~mask.round()
+    # mask = mask.bool()
+    # back to bool
+    mask = ~(mask != 0)
     return mask.long()
 
 def mask_or(

@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch.nn.utils import weight_norm
 
+from vampnet.dac.nn.quantize import ResidualVectorQuantize
+
 # Scripting this brings model speed up 1.4x
 @torch.jit.script
 def snake(x, alpha):
@@ -88,6 +90,9 @@ class FiLM(nn.Module):
         if input_dim > 0:
             self.beta = nn.Linear(input_dim, output_dim)
             self.gamma = nn.Linear(input_dim, output_dim)
+        else:
+            self.beta = nn.Identity()
+            self.gamma = nn.Identity()
 
     def forward(self, x, r):
         if self.input_dim == 0:
@@ -109,7 +114,7 @@ class CodebookEmbedding(nn.Module):
         latent_dim: int,
         n_codebooks: int,
         emb_dim: int,
-        special_tokens: Optional[Tuple[str]] = None,
+        special_tokens: Optional[Tuple[str]] = None
     ):
         super().__init__()
         self.n_codebooks = n_codebooks
@@ -130,8 +135,14 @@ class CodebookEmbedding(nn.Module):
                 }
 
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
+        self.quantizer = ResidualVectorQuantize(
+            input_dim=latent_dim,
+            n_codebooks=n_codebooks,
+            codebook_size=vocab_size,
+            codebook_dim=latent_dim,
+        )
 
-    def from_codes(self, codes: torch.Tensor, codec):
+    def from_codes(self, codes: torch.Tensor):
         """ 
         get a sequence of continuous embeddings from a sequence of discrete codes. 
         unlike it's counterpart in the original VQ-VAE, this function adds for any special tokens
@@ -142,7 +153,7 @@ class CodebookEmbedding(nn.Module):
         for i in range(n_codebooks):
             c = codes[:, i, :]
 
-            lookup_table = codec.quantizer.quantizers[i].codebook.weight
+            lookup_table = self.quantizer.quantizers[i].codebook.weight
             if hasattr(self, "special"):
                 special_lookup = torch.cat(
                     [self.special[tkn][i : i + 1] for tkn in self.special], dim=0

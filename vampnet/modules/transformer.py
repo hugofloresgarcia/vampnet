@@ -2,12 +2,11 @@ import math
 import logging
 from typing import Optional, Tuple, Union, List
 
-import numpy as np
 import torch
 import torch.nn as nn
+from torch import Tensor
 import torch.nn.functional as F
-from einops import rearrange
-import loralib as lora
+from einops.layers.torch import Rearrange
 import audiotools as at
 
 from .activations import get_activation
@@ -17,15 +16,13 @@ from .layers import SequentialWithFiLM
 from .layers import WNConv1d
 from ..util import scalar_to_batch_tensor, codebook_flatten, codebook_unflatten
 from ..mask import _gamma
+from .lora import Linear
 
 LORA_R = 8
 
-# def log(t, eps=1e-20):
-#     return torch.log(t + eps)
-
-
-def gumbel_noise_like(t):
-    noise = torch.zeros_like(t).uniform_(1e-20, 1)
+@torch.jit.script_if_tracing
+def gumbel_noise_like(t: Tensor):
+    noise = torch.zeros_like(t).uniform_(1e-20, 1.0)
     return -torch.log(-torch.log(noise))
 
 
@@ -63,8 +60,8 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
         factor = 2 if activation == "geglu" else 1
-        self.w_1 = lora.Linear(d_model, d_model * 4, bias=False, r=LORA_R)
-        self.w_2 = lora.Linear(d_model * 4 // factor, d_model, bias=False, r=LORA_R)
+        self.w_1 = Linear(d_model, d_model * 4, bias=False, r=LORA_R)
+        self.w_2 = Linear(d_model * 4 // factor, d_model, bias=False, r=LORA_R)
         self.drop = nn.Dropout(dropout)
         self.act = get_activation(activation)()
 
@@ -105,12 +102,12 @@ class MultiHeadRelativeAttention(nn.Module):
         self.attention_max_distance = attention_max_distance
 
         # Create linear query, key, value projections
-        self.w_qs = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
+        self.w_qs = Linear(d_model, d_model, bias=False, r=LORA_R)
         self.w_ks = nn.Linear(d_model, d_model, bias=False)
-        self.w_vs = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
+        self.w_vs = Linear(d_model, d_model, bias=False, r=LORA_R)
 
         # Create linear final output projection
-        self.fc = lora.Linear(d_model, d_model, bias=False, r=LORA_R)
+        self.fc = Linear(d_model, d_model, bias=False, r=LORA_R)
 
         # Dropout for attention output weights
         self.dropout = nn.Dropout(dropout)
@@ -118,6 +115,11 @@ class MultiHeadRelativeAttention(nn.Module):
         # Create relative positional embeddings (if turned on)
         if has_relative_attention_bias:
             self.relative_attention_bias = nn.Embedding(attention_num_buckets, n_head)
+
+        self.rearrange_qkh_h1qk = Rearrange("q k h -> h 1 q k")
+        self.rearrange_blhk_hblk = Rearrange("b l (head k) -> head b l k", head=self.n_head)
+        self.rearrange_bthk_hbtk = Rearrange("b t (head k) -> head b t k", head=self.n_head)
+        self.rearrange_hblv_blhv = Rearrange("head b l v -> b l (head v)")
 
     def _relative_position_bucket(self, relative_position):
         """Converts unbounded relative position into bounded set of buckets
@@ -203,7 +205,7 @@ class MultiHeadRelativeAttention(nn.Module):
 
         # Index attention bias values
         values = self.relative_attention_bias(relative_position_bucket)
-        values = rearrange(values, "q k h -> h 1 q k")
+        values = self.rearrange_qkh_h1qk(values)
 
         return values
 
@@ -225,12 +227,12 @@ class MultiHeadRelativeAttention(nn.Module):
             Outputs after attending (key, value) using queries
         """
         # Compute query, key, value projections
-        q = rearrange(self.w_qs(q), "b l (head k) -> head b l k", head=self.n_head)
-        k = rearrange(self.w_ks(k), "b t (head k) -> head b t k", head=self.n_head)
-        v = rearrange(self.w_vs(v), "b t (head k) -> head b t k", head=self.n_head)
+        q = self.rearrange_blhk_hblk(self.w_qs(q))
+        k = self.rearrange_bthk_hbtk(self.w_ks(k))
+        v = self.rearrange_bthk_hbtk(self.w_vs(v))
 
         # Compute attention matrix
-        attn = torch.einsum("hblk,hbtk->hblt", [q, k]) / np.sqrt(q.shape[-1])
+        attn = torch.einsum("hblk,hbtk->hblt", [q, k]) / math.sqrt(q.shape[-1])
 
         # Add relative position bias to attention scores
         if position_bias is None:
@@ -250,7 +252,7 @@ class MultiHeadRelativeAttention(nn.Module):
 
         # Compute attended outputs (product of attention matrix and values)
         output = torch.einsum("hblt,hbtv->hblv", [attn, v])
-        output = rearrange(output, "head b l v -> b l (head v)")
+        output = self.rearrange_hblv_blhv(output)
         output = self.fc(output)
 
         return output, position_bias
@@ -265,7 +267,6 @@ class TransformerLayer(nn.Module):
         bidirectional: bool = True,
         is_decoder: bool = False,
         has_relative_attention_bias: bool = False,
-        flash_attn: bool = False,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -275,20 +276,10 @@ class TransformerLayer(nn.Module):
         # Create self-attention layer
         self.norm_1 = RMSNorm(d_model)
         self.film_1 = FiLM(d_cond, d_model)
-        self.flash_attn = flash_attn
 
-        if flash_attn:
-            from flash_attn.flash_attention import FlashMHA
-            self.self_attn = FlashMHA(
-                embed_dim=d_model,
-                num_heads=n_heads,
-                attention_dropout=dropout,
-                causal=False,
-            )
-        else:
-            self.self_attn = MultiHeadRelativeAttention(
-                n_heads, d_model, dropout, bidirectional, has_relative_attention_bias
-            )
+        self.self_attn = MultiHeadRelativeAttention(
+            n_heads, d_model, dropout, bidirectional, has_relative_attention_bias
+        )
 
         # (Optional) Create cross-attention layer
         if is_decoder:
@@ -338,11 +329,12 @@ class TransformerLayer(nn.Module):
         """
         y = self.norm_1(x)
         y = self.film_1(y.permute(0, 2, 1), cond).permute(0, 2, 1)
-        if self.flash_attn:
-            with torch.autocast(y.device.type, dtype=torch.bfloat16):
-                y = self.self_attn(y)[0]
-        else:
-            y, position_bias = self.self_attn(y, y, y, x_mask, position_bias)
+        # if self.flash_attn:
+        #     with torch.autocast(y.device.type, dtype=torch.bfloat16):
+        #         y = self.self_attn(y)[0]
+        # else:
+        y, position_bias = self.self_attn(y, y, y, x_mask, position_bias)
+
         x = x + self.dropout(y)
 
         if self.is_decoder:
@@ -397,7 +389,7 @@ class TransformerStack(nn.Module):
                     bidirectional,
                     is_decoder,
                     has_relative_attention_bias=True if (i == 0) else False,
-                    flash_attn=flash_attn,
+                    # flash_attn=flash_attn,
                     dropout=dropout,
                 )
                 for i in range(n_layers)
@@ -525,20 +517,26 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
+        self.rearrange_bpct_bptc = Rearrange("b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+
     def forward(self, x, return_activations: bool = False):
         x = self.embedding(x)
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
 
-        x = rearrange(x, "b d n -> b n d")
+        # x = rearrange(x, "b d n -> b n d")
+        x = x.permute(0, 2, 1)
         out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
         if return_activations:
             out, activations = out
 
-        out = rearrange(out, "b n d -> b d n")
+        # out = rearrange(out, "b n d -> b d n")
+        out = out.permute(0, 2, 1)
 
         out = self.classifier(out, None) # no cond here!
 
-        out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+        b, pc, t = out.shape
+        # out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+        out = self.rearrange_bpct_bptc(out)
 
         if return_activations:
             return out, activations
@@ -564,39 +562,12 @@ class VampNet(at.ml.BaseModel):
             return emb.to(dtype)
         else:
             return r
-    
-    @torch.no_grad()
-    def decode(self, z, codec):
-        """
-        convert a sequence of latents to a signal. 
-        """
-        assert z.ndim == 3
-
-        # remove mask token
-        z = z.masked_fill(z == self.mask_token, 0)
-        signal = at.AudioSignal(
-            codec.decode(
-                codec.quantizer.from_latents(self.embedding.from_codes(z, codec))[0]
-            )["audio"],
-            codec.sample_rate,
-        )
-
-        # find where the mask token is and replace it with silence in the audio
-        for tstep in range(z.shape[-1]):
-            if torch.all(z[:, :, tstep] == self.mask_token):
-                sample_idx_0 = tstep * codec.hop_length
-                sample_idx_1 = sample_idx_0 + codec.hop_length
-                signal.samples[:, :, sample_idx_0:sample_idx_1] = 0.0
-
-        return signal
 
     @torch.inference_mode()
     def generate(
         self, 
-        codec,
-        time_steps: int = 300,
-        _sampling_steps: int = 12,
         start_tokens: Optional[torch.Tensor] = None,
+        sampling_steps: int = 12,
         temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
@@ -606,14 +577,11 @@ class VampNet(at.ml.BaseModel):
         top_p=None,
         seed: int = None,
         sample_cutoff: float = 1.0,
-        return_signal=True,
-        debug=False,
         causal_weight: float = 0.0,
         cfg_guidance: float = None,
     ):
         if seed is not None:
-            at.util.seed(seed)
-        sampling_steps = _sampling_steps
+            torch.manual_seed(seed)
         logging.debug(f"beginning generation with {sampling_steps} steps")
 
         ##################### 
@@ -621,13 +589,6 @@ class VampNet(at.ml.BaseModel):
         #####################
         z = start_tokens
         nb = z.shape[0]
-
-        if z is None:
-            z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
-                self.device
-            )
-
-
 
         #################
         # resolve mask #
@@ -638,9 +599,6 @@ class VampNet(at.ml.BaseModel):
             mask[:, : self.n_conditioning_codebooks, :] = 0.0
         if mask.ndim == 2:
             mask = mask[:, None, :].repeat(1, z.shape[1], 1)
-        # init_mask = mask.clone()
-        
-
 
         ###########
         # set up #
@@ -682,8 +640,7 @@ class VampNet(at.ml.BaseModel):
             ).to(z.device)
 
             # get latents
-            latents = self.embedding.from_codes(z_masked, codec)
-
+            latents = self.embedding.from_codes(z_masked)
 
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
@@ -766,10 +723,7 @@ class VampNet(at.ml.BaseModel):
         if cfg_guidance is not None:
             sampled_z = sampled_z[:nb]
 
-        if return_signal:
-            return self.decode(sampled_z, codec)
-        else:
-            return sampled_z
+        return sampled_z
 
 
 
@@ -899,12 +853,17 @@ def mask_by_random_topk(
 
     return mask
 
+@torch.jit.script_if_tracing
 def typical_filter(
-        logits, 
+        logits: Tensor, 
         typical_mass: float = 0.95,
         typical_min_tokens: int = 1,):
     nb, nt, _ = logits.shape
-    x_flat = rearrange(logits, "b t l -> (b t ) l")
+
+    # x_flat = rearrange(logits, "b t l -> (b t ) l")
+    nb, nt, nl = logits.shape
+    x_flat = logits.view(nb * nt, nl)
+
     x_flat_norm = torch.nn.functional.log_softmax(x_flat, dim=-1)
     x_flat_norm_p = torch.exp(x_flat_norm)
     entropy = -(x_flat_norm * x_flat_norm_p).nansum(-1, keepdim=True)
@@ -925,7 +884,10 @@ def typical_filter(
         1, x_flat_indices, sorted_indices_to_remove
     )
     x_flat = x_flat.masked_fill(indices_to_remove, -float("Inf"))
-    logits = rearrange(x_flat, "(b t) l -> b t l", t=nt)
+
+    # logits = rearrange(x_flat, "(b t) l -> b t l", t=nt)
+    logits = x_flat.view(nb, nt, nl)
+
     return logits
 
 
