@@ -49,6 +49,14 @@ def build_transform():
     return transform
 
 
+@argbind.bind(without_prefix=True)
+def get_checkpoint_path(resume_ckpt: str = None):
+    print("~~~~")
+    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
+    print("~~~~")
+    return resume_ckpt
+
+
 @argbind.bind()
 def build_datasets(
     sample_rate: int,
@@ -73,29 +81,6 @@ def build_datasets(
         vdf, sample_rate=sample_rate, transform=val_tfm, max_examples=2000
     )
     return train_data, val_data
-
-
-def rand_float(shape, low, high, rng):
-    return rng.draw(shape)[:, 0] * (high - low) + low
-
-
-def flip_coin(shape, p, rng):
-    return rng.draw(shape)[:, 0] < p
-
-
-def num_params_hook(o, p):
-    return o + f" {p/1e6:<.3f}M params."
-
-
-def add_num_params_repr_hook(model):
-    import numpy as np
-    from functools import partial
-
-    for n, m in model.named_modules():
-        o = m.extra_repr()
-        p = sum([np.prod(p.size()) for p in m.parameters()])
-
-        setattr(m, "extra_repr", partial(num_params_hook, o=o, p=p))
 
 def accuracy(
     preds: torch.Tensor,
@@ -413,13 +398,6 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
         collate_fn=Dataset.collate)
 
     return train_dataloader, val_dataloader
-
-@argbind.bind(without_prefix=True)
-def get_checkpoint_path(resume_ckpt: str = None):
-    print("~~~~")
-    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
-    print("~~~~")
-    return resume_ckpt
 
 if __name__ == "__main__":
     args = argbind.parse_args()
