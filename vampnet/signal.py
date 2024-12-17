@@ -20,9 +20,6 @@ import math
 import torch
 import torch.nn as nn
 
-
-
-
 from .signal_meter import Meter, MIN_LOUDNESS
 
 GAIN_FACTOR = np.log(10) / 20
@@ -373,7 +370,8 @@ def find_audio(folder: str, ext: list[str] = AUDIO_EXTENSIONS):
     return files
 
 def write(sig: Signal, path: Path | str):
-    wav, sr = sig
+    wav = sig.wav
+    sr = sig.sr
     if wav[0].abs().max() > 1:
         warnings.warn("Audio amplitude > 1 clipped when saving")
 
@@ -381,8 +379,8 @@ def write(sig: Signal, path: Path | str):
 
 def read_from_file(
         path: Path | str, 
-        offset: float, 
-        duration: float, 
+        offset: float = 0., 
+        duration: float | None = None, 
         device: str = "cpu",
     ) -> Signal:
         import librosa

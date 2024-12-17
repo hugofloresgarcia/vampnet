@@ -461,7 +461,7 @@ class VampNet(L.LightningModule):
         n_heads: int = 20,
         n_layers: int = 16,
         r_cond_dim: int = 0,
-        n_codebooks: int = 9,
+        n_codebooks: int = 4,
         n_conditioning_codebooks: int = 0,
         latent_dim: int = 8,
         embedding_dim: int = 1280,
@@ -581,10 +581,9 @@ class VampNet(L.LightningModule):
     @torch.inference_mode()
     def generate(
         self, 
-        start_tokens: Optional[torch.Tensor] = None,
+        codes: Optional[torch.Tensor] = None,
         sampling_steps: int = 12,
         temperature: float = 1.0,
-        mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
         typical_filtering=True,
         typical_mass=0.15,
@@ -602,18 +601,16 @@ class VampNet(L.LightningModule):
         ##################### 
         # resolve initial z #
         #####################
-        z = start_tokens
+        z = codes
         nb = z.shape[0]
 
         #################
         # resolve mask #
         #################
 
-        if mask is None:
-            mask = torch.ones_like(z).to(self.device).int()
-            mask[:, : self.n_conditioning_codebooks, :] = 0.0
-        if mask.ndim == 2:
-            mask = mask[:, None, :].repeat(1, z.shape[1], 1)
+        # get the mask from the start tokens
+        mask = z == self.mask_token
+        print(f"found {mask.sum()} mask tokens in start tokens (total {mask.numel()})")
 
         ###########
         # set up #
@@ -654,13 +651,9 @@ class VampNet(L.LightningModule):
                 z.shape[0]
             ).to(z.device)
 
-            # get latents
-            # TODOO: use embedding instead
-            latents = self.embedding.from_codes(z_masked)
-
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
-            logits = self.forward(latents) # b, prob, seq
+            logits = self.forward(z_masked) # b, prob, seq
 
             if cfg_guidance is not None:
                 logits_cond, logits_uncond = logits[:nb], logits[nb:]

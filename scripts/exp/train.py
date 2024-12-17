@@ -157,6 +157,122 @@ def _metrics(z_hat, r, target, flat_mask, output):
                 top_k=topk,
             )
 
+from lightning.pytorch.callbacks import Callback
+class AudioSampleLoggingCallback(Callback):
+
+    def __init__(self, dataset: Dataset, num_samples: int = 10):
+        self.dataset = dataset
+        self.num_samples = num_samples
+
+
+    @torch.inference_mode()
+    def _save_onesteps(self, module):
+        rs = torch.linspace(0, 1, self.num_samples+1)[1:]
+        for i in range(self.num_samples):
+            sig = self.dataset[i]["sig"].to(module.device)
+            z = module.codec.encode(sig.wav, sig.sr)["codes"]
+            z = z[:, : module.model.n_codebooks, :]
+
+            n_batch = z.shape[0]
+            r = rs[i] * torch.ones(n_batch).to(z.device)
+
+            mask = pmask.random(z, r)
+            mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
+            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+
+            z_hat = module.model(z_mask)
+            # argmax sample
+            z_hat = z_hat.argmax(dim=-2)
+            z_hat = codebook_unflatten(z_hat, module.model.n_codebooks)
+            # replace masked with original
+            z_hat = torch.where(~mask.bool(), z, z_hat)
+
+            outwav = module.codec.decode(
+                module.codec.quantizer.from_codes(z_hat)[0]
+            )
+            recons = module.codec.decode(
+                module.codec.quantizer.from_codes(z)[0]
+            )
+            trainer.logger.experiment.add_audio(
+                f"orig/{i}",
+                sig.wav[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+            trainer.logger.experiment.add_audio(
+                f"recons/{i}-r={r[0]:.2f}",
+                recons[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+            trainer.logger.experiment.add_audio(
+                f"sampled/{i}-r={r[0]:.2f}",
+                outwav[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+
+            
+    @torch.inference_mode()
+    def _save_generations(self, module):
+        for i in range(self.num_samples):
+            sig = self.dataset[i]["sig"].to(module.device)
+
+            z = module.codec.encode(sig.wav, sig.sr)["codes"]
+            z = z[:, : module.model.n_codebooks, :]
+
+            mask = pmask.full_mask(z)
+            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+
+            z_hat = module.model.generate(z_mask)
+
+            outwav = module.codec.decode(
+                module.codec.quantizer.from_codes(z_hat)[0]
+            )
+            trainer.logger.experiment.add_audio(
+                f"generated/{i}",
+                outwav[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+    @torch.inference_mode()
+    def _save_periodic_prompt(self, module):
+        periods = [3, 5, 7, 11, 13, 21]
+        for i in range(self.num_samples):
+            sig = self.dataset[i]["sig"].to(module.device)
+
+            period = periods[i % len(periods)]
+
+            z = module.codec.encode(sig.wav, sig.sr)["codes"]
+            z = z[:, : module.model.n_codebooks, :]
+
+            mask = pmask.periodic_mask(z, period, 1, random_roll=True)
+            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+
+            z_hat = module.model.generate(z_mask)
+
+            outwav = module.codec.decode(
+                module.codec.quantizer.from_codes(z_hat)[0]
+            )
+            trainer.logger.experiment.add_audio(
+                f"periodic/{i}-p={period}",
+                outwav[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+    def on_validation_epoch_end(self, trainer, module):
+        print(f"saving samples at step {trainer.global_step}")
+        module.eval()
+        self._save_onesteps(module)
+        self._save_generations(module)
+        self._save_periodic_prompt(module)
+
+
 class VampNetTrainer(L.LightningModule):
 
     def __init__(self, 
@@ -298,6 +414,13 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
 
     return train_dataloader, val_dataloader
 
+@argbind.bind(without_prefix=True)
+def get_checkpoint_path(resume_ckpt: str = None):
+    print("~~~~")
+    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
+    print("~~~~")
+    return resume_ckpt
+
 if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
@@ -305,6 +428,9 @@ if __name__ == "__main__":
 
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
+
+        callbacks = []
+        callbacks.append(AudioSampleLoggingCallback(val_data))
 
         # todo setup datasets and dataloaders
         trainer = L.Trainer(
@@ -314,7 +440,13 @@ if __name__ == "__main__":
             limit_val_batches=20, 
             gradient_clip_val=5.0,
             val_check_interval=1000,
+            callbacks=callbacks,
             # precision="bf16"
         )
 
-        trainer.fit(model=model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+        trainer.fit(
+            model=model, 
+            train_dataloaders=train_dataloader, 
+            val_dataloaders=val_dataloader, 
+            ckpt_path=get_checkpoint_path()
+        )

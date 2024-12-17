@@ -68,10 +68,11 @@ class EmbeddedInterface(nn.Module):
         print(f"chopping off {self.coarse.n_codebooks} codebooks")
         z = z[:, : self.coarse.n_codebooks, :]
         mask = mask[:, : self.coarse.n_codebooks, :]
+        # apply the mask
+        z = apply_mask(z, mask, self.coarse.mask_token)
         with torch.autocast(z.device.type,  dtype=torch.bfloat16):
             zv = self.coarse.generate(
-                start_tokens=z,
-                mask=mask,
+                codes=z,
                 temperature=temperature,
                 typical_mass=typical_mass,
                 typical_min_tokens=typical_min_tokens,
@@ -82,9 +83,7 @@ class EmbeddedInterface(nn.Module):
 
     @torch.inference_mode()
     def decode(self, z):
-        return self.codec.decode(
-            self.codec.quantizer.from_latents(self.coarse.embedding.from_codes(z))[0]
-        )
+        return self.codec.decode(self.codec.quantizer.from_codes(z)[0])
 
 
 if __name__ == "__main__":

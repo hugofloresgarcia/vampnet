@@ -1,43 +1,31 @@
 import random
 import vampnet
+import vampnet.signal as sn
+from vampnet.interface import EmbeddedInterface
 import audiotools as at
 
-# load the default vampnet model
-interface = vampnet.interface.Interface.default()
-
-# list available finetuned models
-finetuned_model_choices = interface.available_models()
-print(f"available finetuned models: {finetuned_model_choices}")
-
-# pick a random finetuned model
-model_choice = random.choice(finetuned_model_choices)
-print(f"choosing model: {model_choice}")
-
-# load a finetuned model
-interface.load_finetuned(model_choice)
-
-# load an example audio file
-signal = at.AudioSignal("assets/example.wav")
-
-# get the tokens for the audio
-codes = interface.encode(signal)
-
-# build a mask for the audio
-mask = interface.build_mask(
-    codes, signal,
-    periodic_prompt=7, 
-    upper_codebook_mask=3,
+codec = vampnet.dac.DAC.load("/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth")
+eiface = EmbeddedInterface(
+    codec=codec,
+    coarse=vampnet.VampNet(),
+    chunk_size_s=10
 )
 
-# generate the output tokens
-output_tokens = interface.vamp(
-    codes, mask, return_mask=False,
-    temperature=1.0, 
-    typical_filtering=True, 
-)
+# load an audio file
+sig = sn.read_from_file("assets/example.wav")
+# cut sig to hop length
+sig.wav = sn.cut_to_hop_length(sig.wav, eiface.codec.hop_length)
 
-# convert them to a signal
-output_signal = interface.decode(output_tokens)
+sig = sig.to("cuda")
+codec.to("cuda")
 
-# save the output signal
-output_signal.write("scratch/output.wav")
+codes = eiface.encode(sig.wav)
+print(codes.shape)
+
+# decode
+wav = eiface.decode(codes)
+outsig = sn.Signal(wav, sig.sr)
+print(wav.shape)
+
+# write to file
+sn.write(outsig, "scratch/ex-recons.wav")
