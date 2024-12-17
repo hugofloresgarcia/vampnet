@@ -169,8 +169,8 @@ class VampNetTrainer(L.LightningModule):
 
         self.model = VampNet()
         # TODOO: remove, use embedding instead
-        self.model.embedding.quantizer = self.codec.quantizer
-        self.model = torch.compile(self.model)
+        # self.model.embedding.quantizer = self.codec.quantizer
+        # self.model = torch.compile(self.model)
 
         self.criterion = CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=42)
@@ -207,10 +207,8 @@ class VampNetTrainer(L.LightningModule):
         z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
         
         # TODOO: use embedding instead
-        z_mask_latent = vn.embedding.from_codes(z_mask)
-        
-
-        z_hat = self.model(z_mask_latent)
+        # z_mask_latent = vn.embedding.from_codes(z_mask)
+        z_hat = self.model(z_mask)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -254,9 +252,9 @@ class VampNetTrainer(L.LightningModule):
         z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
 
         # TODOO: use embedding instead
-        z_mask_latent = vn.embedding.from_codes(z_mask)
+        # z_mask_latent = vn.embedding.from_codes(z_mask)
 
-        z_hat = self.model(z_mask_latent)
+        z_hat = self.model(z_mask)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],

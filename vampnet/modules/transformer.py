@@ -8,6 +8,7 @@ from torch import Tensor
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 import lightning as L
+from einops import rearrange
 
 from .activations import get_activation
 from .layers import CodebookEmbedding
@@ -484,21 +485,12 @@ class VampNet(L.LightningModule):
 
         assert self.noise_mode == "mask", "deprecated"
 
-        self.embedding = CodebookEmbedding(
-            latent_dim=latent_dim,
-            n_codebooks=n_codebooks,
-            vocab_size=vocab_size,
-            emb_dim=embedding_dim,
-            special_tokens=["MASK"],
-        )
-        self.mask_token = self.embedding.special_idxs["MASK"]
-
-        # NEW
         # add an embedding layer per codebook
-        # self.embedding = nn.Embedding(
-        #     ((vocab_size) * n_codebooks)+1, embedding_dim
-        # )
-        # self.mask_token = (vocab_size * n_codebooks)
+        assert embedding_dim % n_codebooks == 0, f"embedding_dim must be divisible by n_codebooks, but got {embedding_dim} and {n_codebooks}"
+        self.embedding = nn.Embedding(
+            ((vocab_size) * n_codebooks) + 1, embedding_dim // n_codebooks
+        )
+        self.mask_token = (vocab_size * n_codebooks)
 
         self.transformer = TransformerStack(
             d_model=embedding_dim,
@@ -524,47 +516,42 @@ class VampNet(L.LightningModule):
             ),
         )
 
-        self.rearrange_bpct_bptc = Rearrange("b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+        # self.rearrange_bpct_bptc = Rearrange("b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
     
-    def codebook_idx_to_global_idx(codes: Tensor):
+    def codebook_idx_to_global_idx(self, codes: Tensor):
         # codes is shape (b, n_codebooks, t)
         # print a slice of the codes
-        print(f"old codes: {codes[0, :, 0:10]}")
+        mask = codes == self.mask_token
+        old_codes = codes.clone()
+
         code_offsets = torch.arange(self.n_codebooks).to(codes.device) * self.vocab_size
-        code_offsets = code_offsets[None, :, None]
+        code_offsets = code_offsets[None, :, None].repeat(codes.shape[0], 1, codes.shape[2])
         codes = codes + code_offsets
-        print(f"new codes: {codes[0, :, 0:10]}")
+
+        # place the mask token back
+        codes[mask] = self.mask_token
         return codes
 
     def forward(self, x, return_activations: bool = False):
-        # NEW
-        #~~~
-        # # input should be shape (batch, codebook, seq)
-        # x = self.codebook_idx_to_global_idx(x)
-        # # pass through the embedding layer, output shape (batch, codebook, seq, emb)
-        # x = self.embedding(x)
-        # # concat the embds along the codebook dimension
-        # x = rearrange(x, "b c n d -> b n (c d)")
-
-        # OLD
+        # input should be shape (batch, codebook, seq)
+        x = self.codebook_idx_to_global_idx(x)
+        # pass through the embedding layer, output shape (batch, codebook, seq, emb)
         x = self.embedding(x)
-        #~~~
-        x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
+        # concat the embds along the codebook dimension
 
-        # x = rearrange(x, "b d n -> b n d")
-        x = x.permute(0, 2, 1)
+        x = rearrange(x, "b c n d -> b n (c d)")
+        x_mask = torch.ones_like(x, dtype=torch.bool)[:, :, :1].squeeze(2)
+
         out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
         if return_activations:
             out, activations = out
 
-        # out = rearrange(out, "b n d -> b d n")
-        out = out.permute(0, 2, 1)
+        out = rearrange(out, "b n d -> b d n")
 
         out = self.classifier(out, None) # no cond here!
 
         b, pc, t = out.shape
-        # out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
-        out = self.rearrange_bpct_bptc(out)
+        out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
 
         if return_activations:
             return out, activations
