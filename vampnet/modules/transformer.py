@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
-import audiotools as at
+import lightning as L
 
 from .activations import get_activation
 from .layers import CodebookEmbedding
@@ -56,7 +56,7 @@ class RMSNorm(nn.Module):
 
 class FeedForward(nn.Module):
     def __init__(
-        self, d_model: int = 512, dropout: float = 0.1, activation: str = "geglu"
+        self, d_model: int = 512, dropout: float = 0.0, activation: str = "geglu"
     ):
         super().__init__()
         factor = 2 if activation == "geglu" else 1
@@ -86,7 +86,7 @@ class MultiHeadRelativeAttention(nn.Module):
         self,
         n_head: int = 8,
         d_model: int = 512,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
         bidirectional: bool = True,
         has_relative_attention_bias: bool = True,
         attention_num_buckets: int = 32,
@@ -267,7 +267,7 @@ class TransformerLayer(nn.Module):
         bidirectional: bool = True,
         is_decoder: bool = False,
         has_relative_attention_bias: bool = False,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
     ):
         super().__init__()
         # Store args
@@ -454,7 +454,7 @@ class TransformerStack(nn.Module):
             return out
 
 
-class VampNet(at.ml.BaseModel):
+class VampNet(L.LightningModule):
     def __init__(
         self,
         n_heads: int = 20,
@@ -467,7 +467,7 @@ class VampNet(at.ml.BaseModel):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",
-        dropout: float = 0.1
+        dropout: float = 0.0
     ):
         super().__init__()
         assert r_cond_dim == 0, f"r_cond_dim must be 0 (not supported), but got {r_cond_dim}"
@@ -492,6 +492,13 @@ class VampNet(at.ml.BaseModel):
             special_tokens=["MASK"],
         )
         self.mask_token = self.embedding.special_idxs["MASK"]
+
+        # NEW
+        # add an embedding layer per codebook
+        # self.embedding = nn.Embedding(
+        #     ((vocab_size) * n_codebooks)+1, embedding_dim
+        # )
+        # self.mask_token = (vocab_size * n_codebooks)
 
         self.transformer = TransformerStack(
             d_model=embedding_dim,
@@ -518,9 +525,30 @@ class VampNet(at.ml.BaseModel):
         )
 
         self.rearrange_bpct_bptc = Rearrange("b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+    
+    def codebook_idx_to_global_idx(codes: Tensor):
+        # codes is shape (b, n_codebooks, t)
+        # print a slice of the codes
+        print(f"old codes: {codes[0, :, 0:10]}")
+        code_offsets = torch.arange(self.n_codebooks).to(codes.device) * self.vocab_size
+        code_offsets = code_offsets[None, :, None]
+        codes = codes + code_offsets
+        print(f"new codes: {codes[0, :, 0:10]}")
+        return codes
 
     def forward(self, x, return_activations: bool = False):
+        # NEW
+        #~~~
+        # # input should be shape (batch, codebook, seq)
+        # x = self.codebook_idx_to_global_idx(x)
+        # # pass through the embedding layer, output shape (batch, codebook, seq, emb)
+        # x = self.embedding(x)
+        # # concat the embds along the codebook dimension
+        # x = rearrange(x, "b c n d -> b n (c d)")
+
+        # OLD
         x = self.embedding(x)
+        #~~~
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
 
         # x = rearrange(x, "b d n -> b n d")
@@ -640,6 +668,7 @@ class VampNet(at.ml.BaseModel):
             ).to(z.device)
 
             # get latents
+            # TODOO: use embedding instead
             latents = self.embedding.from_codes(z_masked)
 
             # infer from latents

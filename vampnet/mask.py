@@ -73,6 +73,7 @@ def linear_random(
 
     return mask
 
+@torch.jit.script_if_tracing
 def inpaint(x: torch.Tensor, n_prefix: int, n_suffix: int,):
     assert n_prefix is not None
     assert n_suffix is not None
@@ -92,11 +93,8 @@ def inpaint(x: torch.Tensor, n_prefix: int, n_suffix: int,):
         for i, n in enumerate(n_suffix):
             if n > 0:
                 mask[i, :, -n:] = 0.0
-
-    
     return mask
 
-#
 @torch.jit.script_if_tracing
 def periodic_mask(x: torch.Tensor, period: int,
                   width: int = 1, random_roll: bool = False,):

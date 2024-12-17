@@ -1,21 +1,262 @@
+# ~ basically a copy of audiotools, but torchscript friendly ~
 import math
 from pathlib import Path
 import warnings
 import subprocess
 from dataclasses import dataclass
+import numbers
 
 import torch 
 from torch import nn
 import numpy as np
 from torch import Tensor
+import torchaudio.transforms as T
 
 import soundfile as sf
+from flatten_dict import flatten
+from flatten_dict import unflatten
 
 import math
 import torch
 import torch.nn as nn
 
-# ~ util ~
+
+
+
+from .signal_meter import Meter, MIN_LOUDNESS
+
+GAIN_FACTOR = np.log(10) / 20
+"""Gain factor for converting between amplitude and decibels."""
+
+@dataclass
+class Signal:
+    wav: Tensor
+    sr: int
+
+    @property
+    def duration(self):
+        return self.wav.shape[-1] / self.sr
+    
+    @property
+    def num_channels(self):
+        return self.wav.shape[-2]
+
+    @property 
+    def num_samples(self):
+        return self.wav.shape[-1]
+
+    def to(self, device: str):
+        return Signal(self.wav.to(device), self.sr)
+
+# ~ signal creation utils ~
+def batch(
+    audio_signals: list[Signal],
+    pad_signals: bool = False,
+    truncate_signals: bool = False,
+    resample: bool = False,
+    dim: int = 0,
+):
+    signal_lengths = [x.num_samples for x in audio_signals]
+    sample_rates = [x.sr for x in audio_signals]
+
+    if len(set(sample_rates)) != 1:
+        if resample:
+            for x in audio_signals:
+                x.resample(sample_rates[0])
+        else:
+            raise RuntimeError(
+                f"Not all signals had the same sample rate! Got {sample_rates}. "
+                f"All signals must have the same sample rate, or resample must be True. "
+            )
+
+    if len(set(signal_lengths)) != 1:
+        if pad_signals:
+            max_length = max(signal_lengths)
+            for x in audio_signals:
+                pad_len = max_length - x.num_samples
+                padded = zero_pad(x, 0, pad_len)
+                x.wav = padded.wav
+
+        elif truncate_signals:
+            min_length = min(signal_lengths)
+            for x in audio_signals:
+                truncated = truncate_samples(x, min_length)
+                x.wav = truncated.wav
+        else:
+            raise RuntimeError(
+                f"Not all signals had the same length! Got {signal_lengths}. "
+                f"All signals must be the same length, or pad_signals/truncate_signals "
+                f"must be True. "
+            )
+    # Concatenate along the specified dimension (default 0)
+    audio_data = torch.cat([x.wav for x in audio_signals], dim=dim)
+
+    batched_signal = Signal(
+        audio_data,
+        sr=audio_signals[0].sr,
+    )
+    return batched_signal
+
+
+# ~ transform ~
+def to_mono(sig: Signal) -> Signal:
+    """Converts a stereo signal to mono by averaging the channels."""
+    wav = sig.wav.mean(dim=-2, keepdim=True)
+    return Signal(wav, sig.sr)
+
+def normalize(sig: Signal, db: Tensor | float = -24.0) -> Signal:
+    """Normalizes the signal's volume to the specified db, in LUFS.
+    This is GPU-compatible, making for very fast loudness normalization.
+
+    Parameters
+    ----------
+    db : typing.Union[torch.Tensor, np.ndarray, float], optional
+        Loudness to normalize to, by default -24.0
+    """
+    db = ensure_tensor(db).to(sig.wav.device)
+    ref_db = loudness(sig)
+    gain = db - ref_db
+    gain = torch.exp(gain * GAIN_FACTOR)
+
+    wav = sig.wav * gain[:, None, None]
+    return Signal(wav, sig.sr)
+
+# ~ analyze ~
+def loudness(
+    sig: Signal, filter_class: str = "K-weighting", block_size: float = 0.400, **kwargs
+) -> Tensor:
+    """Calculates loudness using an implementation of ITU-R BS.1770-4.
+    Allows control over gating block size and frequency weighting filters for
+    additional control. Measure the integrated gated loudness of a signal.
+
+    API is derived from PyLoudnorm, but this implementation is ported to PyTorch
+    and is tensorized across batches. When on GPU, an FIR approximation of the IIR
+    filters is used to compute loudness for speed.
+
+    Uses the weighting filters and block size defined by the meter
+    the integrated loudness is measured based upon the gating algorithm
+    defined in the ITU-R BS.1770-4 specification.
+    """
+    original_length = sig.num_samples
+    if sig.duration < 0.5:
+        pad_len = int((0.5 - sig.duration) * sig.sr)
+        zero_pad(sig, 0, pad_len)
+
+    # create BS.1770 meter
+    meter = Meter(
+        sig.sr, filter_class=filter_class, block_size=block_size, **kwargs
+    )
+    meter = meter.to(sig.wav.device)
+    # measure loudness
+    loudness = meter.integrated_loudness(sig.wav.permute(0, 2, 1))
+    truncate_samples(sig, original_length)
+    min_loudness = (
+        torch.ones_like(loudness, device=loudness.device) * MIN_LOUDNESS
+    )
+    _loudness = torch.maximum(loudness, min_loudness)
+
+    return _loudness.to(sig.wav.device)
+
+# ~ sig util ~
+@torch.jit.script_if_tracing
+def truncate_samples(sig: Signal, original_length: int):
+    """Truncates samples to original length."""
+    if sig.num_samples > original_length:
+        sig.wav = sig.wav[:, :original_length]
+    return sig
+
+@torch.jit.script_if_tracing
+def zero_pad(sig: Signal, start: int, end: int):
+    """Zero pads signal."""
+    sig.wav = F.pad(sig.wav, (start, end))
+    return sig
+
+@torch.jit.script_if_tracing
+def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
+    length = wav.shape[-1]
+    right_cut = length % hop_length
+    if right_cut > 0:
+        wav = wav[..., :-right_cut]
+    return wav
+
+@torch.jit.script_if_tracing
+def trim_to_s(sig: Signal, duration: float) -> Tensor:
+    length = int(duration * sig.sr)
+    return Signal(sig.wav[..., :length], sig.sr)
+
+
+def ensure_tensor(
+    x: np.ndarray | torch.Tensor | float | int,
+    ndim: int = None,
+    batch_size: int = None,
+):
+    """Ensures that the input ``x`` is a tensor of specified
+    dimensions and batch size.
+
+    Parameters
+    ----------
+    x : typing.Union[np.ndarray, torch.Tensor, float, int]
+        Data that will become a tensor on its way out.
+    ndim : int, optional
+        How many dimensions should be in the output, by default None
+    batch_size : int, optional
+        The batch size of the output, by default None
+
+    Returns
+    -------
+    torch.Tensor
+        Modified version of ``x`` as a tensor.
+    """
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x)
+    if ndim is not None:
+        assert x.ndim <= ndim
+        while x.ndim < ndim:
+            x = x.unsqueeze(-1)
+    if batch_size is not None:
+        if x.shape[0] != batch_size:
+            shape = list(x.shape)
+            shape[0] = batch_size
+            x = x.expand(*shape)
+    return x
+
+# ~ data util ~
+def prepare_batch(batch: dict | list | torch.Tensor, device: str = "cpu"):
+    """Moves items in a batch (typically generated by a DataLoader as a list
+    or a dict) to the specified device. This works even if dictionaries
+    are nested.
+
+    Parameters
+    ----------
+    batch : typing.Union[dict, list, torch.Tensor]
+        Batch, typically generated by a dataloader, that will be moved to
+        the device.
+    device : str, optional
+        Device to move batch to, by default "cpu"
+
+    Returns
+    -------
+    typing.Union[dict, list, torch.Tensor]
+        Batch with all values moved to the specified device.
+    """
+    if isinstance(batch, dict):
+        batch = flatten(batch)
+        for key, val in batch.items():
+            try:
+                batch[key] = val.to(device)
+            except:
+                pass
+        batch = unflatten(batch)
+    elif torch.is_tensor(batch):
+        batch = batch.to(device)
+    elif isinstance(batch, list):
+        for i in range(len(batch)):
+            try:
+                batch[i] = batch[i].to(device)
+            except:
+                pass
+    return batch
+
 def random_state(seed: int | np.random.RandomState):
     """
     Turn seed into a np.random.RandomState instance.
@@ -49,31 +290,54 @@ def random_state(seed: int | np.random.RandomState):
             "%r cannot be used to seed a numpy.random.RandomState" " instance" % seed
         )
 
-@torch.jit.script_if_tracing
-def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
-    length = wav.shape[-1]
-    right_cut = length % hop_length
-    if right_cut > 0:
-        wav = wav[..., :-right_cut]
-    return wav
+def collate(list_of_dicts: list, n_splits: int = None):
+    """Collates a list of dictionaries (e.g. as returned by a
+    dataloader) into a dictionary with batched values. This routine
+    uses the default torch collate function for everything
+    except Signal objects, which are handled by the batch
+    function.
 
-def trim_to_s(wav: Tensor, sr: int, duration: float) -> Tensor:
-    length = int(duration * sr)
-    return wav[..., :length]
+    This function takes n_splits to enable splitting a batch
+    into multiple sub-batches for the purposes of gradient accumulation,
+    etc.
+
+    Parameters
+    ----------
+    list_of_dicts : list
+        List of dictionaries to be collated.
+    n_splits : int
+        Number of splits to make when creating the batches (split into
+        sub-batches). Useful for things like gradient accumulation.
+
+    """
+    batches = []
+    list_len = len(list_of_dicts)
+
+    return_list = False if n_splits is None else True
+    n_splits = 1 if n_splits is None else n_splits
+    n_items = int(math.ceil(list_len / n_splits))
+
+    for i in range(0, list_len, n_items):
+        # Flatten the dictionaries to avoid recursion.
+        list_of_dicts_ = [flatten(d) for d in list_of_dicts[i : i + n_items]]
+        dict_of_lists = {
+            k: [dic[k] for dic in list_of_dicts_] for k in list_of_dicts_[0]
+        }
+
+        outbatch = {}
+        for k, v in dict_of_lists.items():
+            if isinstance(v, list):
+                if all(isinstance(s, Signal) for s in v):
+                    outbatch[k] = batch(v, pad_signals=True)
+                else:
+                    # Borrow the default collate fn from torch.
+                    outbatch[k] = torch.utils.data._utils.collate.default_collate(v)
+        batches.append(unflatten(outbatch))
+
+    batches = batches[0] if not return_list else batches
+    return batches
 
 # ~ i/o ~
-
-@dataclass
-class Info:
-    """Shim for torchaudio.info API changes."""
-
-    sample_rate: float
-    num_frames: int
-
-    @property
-    def duration(self) -> float:
-        return self.num_frames / self.sample_rate
-
 AUDIO_EXTENSIONS = [".wav", ".flac", ".mp3", ".mp4", ".aiff"]
 AUDIO_EXTENSIONS += [x.upper() for x in AUDIO_EXTENSIONS]
 
@@ -108,25 +372,8 @@ def find_audio(folder: str, ext: list[str] = AUDIO_EXTENSIONS):
         print(f"found {len(new_files)} files with extension {x}")
     return files
 
-def info(audio_path: str):
-    """Shim for torchaudio.info to make 0.7.2 API match 0.8.0.
-
-    Parameters
-    ----------
-    audio_path : str
-        Path to audio file.
-    """
-    info = torch_info(audio_path)
-
-    if isinstance(info, tuple):  # pragma: no cover
-        signal_info = info[0]
-        info = Info(sample_rate=signal_info.rate, num_frames=signal_info.length)
-    else:
-        info = Info(sample_rate=info.sample_rate, num_frames=info.num_frames)
-
-    return info
-
-def write(wav: torch.Tensor, sr: int, path: Path | str):
+def write(sig: Signal, path: Path | str):
+    wav, sr = sig
     if wav[0].abs().max() > 1:
         warnings.warn("Audio amplitude > 1 clipped when saving")
 
@@ -137,7 +384,7 @@ def read_from_file(
         offset: float, 
         duration: float, 
         device: str = "cpu",
-    ):
+    ) -> Signal:
         import librosa
         try:
             data, sample_rate = librosa.load(
@@ -160,9 +407,12 @@ def read_from_file(
             data = data.unsqueeze(0)
         if data.ndim < 3:
             data = data.unsqueeze(0)
-        
-        self.path_to_file = audio_path
-        return self.to(device)
+
+        return Signal(data.to(device), sample_rate)
+
+def resample(sig: Signal, sample_rate: int) -> Signal:
+    resampler = T.Resample(orig_freq=sig.sr, new_freq=sample_rate)
+    return Signal(resampler(sig.wav), sample_rate)
 
 def excerpt(
     audio_path: str | Path,
@@ -170,7 +420,7 @@ def excerpt(
     duration: float = None,
     state: np.random.RandomState | int = None,
     **kwargs,
-):
+) -> Signal:
     total_duration = fast_get_duration(audio_path)
     if total_duration is None:
         print(f"had to to slow info fall back for {audio_path}")
@@ -202,9 +452,37 @@ def excerpt(
     offset = state.uniform(lower_bound, upper_bound)
 
     wav, sr = read_from_file(audio_path, offset, duration, **kwargs)
-    return wav, sr
+    return Signal(wav, sr)
 
 # ~ io utils ~
+@dataclass
+class Info:
+    """Shim for torchaudio.info API changes."""
+
+    sample_rate: float
+    num_frames: int
+
+    @property
+    def duration(self) -> float:
+        return self.num_frames / self.sample_rate
+
+def info(audio_path: str):
+    """Shim for torchaudio.info to make 0.7.2 API match 0.8.0.
+
+    Parameters
+    ----------
+    audio_path : str
+        Path to audio file.
+    """
+    info = torch_info(audio_path)
+
+    if isinstance(info, tuple):  # pragma: no cover
+        signal_info = info[0]
+        info = Info(sample_rate=signal_info.rate, num_frames=signal_info.length)
+    else:
+        info = Info(sample_rate=info.sample_rate, num_frames=info.num_frames)
+
+    return info
 
 def fast_get_audio_channels(path: str) -> dict:
     process = subprocess.Popen(

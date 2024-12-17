@@ -1,9 +1,5 @@
-torch==2.1.0
-argbind>=0.3.2
-numpy==1.23
-loralib
-wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat
-descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git
--e git+https://github.com/audacitorch/pyharp.git#egg=pyharp 
-torch_pitch_shift
-gradio==4.37.2
+torch
+argbind
+numpy
+gradio
+einops

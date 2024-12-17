@@ -12,8 +12,8 @@ def WNConv1d(*args, **kwargs):
 def WNConvTranspose1d(*args, **kwargs):
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
 
-import cached_conv as cc
 def CausalConv1d(*args, **kwargs):
+    import cached_conv as cc
     # grab the padding 
     kernel_size=kwargs.get('kernel_size', 1)
     stride=kwargs.get('stride', 1)
@@ -28,6 +28,7 @@ def CausalConv1d(*args, **kwargs):
     return cc.Conv1d(*args, **kwargs)
 
 def CausalConvTranspose1d(*args, **kwargs):
+    import cached_conv as cc
     return cc.ConvTranspose1d(*args, **kwargs, causal=True)
 
 

@@ -2,16 +2,17 @@
 from . import modules
 from pathlib import Path
 from . import scheduler
-from .interface import Interface
 from .modules.transformer import VampNet
 
 __version__ = "0.0.1"
 
+# TODO: all of the code below should be updated
+
 ROOT = Path(__file__).parent.parent
-MODELS_DIR = ROOT / "models" / "vampnet"
+MODELS_DIR = ROOT / "models" / "vampnet" / __version__
 
 from huggingface_hub import hf_hub_download, HfFileSystem
-DEFAULT_HF_MODEL_REPO = "hugggof/vampnet"
+DEFAULT_HF_MODEL_REPO = f"hugggof/vampnet-{__version__}"
 FS = HfFileSystem()
 
 def download_codec():
@@ -29,7 +30,7 @@ def download_codec():
     
 
 def download_default():
-    filenames = ["coarse.pth", "c2f.pth"]
+    filenames = ["coarse.pth"]
     repo_id = DEFAULT_HF_MODEL_REPO
     paths = []
     for filename in filenames:
@@ -45,7 +46,7 @@ def download_default():
 
 def download_finetuned(name):
     repo_id = f"{DEFAULT_HF_MODEL_REPO}"
-    filenames = ["coarse.pth", "c2f.pth"]
+    filenames = ["coarse.pth"]
     paths = []
     for filename in filenames:
         path = f"{MODELS_DIR}/loras/{name}/{filename}"

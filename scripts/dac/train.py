@@ -87,18 +87,6 @@ def build_datasets(
     db_path: str = "sm.db", 
     query: str = "SELECT * from audio_file", 
 ):
-    # Give one loader per key/value of dictionary, where
-    # value is a list of folders. Create a dataset for each one.
-    # Concatenate the datasets with ConcatDataset, which
-    # cycles through them.
-
-    # datasets = []
-    # for _, v in folders.items():
-    #     loader = AudioLoader(sources=v)
-    #     transform = build_transform()
-    #     dataset = AudioDataset(loader, sample_rate, transform=transform)
-    #     datasets.append(dataset)
-    
     train_tfm = build_transform(augment_prob=1.0)    
     val_tfm = build_transform(augment_prob=1.0)   
 

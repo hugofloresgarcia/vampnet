@@ -28,12 +28,6 @@ setup(
     install_requires=[
         "torch",
         "argbind>=0.3.2",
-        "numpy==1.23",
-        "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat",
-        "descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git",
         "gradio", 
-        "loralib",
-        "torch_pitch_shift",
-        "plotly",
     ],
 )

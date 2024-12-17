@@ -4,41 +4,6 @@ import torch
 import numpy as np
 from einops import rearrange
 
-def ensure_tensor(
-    x: np.ndarray | torch.Tensor | float | int,
-    ndim: int = None,
-    batch_size: int = None,
-):
-    """Ensures that the input ``x`` is a tensor of specified
-    dimensions and batch size.
-
-    Parameters
-    ----------
-    x : typing.Union[np.ndarray, torch.Tensor, float, int]
-        Data that will become a tensor on its way out.
-    ndim : int, optional
-        How many dimensions should be in the output, by default None
-    batch_size : int, optional
-        The batch size of the output, by default None
-
-    Returns
-    -------
-    torch.Tensor
-        Modified version of ``x`` as a tensor.
-    """
-    if not torch.is_tensor(x):
-        x = torch.as_tensor(x)
-    if ndim is not None:
-        assert x.ndim <= ndim
-        while x.ndim < ndim:
-            x = x.unsqueeze(-1)
-    if batch_size is not None:
-        if x.shape[0] != batch_size:
-            shape = list(x.shape)
-            shape[0] = batch_size
-            x = x.expand(*shape)
-    return x
-
 
 @torch.jit.script
 def scalar_to_batch_tensor(x: int | float, batch_size: int):
