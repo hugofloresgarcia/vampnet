@@ -22,12 +22,12 @@ class EmbeddedInterface(nn.Module):
 
     def __init__(self,
         codec: DAC, 
-        coarse: VampNet, 
+        vn: VampNet, 
         chunk_size_s: int = 10,
     ):
         super().__init__()
         self.codec = codec
-        self.coarse = coarse
+        self.vn = vn
 
         self.register_buffer("sample_rate", tt(self.codec.sample_rate))
         self.register_buffer("hop_length", tt(self.codec.hop_length))
@@ -41,6 +41,7 @@ class EmbeddedInterface(nn.Module):
 
     @torch.inference_mode()
     def build_mask(self, 
+            z: Tensor,
             periodic_prompt: Tensor = 7, 
             upper_codebook_mask: Tensor = 3, 
             dropout_amt: Tensor = 0.0,
@@ -65,13 +66,13 @@ class EmbeddedInterface(nn.Module):
         ):
 
         # chop off, leave only the top  codebooks
-        print(f"chopping off {self.coarse.n_codebooks} codebooks")
-        z = z[:, : self.coarse.n_codebooks, :]
-        mask = mask[:, : self.coarse.n_codebooks, :]
+        print(f"chopping off {self.vn.n_codebooks} codebooks")
+        z = z[:, : self.vn.n_codebooks, :]
+        mask = mask[:, : self.vn.n_codebooks, :]
         # apply the mask
-        z = apply_mask(z, mask, self.coarse.mask_token)
+        z = apply_mask(z, mask, self.vn.mask_token)
         with torch.autocast(z.device.type,  dtype=torch.bfloat16):
-            zv = self.coarse.generate(
+            zv = self.vn.generate(
                 codes=z,
                 temperature=temperature,
                 typical_mass=typical_mass,
@@ -95,95 +96,49 @@ if __name__ == "__main__":
     # torch.set_logging.debugoptions(threshold=10000)
     at.util.seed(42)
 
-    interface = Interface(
-        coarse_ckpt="./models/vampnet/coarse.pth", 
-        coarse2fine_ckpt="./models/vampnet/c2f.pth", 
-        codec_ckpt="./models/vampnet/codec.pth",
-        device="cuda", 
-        compile=False
-    )
-
-    sig = at.AudioSignal('assets/example.wav')
-
-    z = interface.encode(sig)
-
-    for m in interface.modules():
-        if hasattr(m, "weight_g"):
-            torch.nn.utils.remove_weight_norm(m)
-
-
-    mask = interface.build_mask(
-        z=z,
-        sig=sig,
-        rand_mask_intensity=1.0,
-        prefix_s=0.0,
-        suffix_s=0.0,
-        periodic_prompt=7,
-        periodic_prompt_width=1,
-        onset_mask_width=5, 
-        _dropout=0.0,
-        upper_codebook_mask=3,
-    )
-
-    zv, mask_z = interface.coarse_vamp(
-        z, 
-        mask=mask,
-        return_mask=True, 
-        gen_fn=interface.coarse.generate
-    )
-
-    use_coarse2fine = True
-    if use_coarse2fine: 
-        zv = interface.coarse_to_fine(zv, mask=mask)
-    
-    sig = interface.decode(zv).cpu()
-    mask = interface.decode(mask_z).cpu()
-    recons = interface.decode(z).cpu()
-
-    sig.write("scratch/out.wav")
-    mask.write("scratch/mask.wav")
-    recons.write("scratch/recons.wav")
-
-    logging.debug("done")
-
     #~~~~ embedded
     print(f"exporting embedded interface")
-    # move stuff to cpu before exporting
-    z = z.cpu()
-    mask = mask.cpu()
-    zv = zv.cpu()
-    interface.codec.to("cpu")
-    interface.coarse.to("cpu")
-    sig = sig.to("cpu")
+    ckpt = "/home/hugo/soup/runs/debug/lightning_logs/version_23/checkpoints/epoch=16-step=119232.ckpt"
+    codec_ckpt = "/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 
+    from scripts.exp.train import VampNetTrainer
+    bundle = VampNetTrainer.load_from_checkpoint(ckpt, codec_ckpt=codec_ckpt) 
+    codec = bundle.codec
+    vn = bundle.model
     eiface = EmbeddedInterface(
-        codec=interface.codec, 
-        coarse=interface.coarse,
+        codec=codec,
+        vn=vn,
     )
     eiface.eval()
+    eiface.to("cpu")
 
+    import vampnet.signal as sn
+    sig = sn.read_from_file("assets/example.wav", duration=3.0)
     # handle roughly 10 seconds
-    sig.samples = trim_to_s(sig.samples, sig.sample_rate, 5.0)
-    sig.samples = cut_to_hop_length(sig.samples, eiface.hop_length)
-    sig.write("scratch/out_embedded.wav")
-    wav = sig.samples.to(eiface.codec.device)
+    # sig.samples = trim_to_s(sig.samples, sig.sample_rate, 5.0)
+    sig.wav = cut_to_hop_length(sig.wav, eiface.hop_length)
+    sn.write(sig, "scratch/out_embedded.wav")
+    wav = sig.wav.to(eiface.codec.device)
 
     z = eiface.encode(wav)
-    mask = eiface.build_mask(7, 3, 0.3)
+    mask = eiface.build_mask(z, 7, 3, 0.3)
     zv = eiface.vamp(z, mask, 1.0, 0.15, 42, 1)
 
-    recons = eiface.decode(z)
-    out = eiface.decode(zv)
+    recons = sn.Signal(eiface.decode(z), eiface.sample_rate)
+    out = sn.Signal(eiface.decode(zv), eiface.sample_rate)
 
-    write(recons, eiface.sample_rate, "scratch/recons_embedded.wav")
-    write(out, eiface.sample_rate, "scratch/out_embedded_vamp.wav")
+    write(recons, "scratch/recons_embedded.wav")
+    write(out, "scratch/out_embedded_vamp.wav")
+
+    # https://github.com/Lightning-AI/pytorch-lightning/issues/17517#issuecomment-1528651189
+    eiface.vn._trainer = object()
 
     print(f"exporting embedded interface")
     traced = torch.jit.trace_module(
         mod=eiface, 
         inputs={
             "encode": (wav), 
-            "build_mask": (tt(7), tt(3), tt(0.3)),
+            "build_mask": (z, tt(7), tt(3), tt(0.3)),
             "vamp": (z, mask, tt(1.0), tt(0.15), tt(42), tt(1)),
             "decode": (zv),
         }
@@ -192,19 +147,20 @@ if __name__ == "__main__":
 
     # redo the test with the traced model
     z = traced.encode(wav)
-    mask = traced.build_mask(tt(7), tt(3), tt(0.3))
+    mask = traced.build_mask(z, tt(0), tt(3), tt(0.3))
     zv = traced.vamp(z, mask, tt(1.0), tt(0.15), tt(42), tt(1))
-    out = traced.decode(zv)
 
-    write(recons, eiface.sample_rate, "scratch/recons_embedded_traced.wav")
-    write(out, eiface.sample_rate, "scratch/out_embedded_vamp_traced.wav")
+    recons = sn.Signal(traced.decode(z), eiface.sample_rate)
+    out = sn.Signal(traced.decode(zv), eiface.sample_rate)
+    write(recons, "scratch/recons_embedded_traced.wav")
+    write(out, "scratch/out_embedded_vamp_traced.wav")
 
     torch.jit.save(traced, "models/vampnet-embedded.pt")
 
     print(f"expected z shape is {z.shape}")
     print(f"expected mask shape is {mask.shape}")
     print(f"expected zv shape is {zv.shape}")
-    print(f"expected wav shape is {sig.samples.shape}")
+    print(f"expected wav shape is {sig.wav.shape}")
 
 
         

@@ -57,7 +57,6 @@ def get_checkpoint_path(resume_ckpt: str = None):
     return resume_ckpt
 
 
-@argbind.bind()
 def build_datasets(
     sample_rate: int,
     db_path: str = None, 
@@ -163,7 +162,7 @@ class AudioSampleLoggingCallback(Callback):
 
             mask = pmask.random(z, r)
             mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
-            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+            z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
             z_hat = module.model(z_mask)
             # argmax sample
@@ -210,7 +209,7 @@ class AudioSampleLoggingCallback(Callback):
             z = z[:, : module.model.n_codebooks, :]
 
             mask = pmask.full_mask(z)
-            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+            z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
             z_hat = module.model.generate(z_mask)
 
@@ -236,7 +235,7 @@ class AudioSampleLoggingCallback(Callback):
             z = z[:, : module.model.n_codebooks, :]
 
             mask = pmask.periodic_mask(z, period, 1, random_roll=True)
-            z_mask, mask = pmask.apply_mask(z, mask, module.model.mask_token)
+            z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
             z_hat = module.model.generate(z_mask)
 
@@ -260,11 +259,9 @@ class AudioSampleLoggingCallback(Callback):
 
 class VampNetTrainer(L.LightningModule):
 
-    def __init__(self, 
-            args, 
-        ):
+    def __init__(self, codec_ckpt: str):
         super().__init__()
-        self.codec = DAC.load(args["codec_ckpt"], map_location="cpu")
+        self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec.eval()
         self.codec = torch.compile(self.codec)
 
@@ -305,7 +302,7 @@ class VampNetTrainer(L.LightningModule):
 
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        z_mask = pmask.apply_mask(z, mask, vn.mask_token)
         
         # TODOO: use embedding instead
         # z_mask_latent = vn.embedding.from_codes(z_mask)
@@ -350,7 +347,7 @@ class VampNetTrainer(L.LightningModule):
 
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-        z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+        z_mask = pmask.apply_mask(z, mask, vn.mask_token)
 
         # TODOO: use embedding instead
         # z_mask_latent = vn.embedding.from_codes(z_mask)
@@ -400,9 +397,11 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
     return train_dataloader, val_dataloader
 
 if __name__ == "__main__":
+    build_datasets = argbind.bind(build_datasets)
+
     args = argbind.parse_args()
     with argbind.scope(args):
-        model = VampNetTrainer(args)
+        model = VampNetTrainer(args["codec_ckpt"])
 
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)

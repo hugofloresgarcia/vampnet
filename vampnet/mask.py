@@ -35,7 +35,7 @@ def apply_mask(
     fill_x = torch.full_like(x, mask_token)
     x = x * (1 - mask) + fill_x * mask
 
-    return x, mask
+    return x
 
 def random(
     x: torch.Tensor,

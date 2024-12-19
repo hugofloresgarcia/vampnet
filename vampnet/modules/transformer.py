@@ -10,6 +10,9 @@ from einops.layers.torch import Rearrange
 import lightning as L
 from einops import rearrange
 
+# from x_transformers import ContinuousTransformerWrapper
+# from x_transformers import Encoder
+
 from .activations import get_activation
 from .layers import CodebookEmbedding
 from .layers import FiLM
@@ -459,14 +462,14 @@ class VampNet(L.LightningModule):
     def __init__(
         self,
         n_heads: int = 20,
-        n_layers: int = 16,
+        n_layers: int = 20,
         r_cond_dim: int = 0,
         n_codebooks: int = 4,
         n_conditioning_codebooks: int = 0,
         latent_dim: int = 8,
-        embedding_dim: int = 1280,
+        embedding_dim: int = 1000,
         vocab_size: int = 1024,
-        flash_attn: bool = True,
+        flash_attn: bool = False,
         noise_mode: str = "mask",
         dropout: float = 0.0
     ):
@@ -503,6 +506,22 @@ class VampNet(L.LightningModule):
             is_decoder=False,
             dropout=dropout,
         )
+
+        # self.lm = ContinuousTransformerWrapper(
+        #     max_seq_len=max_seq_len,
+        #     attn_layers=Encoder(
+        #         dim=self.embedding_dim,
+        #         depth=self.n_layers,
+        #         heads=self.n_heads,
+        #         attn_flash=True,
+        #         ff_glu=True, 
+        #         use_rmsnorm=True, 
+        #         rotary_pos_emb=True
+        #     ),
+        #     emb_dropout=dropout,
+        #     num_memory_tokens=num_reg_tokens,
+        # )
+
 
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks

@@ -194,6 +194,7 @@ class DAC(BaseModel, CodecMixin):
 
         self.delay = self.get_delay()
 
+    @torch.jit.script_if_tracing
     def preprocess(self, audio_data, sample_rate):
         if sample_rate is None:
             sample_rate = self.sample_rate

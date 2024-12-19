@@ -217,8 +217,7 @@ class ResidualVectorQuantize(nn.Module):
 
         return z_q, codes, latents, commitment_loss, codebook_loss
 
-    @torch.jit.script_if_tracing
-    def from_codes(self, codes: torch.Tensor):
+    def from_codes(self: "ResidualVectorQuantize", codes: torch.Tensor):
         """Given the quantized codes, reconstruct the continuous representation
         Parameters
         ----------
