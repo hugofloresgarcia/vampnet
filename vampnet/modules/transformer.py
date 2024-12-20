@@ -82,6 +82,7 @@ class VampNet(L.LightningModule):
                 use_rmsnorm=True, 
                 rotary_pos_emb=True
             ),
+            use_abs_pos_emb=False,
             emb_dropout=dropout,
         )
 
