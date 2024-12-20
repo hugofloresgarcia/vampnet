@@ -28,7 +28,7 @@ VampNet.flash_attn: false
 VampNet.dropout: 0.0
 
 # Data
-batch_size: 32
+batch_size: 16
 num_workers: 10
 Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
 

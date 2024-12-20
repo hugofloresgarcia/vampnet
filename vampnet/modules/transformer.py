@@ -491,7 +491,7 @@ class VampNet(L.LightningModule):
         # add an embedding layer per codebook
         assert embedding_dim % n_codebooks == 0, f"embedding_dim must be divisible by n_codebooks, but got {embedding_dim} and {n_codebooks}"
         self.embedding = nn.Embedding(
-            ((vocab_size) * n_codebooks) + 1, embedding_dim // n_codebooks
+            ((vocab_size) * n_codebooks) + 1, embedding_dim 
         )
         self.mask_token = (vocab_size * n_codebooks)
 
@@ -507,28 +507,13 @@ class VampNet(L.LightningModule):
             dropout=dropout,
         )
 
-        # self.lm = ContinuousTransformerWrapper(
-        #     max_seq_len=max_seq_len,
-        #     attn_layers=Encoder(
-        #         dim=self.embedding_dim,
-        #         depth=self.n_layers,
-        #         heads=self.n_heads,
-        #         attn_flash=True,
-        #         ff_glu=True, 
-        #         use_rmsnorm=True, 
-        #         rotary_pos_emb=True
-        #     ),
-        #     emb_dropout=dropout,
-        #     num_memory_tokens=num_reg_tokens,
-        # )
-
 
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks
         self.classifier = SequentialWithFiLM(
             WNConv1d(
                 embedding_dim,
-                vocab_size * self.n_predict_codebooks,
+                vocab_size,
                 kernel_size=1,
                 padding="same",
                 # groups=self.n_predict_codebooks,
@@ -558,7 +543,8 @@ class VampNet(L.LightningModule):
         x = self.embedding(x)
         # concat the embds along the codebook dimension
 
-        x = rearrange(x, "b c n d -> b n (c d)")
+        nb, nc, nt, nd = x.shape
+        x = rearrange(x, "b c n d -> b (n c) d")
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :, :1].squeeze(2)
 
         out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
@@ -570,32 +556,12 @@ class VampNet(L.LightningModule):
         out = self.classifier(out, None) # no cond here!
 
         b, pc, t = out.shape
-        out = rearrange(out, "b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+        # out = rearrange(out, "b p (t c) -> b p (t c)", c=self.n_predict_codebooks)
 
         if return_activations:
             return out, activations
         else:
             return out
-    
-    def r_embed(self, r, max_positions=10000):
-        if self.r_cond_dim > 0:
-            dtype = r.dtype
-
-            r = _gamma(r) * max_positions
-            half_dim = self.r_cond_dim // 2
-
-            emb = math.log(max_positions) / (half_dim - 1)
-            emb = torch.arange(half_dim, device=r.device).float().mul(-emb).exp()
-
-            emb = r[:, None] * emb[None, :]
-            emb = torch.cat([emb.sin(), emb.cos()], dim=1)
-
-            if self.r_cond_dim % 2 == 1:  # zero pad
-                emb = nn.functional.pad(emb, (0, 1), mode="constant")
-
-            return emb.to(dtype)
-        else:
-            return r
 
     @torch.inference_mode()
     def generate(
