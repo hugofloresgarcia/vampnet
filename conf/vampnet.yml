@@ -29,8 +29,14 @@ VampNet.dropout: 0.0
 batch_size: 64
 num_workers: 10
 Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
+Dataset.use_chunk_table: true
 
 # build_datasets.db_path: /media/pancho/sm.db
 build_datasets.db_path: /home/hugo/soup/scratch/data-fast/sm.db
-build_datasets.query: "SELECT * from audio_file JOIN dataset WHERE dataset.name != 'vctk-wav48-silence-trimmed AND audio_file.duration > 1.5' "
-# build_datasets.query: "SELECT * from audio_file JOIN dataset "
+build_datasets.query: "
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+"
+

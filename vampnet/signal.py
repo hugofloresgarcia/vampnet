@@ -11,6 +11,7 @@ from torch import nn
 import numpy as np
 from torch import Tensor
 import torchaudio.transforms as T
+import torch.nn.functional as F
 
 import soundfile as sf
 from flatten_dict import flatten
