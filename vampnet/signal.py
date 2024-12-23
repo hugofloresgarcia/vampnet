@@ -97,6 +97,9 @@ def batch(
 
 
 # ~ transform ~
+def pitch_shift(sig: Signal, semitones: int) -> Signal:
+    tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
+
 def to_mono(sig: Signal) -> Signal:
     """Converts a stereo signal to mono by averaging the channels."""
     wav = sig.wav.mean(dim=-2, keepdim=True)

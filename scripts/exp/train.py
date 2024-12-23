@@ -263,13 +263,13 @@ class VampNetTrainer(L.LightningModule):
 
     def __init__(self, codec_ckpt: str):
         super().__init__()
+        self.save_hyperparameters()
+        
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec.eval()
         self.codec = torch.compile(self.codec)
 
         self.model = VampNet()
-        # TODOO: remove, use embedding instead
-        # self.model.embedding.quantizer = self.codec.quantizer
         # self.model = torch.compile(self.model)
 
         self.criterion = CrossEntropyLoss()

@@ -3,6 +3,7 @@ from . import modules
 from pathlib import Path
 from . import scheduler
 from .modules.transformer import VampNet
+from . import interface
 
 __version__ = "0.0.1"
 
