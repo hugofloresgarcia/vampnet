@@ -3,12 +3,12 @@ import vampnet
 import vampnet.signal as sn
 from vampnet.interface import EmbeddedInterface
 import audiotools as at
+from scripts.exp.train import VampNetTrainer
 
 codec = vampnet.dac.DAC.load("/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth")
 eiface = EmbeddedInterface(
     codec=codec,
     coarse=vampnet.VampNet(),
-    chunk_size_s=10
 )
 
 # load an audio file

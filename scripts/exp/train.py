@@ -14,6 +14,7 @@ import loralib as lora
 import torch._dynamo
 torch._dynamo.config.verbose=True
 import lightning as L
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
 import vampnet
 from vampnet.modules.transformer import VampNet
@@ -60,9 +61,10 @@ def get_checkpoint_path(resume_ckpt: str = None):
 def build_datasets(
     sample_rate: int,
     db_path: str = None, 
-    query: str = "SELECT * from audio_file", 
+    query: str = None, 
 ):    
     assert db_path is not None, "db_path is required"
+    assert query is not None, "query is required"
     train_tfm = build_transform()    
     val_tfm = build_transform()   
 
@@ -365,7 +367,7 @@ class VampNetTrainer(L.LightningModule):
         output = {}
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-        output["loss"] = self.criterion(z_hat, t_masked)
+        output["loss/val"] = self.criterion(z_hat, t_masked)
 
         _metrics(
             r=r,
@@ -377,7 +379,7 @@ class VampNetTrainer(L.LightningModule):
 
         self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True)
         
-        return output["loss"]
+        return output
 
 @argbind.bind(without_prefix=True)
 def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
@@ -396,6 +398,18 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
 
     return train_dataloader, val_dataloader
 
+def print_model_summary(model):
+    total_params = 0
+    print(f"{'Layer':<30} {'Parameters':>10}")
+    print("=" * 40)
+    for name, module in model.named_modules():
+        if len(list(module.children())) == 0:  # Only leaf modules
+            num_params = sum(p.numel() for p in module.parameters())
+            total_params += num_params
+            print(f"{name:<30} {num_params:>10}")
+    print("=" * 40)
+    print(f"Total parameters: {total_params}")
+
 if __name__ == "__main__":
     build_datasets = argbind.bind(build_datasets)
 
@@ -403,11 +417,21 @@ if __name__ == "__main__":
     with argbind.scope(args):
         model = VampNetTrainer(args["codec_ckpt"])
 
+        print_model_summary(model)
+
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
 
         callbacks = []
         callbacks.append(AudioSampleLoggingCallback(val_data))
+        callbacks.append(LearningRateMonitor(logging_interval="step"))
+        callbacks.append(ModelCheckpoint(
+            monitor="loss/val",
+            mode="min",
+            save_top_k=3,
+            save_last=True,
+            filename="vampnet-{epoch:02d}-{step}",
+        ))
 
         # todo setup datasets and dataloaders
         trainer = L.Trainer(
@@ -418,7 +442,7 @@ if __name__ == "__main__":
             gradient_clip_val=5.0,
             val_check_interval=1000,
             callbacks=callbacks,
-            # precision="bf16"
+            precision="bf16"
         )
 
         trainer.fit(

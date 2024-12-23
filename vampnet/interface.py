@@ -17,20 +17,24 @@ from .signal import cut_to_hop_length, write, trim_to_s
 from vampnet.dac.model.dac import DAC
 
 
-# an interface suitable for tracing 
-class EmbeddedInterface(nn.Module):
+# an interface suitable for interfacing with unloop
+class Interface(nn.Module):
 
     def __init__(self,
         codec: DAC, 
-        vn: VampNet, 
-        chunk_size_s: int = 10,
+        vn: VampNet,
     ):
         super().__init__()
         self.codec = codec
         self.vn = vn
 
-        self.register_buffer("sample_rate", tt(self.codec.sample_rate))
-        self.register_buffer("hop_length", tt(self.codec.hop_length))
+        self.codec.eval()
+        self.vn.eval()
+
+        # compile
+        self.sample_rate = self.codec.sample_rate
+        self.hop_length = self.codec.hop_length
+    
 
     @torch.inference_mode()
     def encode(self, wav):
@@ -58,11 +62,7 @@ class EmbeddedInterface(nn.Module):
     @torch.inference_mode()
     def vamp(self, 
         z: Tensor, 
-        mask: Tensor,
-        temperature: Tensor = 1.0,
-        typical_mass: Tensor = 0.0,
-        typical_min_tokens: Tensor = 0,
-        seed: Tensor = 42,
+        **kwargs
         ):
 
         # chop off, leave only the top  codebooks
@@ -74,10 +74,7 @@ class EmbeddedInterface(nn.Module):
         with torch.autocast(z.device.type,  dtype=torch.bfloat16):
             zv = self.vn.generate(
                 codes=z,
-                temperature=temperature,
-                typical_mass=typical_mass,
-                typical_min_tokens=typical_min_tokens,
-                seed=seed,
+                **kwargs
             )
 
         return zv

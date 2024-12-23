@@ -1,13 +1,13 @@
 import random
 import vampnet
 import vampnet.signal as sn
-from vampnet.interface import EmbeddedInterface
+from vampnet.interface import Interface
 import audiotools as at
 import torch
 
 from scripts.exp.train import VampNetTrainer
 
-ckpt = "/home/hugo/soup/runs/debug/lightning_logs/version_23/checkpoints/epoch=16-step=119232.ckpt"
+ckpt = "/home/hugo/soup/runs/debug/lightning_logs/version_49/checkpoints/last.ckpt"
 codec_ckpt = "/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 
 bundle = VampNetTrainer.load_from_checkpoint(ckpt, codec_ckpt=codec_ckpt) 
@@ -15,27 +15,31 @@ codec = bundle.codec
 vn = bundle.model
 vn.eval()
 codec.eval()
-eiface = EmbeddedInterface(
+
+eiface = Interface(
     codec=codec,
-    coarse=vn,
+    vn=vn,
 )
 
 # load the dataset for playing w/
-from scripts.exp.train import build_datasets
+# from scripts.exp.train import build_datasets
 
-train_data, val_data = build_datasets(
-    sample_rate=codec.sample_rate, 
-    db_path="scratch/data-fast/sm.db", 
-    query="SELECT * FROM audio_file JOIN dataset where dataset.name = 'vctk'"
-)
+# train_data, val_data = build_datasets(
+#     sample_rate=codec.sample_rate, 
+#     db_path="scratch/data-fast/sm.db", 
+#     query="SELECT * FROM audio_file JOIN dataset where dataset.name = 'vctk'"
+# )
 
 
 # load an audio file
-# sig = sn.read_from_file("assets/example.wav")
-sig = val_data[0]["sig"]
+sig = sn.read_from_file("assets/example.wav")
+# sig = val_data[0]["sig"]
+
+# sig.wav = torch.cat([sig.wav, sig.wav, sig.wav], dim=-1)
 
 # cut sig to hop length
 sig.wav = sn.cut_to_hop_length(sig.wav, eiface.codec.hop_length)
+sig = sn.normalize(sig, -24)
 
 # move to gpu
 sig = sig.to("cuda")
@@ -45,7 +49,7 @@ codes = eiface.encode(sig.wav)
 print(codes.shape)
 
 # make a mask
-mask = eiface.build_mask(codes)
+mask = eiface.build_mask(codes, periodic_prompt=7, upper_codebook_mask=1)
 
 # vamp on the codes
 # chop off, leave only the top  codebooks

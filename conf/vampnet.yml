@@ -10,8 +10,6 @@ val_freq: 1000
 
 
 # Optimization
-amp: false
-
 CrossEntropyLoss.label_smoothing: 0.0
 
 AdamW.lr: 0.001
@@ -22,15 +20,17 @@ VampNet.n_conditioning_codebooks: 0
 VampNet.r_cond_dim: 0
 VampNet.noise_mode: mask
 VampNet.embedding_dim: 1000
-VampNet.n_layers: 10
-VampNet.n_heads: 10
-VampNet.flash_attn: false
+VampNet.n_layers: 8
+VampNet.n_heads: 8
+VampNet.flash_attn: true
 VampNet.dropout: 0.0
 
 # Data
-batch_size: 32
+batch_size: 64
 num_workers: 10
 Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
 
+# build_datasets.db_path: /media/pancho/sm.db
 build_datasets.db_path: /home/hugo/soup/scratch/data-fast/sm.db
-build_datasets.query: "SELECT * from audio_file JOIN dataset WHERE dataset.name = 'vctk' "
+build_datasets.query: "SELECT * from audio_file JOIN dataset WHERE dataset.name != 'vctk-wav48-silence-trimmed AND audio_file.duration > 1.5' "
+# build_datasets.query: "SELECT * from audio_file JOIN dataset "
