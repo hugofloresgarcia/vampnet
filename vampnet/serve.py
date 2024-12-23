@@ -121,6 +121,13 @@ class VampNetDigitalInstrumentSystem:
             # sig = sn.transpose(sig, self.transpose)
 
             # run the vamp
+            if self.is_vamping: 
+                self._interrupt = True
+                while self.is_vamping:
+                    print(f"Waiting for the current process to finish")
+                    time.sleep(0.05)
+                print(f"Current process has finished, starting new process")
+            
             sig = self.vamp(sig)
 
             # write the audio
@@ -182,6 +189,8 @@ class VampNetDigitalInstrumentSystem:
             # check for an interrupt 
             if self._interrupt:
                 print(f'INTERRUPTED at step {i}')
+                self._interrupt = False
+                self.is_vamping = False
                 return
 
             # build the mask
