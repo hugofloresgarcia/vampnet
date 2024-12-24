@@ -19,8 +19,8 @@ VampNet.n_codebooks: 4
 VampNet.n_conditioning_codebooks: 0
 VampNet.r_cond_dim: 0
 VampNet.noise_mode: mask
-VampNet.embedding_dim: 1000
-VampNet.n_layers: 6
+VampNet.embedding_dim: 768
+VampNet.n_layers: 8
 VampNet.n_heads: 8
 VampNet.flash_attn: true
 VampNet.dropout: 0.0
