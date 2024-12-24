@@ -54,7 +54,7 @@ class Interface(nn.Module):
             upper_codebook_mask: Tensor = 3, 
             dropout_amt: Tensor = 0.0,
         ):
-        mask = linear_random(z, tt(1.0))
+        mask = linear_random(z, 1.0)
         pmask = periodic_mask(z, periodic_prompt, 1, random_roll=True)
         mask = mask_and(mask, pmask)
 
