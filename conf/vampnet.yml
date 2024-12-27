@@ -19,16 +19,17 @@ VampNet.n_codebooks: 4
 VampNet.n_conditioning_codebooks: 0
 VampNet.r_cond_dim: 0
 VampNet.noise_mode: mask
-VampNet.embedding_dim: 1000
-VampNet.n_layers: 6
+VampNet.embedding_dim: 768
+VampNet.n_layers: 8
 VampNet.n_heads: 8
 VampNet.flash_attn: true
 VampNet.dropout: 0.0
 
 # Data
-batch_size: 64
+batch_size: 32
 num_workers: 10
-Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
+# Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
+Dataset.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
 Dataset.use_chunk_table: true
 
 # build_datasets.db_path: /media/pancho/sm.db

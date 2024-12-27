@@ -73,7 +73,7 @@ def build_datasets(
     print(f"loading data from {db_path}")
 
     df = pd.read_sql(query, conn)
-    tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=42)
+    tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=1)
 
     train_data = Dataset(
         tdf, sample_rate=sample_rate, transform=train_tfm
@@ -273,7 +273,7 @@ class VampNetTrainer(L.LightningModule):
         # self.model = torch.compile(self.model)
 
         self.criterion = CrossEntropyLoss()
-        self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=42)
+        self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
 
         assert (
             self.model.vocab_size == self.codec.quantizer.quantizers[0].codebook_size
@@ -330,7 +330,7 @@ class VampNetTrainer(L.LightningModule):
             output=output,
         )
 
-        self.log("loss/train", output["loss"], on_step=True, prog_bar=True)
+        self.log("loss/train", output["loss"], on_step=True, prog_bar=True, sync_dist=True)
 
         return output["loss"]
 
@@ -377,7 +377,7 @@ class VampNetTrainer(L.LightningModule):
             output=output,
         )
 
-        self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True)
+        self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         
         return output
 
@@ -432,17 +432,24 @@ if __name__ == "__main__":
             save_last=True,
             filename="vampnet-{epoch:02d}-{step}",
         ))
+        
+        # figure out how many gpus we have
+        import os
+        cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "")
+        n_gpus = len(cuda_visible_devices.split(","))
+        print(f"using {n_gpus} gpus")
 
         # todo setup datasets and dataloaders
         trainer = L.Trainer(
-            devices=1,
+            devices=n_gpus,
             default_root_dir="runs/debug",
             max_epochs=-1,
             limit_val_batches=20, 
             gradient_clip_val=5.0,
             val_check_interval=1000,
             callbacks=callbacks,
-            precision="bf16"
+            precision="bf16-mixed", 
+            strategy="ddp_find_unused_parameters_true"
         )
 
         trainer.fit(

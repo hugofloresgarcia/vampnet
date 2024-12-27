@@ -3,3 +3,5 @@ argbind
 numpy
 gradio
 einops
+lightning
+torchaudio
