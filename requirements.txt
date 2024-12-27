@@ -1,4 +1,4 @@
-torch==2.1.0
+torch
 argbind>=0.3.2
 numpy==1.23
 loralib
