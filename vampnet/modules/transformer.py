@@ -44,7 +44,7 @@ class VampNet(L.LightningModule):
         n_codebooks: int = 4,
         n_conditioning_codebooks: int = 0,
         latent_dim: int = 8,
-        embedding_dim: int = 1000,
+        embedding_dim: int = 768,
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",

@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-from audiotools import AudioSignal
+import vampnet.signal as sn
 
 from .util import scalar_to_batch_tensor
 
@@ -26,11 +26,12 @@ def apply_mask(
         mask: torch.Tensor, 
         mask_token: int
     ):
-    assert mask.ndim == 3, "mask must be (batch, n_codebooks, seq), but got {mask.ndim}"
+    assert mask.ndim == 3, f"mask must be (batch, n_codebooks, seq), but got {mask.ndim}"
     assert mask.shape == x.shape, f"mask must be same shape as x, but got {mask.shape} and {x.shape}" 
-    assert mask.dtype == torch.int, "mask must be int dtype, but got {mask.dtype}"
+    assert mask.dtype == torch.int, f"mask must be int dtype, but got {mask.dtype}"
     assert ~torch.any(mask > 1), "mask must be binary"
     assert ~torch.any(mask < 0), "mask must be binary"
+    mask = mask.int()
 
     fill_x = torch.full_like(x, mask_token)
     x = x * (1 - mask) + fill_x * mask
@@ -202,16 +203,16 @@ def time_stretch_mask(
     return mask
 
 def onset_mask(
-    sig: AudioSignal, 
+    sig: sn.Signal, 
     z: torch.Tensor,
-    interface,
+    hop_length: int,
     width: int = 1, 
 ):
     import librosa
 
     onset_frame_idxs = librosa.onset.onset_detect(
-        y=sig.samples[0][0].detach().cpu().numpy(), sr=sig.sample_rate, 
-        hop_length=interface.codec.hop_length,
+        y=sig.wav[0][0].detach().cpu().numpy(), sr=sig.sr, 
+        hop_length=hop_length,
         backtrack=True,
     )
     if len(onset_frame_idxs) == 0:
@@ -219,7 +220,7 @@ def onset_mask(
     print("onset_frame_idxs", onset_frame_idxs)
     print("mask shape", z.shape)
 
-    mask = torch.ones_like(z)
+    mask = torch.ones_like(z).int()
     for idx in onset_frame_idxs:
         mask[:, :, idx-width:idx+width] = 0
 

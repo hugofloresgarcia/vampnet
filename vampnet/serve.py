@@ -24,18 +24,6 @@ class Param:
     value: any
     _t: type
 
-
-
-
-def set_filter(address: str, *args: list[any]) -> None:
-    # We expect two float arguments
-    if not len(args) == 2 or type(args[0]) is not float or type(args[1]) is not float:
-        return
-
-    # Check that address starts with filter
-    if not address[:-1] == "/filter":  # Cut off the last character
-        return
-
 # a timer that allows recording things with timer.tick(name="name")
 class Timer:
     
@@ -111,7 +99,7 @@ class VampNetDigitalInstrumentSystem:
                 self.corrupt_type = args[0]
                 assert self.corrupt_type in self.CORRUPT_TYPES, f"corrupt type must be one of {self.CORRUPT_TYPES}"
             elif address == "/corrupt_timbre":
-                self.corrupt_timbre = args[0]
+                self.corrupt_timbre = int(args[0])
             elif address == "/seed":
                 self.seed = args[0]
             else:
@@ -144,11 +132,13 @@ class VampNetDigitalInstrumentSystem:
             if self.is_vamping: 
                 self._interrupt = True
                 while self.is_vamping:
-                    print(f"Waiting for the current process to finish")
+                    # print(f"Waiting for the current process to finish")
                     time.sleep(0.05)
                 print(f"Current process has finished, starting new process")
             
             sig = self.vamp(sig)
+            if sig is None: # we were interrupted
+                return
 
             # write the audio
             outpath = audio_path.with_suffix(".vamped.wav")
@@ -165,14 +155,25 @@ class VampNetDigitalInstrumentSystem:
 
     def calculate_mask(self, z: torch.Tensor):
         with self._param_lock:
+            def float_index(alist, value):
+                return alist[int(value * (len(alist) - 1))]
             # compute the periodic prompt, dropout amt
             assert not self.corrupt_type == "onsets", "onsets not supported yet"
             # periodic_prompt = self.corrupt_time_amt if self.corrupt_type == "periodic" else 1
             if self.corrupt_type == "periodic":
-                periods = [3, 5, 7, 11, 13, 17, 21, 0]
+                periods = [1, 3, 5, 7, 11, 13, 17, 21, 0]
                 # map corrupt_time_amt to a periodic prompt
-                periodic_prompt = periods[int(self.corrupt_time_amt * (len(periods) - 1))]
+                periodic_prompt = float_index(periods, self.corrupt_time_amt)
                 print(f"periodic prompt: {periodic_prompt}")
+            elif self.corrupt_type == "onsets":
+                raise NotImplementedError()
+                periodic_prompt = [1, 2, 3]
+                onset_masks = [1, 2, 3, 5, 7, 11, 13]
+                onset_masks.reverse()
+                onset_masks = [(o, p) for o in onset_masks for p in periodic_prompt]
+                onset_mask = float_index(onset_masks, self.corrupt_time_amt)
+                print(f"onset mask: {onset_mask}")
+
             dropout_amt = self.corrupt_time_amt if self.corrupt_type == "random" else 0.0
             upper_codebook_mask = self.corrupt_timbre
 
@@ -182,6 +183,10 @@ class VampNetDigitalInstrumentSystem:
             upper_codebook_mask=upper_codebook_mask,
             dropout_amt=dropout_amt, 
         )
+
+        # save the mask as a txt file (numpy)
+        import numpy as np
+        np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
 
         return mask
 
@@ -202,6 +207,15 @@ class VampNetDigitalInstrumentSystem:
         codes = self.interface.encode(sig.wav)
         timer.tock("encode")
 
+        timer.tick("sample")
+        # build the mask
+        # MUST APPLY MASK BEFORE INITIALIZING STATE
+        mask = self.calculate_mask(codes)
+        codes = apply_mask(
+            codes, mask, 
+            self.interface.vn.mask_token
+        )
+
         state = self.interface.vn.initialize_state(
             codes, 
             self.SAMPLING_STEPS, 
@@ -214,8 +228,7 @@ class VampNetDigitalInstrumentSystem:
         else:
             torch.manual_seed(int(time.time()))
 
-        timer.tick("sample")
-        for _ in tqdm(range(self.SAMPLING_STEPS)):
+        for i in tqdm(range(self.SAMPLING_STEPS)):
 
             # check for an interrupt 
             if self._interrupt:
@@ -224,14 +237,7 @@ class VampNetDigitalInstrumentSystem:
                 self.is_vamping = False
                 return
 
-            # build the mask
-            mask = self.calculate_mask(state.z_masked)
-
             # apply mask
-            state.z_masked = apply_mask(
-                state.z_masked, mask, 
-                self.interface.vn.mask_token
-            )
 
             state = self.interface.vn.generate_step(
                 state,
@@ -270,12 +276,12 @@ def start_server():
     dispatcher.map("/seed", system.set_parameter)
     dispatcher.set_default_handler(lambda a, *r: print(a, r))
 
-    server = BlockingOSCUDPServer((ip, r_port), dispatcher)
+    server = ThreadingOSCUDPServer((ip, r_port), dispatcher)
     print(f"Serving on {server.server_address}")
     server.serve_forever()
 
 interface = vampnet.interface.load_from_trainer_ckpt(
-    ckpt_path="ckpt-vctk.ckpt", 
+    ckpt_path="mtg-ok.ckpt", 
     codec_ckpt="/Users/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 )
 
