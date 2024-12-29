@@ -1,0 +1,190 @@
+#N canvas 55 51 683 493 10;
+#X declare -path bin;
+#X declare -path bin64;
+#X msg 596 -73 \; pd dsp 1;
+#X msg 595 -33 \; pd dsp 0;
+#X obj 86 320 hsl 128 15 0 1 0 1 empty empty output-level 20 8 0 10
+-262144 -260097 -1 6100 0;
+#X floatatom 100 349 5 0 0 0 - - -;
+#X obj 64 175 ipoke~ \$0-ipokebuf;
+#X obj 76 150 r \$0-draw;
+#X obj 596 -102 loadbang;
+#X obj 47 -86 hsl 300 20 -3 3 0 1 empty empty writing-and-reading-speed
+100 10 0 10 -262144 -260097 -1 21000 0;
+#X obj 44 15 tabread4~ \$0-ipokebuf;
+#X obj 64 71 hip~ 5;
+#X floatatom 57 -53 5 0 0 0 - - -;
+#X obj 260 9 hsl 395 140 0 88199 0 0 empty \$0-slider empty -2 -8 0
+10 -262144 -260097 -1 16300 1;
+#X obj 259 347 s \$0-ipokebuf;
+#X msg 259 318 const 0;
+#X text 129 243 direct out;
+#X floatatom 110 124 5 0 0 0 - - -;
+#X obj 100 100 hsl 128 15 0 1 0 1 empty empty feedback 5 8 0 10 -262144
+-260097 -1 8800 0;
+#N canvas 1 51 420 192 searchpatch 0;
+#X obj 36 95 declare -path bin;
+#X obj 36 129 declare -path bin64;
+#X text 34 31 Find path to [ipoke~] executables. If you want to use
+[ipoke~] in your own patches \, copy or move the executable for your
+platform in Pd's 'extra' directory.;
+#X restore 567 344 pd searchpatch;
+#N canvas 0 22 180 176 dac~ 0;
+#X obj 18 34 inlet~;
+#X obj 18 102 dac~;
+#X obj 18 70 *~ 0;
+#X obj 78 34 inlet;
+#X connect 0 0 2 0;
+#X connect 2 0 1 0;
+#X connect 2 0 1 1;
+#X connect 3 0 2 1;
+#X restore 44 349 pd dac~;
+#N canvas 591 202 454 492 soundfile 0;
+#X obj 240 86 openpanel;
+#N canvas 0 22 450 300 (subpatch) 0;
+#X array \$0-soundfile 108000 float 2;
+#X coords 0 1 108000 -1 400 100 1;
+#X restore 28 -20 graph;
+#X msg 240 158 read -resize \$1 \$2-soundfile;
+#X obj 312 116 f \$0;
+#X obj 312 90 loadbang;
+#X obj 240 184 soundfiler;
+#X obj 103 377 tabplay~ \$0-soundfile;
+#X obj 226 405 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144
+-1 -1;
+#X text 244 406 loop;
+#X obj 103 349 spigot;
+#X obj 267 235 != 0;
+#X obj 240 208 t b f;
+#X obj 280 257 tgl 15 0 empty empty empty 17 7 0 10 -262144 -1 -1 0
+1;
+#X obj 103 409 s~ \$0-soundfile;
+#X obj 240 133 pack s f;
+#X obj 103 252 tgl 25 0 empty empty empty 17 7 0 10 -262144 -260097
+-1 0 1;
+#X obj 103 290 sel 0 1;
+#X msg 103 319 stop;
+#X obj 103 223 bng 25 250 50 0 empty empty empty 17 7 0 10 -262144
+-260097 -1;
+#X text 131 225 open soundfile;
+#X text 131 255 play / stop;
+#X msg 240 235 1;
+#X connect 0 0 14 0;
+#X connect 2 0 5 0;
+#X connect 3 0 14 1;
+#X connect 4 0 3 0;
+#X connect 5 0 11 0;
+#X connect 6 0 13 0;
+#X connect 6 1 7 0;
+#X connect 7 0 9 0;
+#X connect 9 0 6 0;
+#X connect 10 0 9 1;
+#X connect 10 0 12 0;
+#X connect 11 0 21 0;
+#X connect 11 1 10 0;
+#X connect 14 0 2 0;
+#X connect 15 0 16 0;
+#X connect 16 0 17 0;
+#X connect 16 1 9 0;
+#X connect 17 0 9 0;
+#X connect 18 0 0 0;
+#X connect 21 0 15 0;
+#X coords 0 -1 1 1 120 60 2 100 220;
+#X restore 370 -85 pd soundfile;
+#X obj 63 44 r~ \$0-soundfile;
+#X obj 65 210 r~ \$0-soundfile;
+#N canvas 572 415 267 203 pointer 0;
+#X obj 34 -32 inlet;
+#X obj 34 23 phasor~;
+#N canvas 947 92 212 197 Hz 0;
+#X obj 32 23 inlet;
+#X obj 97 50 samplerate~;
+#X floatatom 97 109 5 0 0 0 - - -;
+#X obj 97 24 loadbang;
+#X obj 32 93 *;
+#X obj 32 151 outlet;
+#X obj 97 76 / 88200;
+#X obj 100 151 s \$0-Hz;
+#X obj 156 25 bng 15 250 50 0 empty empty empty 17 7 0 10 -262144 -1
+-1;
+#X connect 0 0 4 0;
+#X connect 1 0 6 0;
+#X connect 3 0 1 0;
+#X connect 4 0 5 0;
+#X connect 4 0 7 0;
+#X connect 6 0 2 0;
+#X connect 6 0 4 1;
+#X connect 8 0 1 0;
+#X restore 34 -4 pd Hz;
+#X obj 34 49 *~ 88200;
+#X obj 167 -31 inlet;
+#N canvas 329 481 282 268 draw 0;
+#X obj 29 168 snapshot~;
+#X obj 29 225 s \$0-draw;
+#X obj 29 196 bang;
+#X obj 183 103 metro 500;
+#X obj 29 26 inlet~;
+#X obj 183 30 inlet;
+#X obj 80 80 snapshot~;
+#X obj 80 106 s \$0-slider;
+#X obj 80 51 metro 50;
+#X obj 80 26 tgl 15 1 empty empty empty 17 7 0 10 -262144 -1 -1 1 1
+;
+#X connect 0 0 2 0;
+#X connect 2 0 1 0;
+#X connect 3 0 0 0;
+#X connect 4 0 0 0;
+#X connect 4 0 6 0;
+#X connect 5 0 3 0;
+#X connect 6 0 7 0;
+#X connect 8 0 6 0;
+#X connect 9 0 8 0;
+#X restore 128 66 pd draw;
+#X obj 34 103 outlet~;
+#X connect 0 0 2 0;
+#X connect 1 0 3 0;
+#X connect 2 0 1 0;
+#X connect 3 0 5 0;
+#X connect 3 0 6 0;
+#X connect 4 0 5 1;
+#X restore 44 -17 pd pointer;
+#X obj 101 -52 tgl 25 1 empty empty empty 17 7 0 10 -262144 -260097
+-1 1 1;
+#X text 128 -46 draw;
+#X obj 98 241 tgl 25 1 empty empty empty 17 7 0 10 -262144 -260097
+-1 0.7 0.7;
+#X text 255 165 Variable speed sound on sound looping delay \, tested
+with soundfile (.wav or .aiff). It works particularly nice with drumloops.
+;
+#N canvas 0 22 450 300 (subpatch) 0;
+#X array \$0-ipokebuf 88200 float 2;
+#X coords 0 1 88200 -1 400 140 1;
+#X restore 257 9 graph;
+#X text 256 219 Be careful with high feedback settings if the soundfile
+is still playing \, there is no limiter included in this patch.;
+#X text 313 318 clear buffer;
+#X obj 65 275 *~ 0.7;
+#X obj 64 124 *~ 0.7;
+#X text 256 260 If you experience nasty clicks or dropouts \, it may
+be caused by the array's visual update. Disable the 'draw' toggle.
+;
+#X connect 2 0 3 0;
+#X connect 2 0 18 1;
+#X connect 5 0 4 0;
+#X connect 6 0 0 0;
+#X connect 7 0 10 0;
+#X connect 7 0 22 0;
+#X connect 8 0 9 0;
+#X connect 8 0 18 0;
+#X connect 9 0 31 0;
+#X connect 13 0 12 0;
+#X connect 16 0 15 0;
+#X connect 16 0 31 1;
+#X connect 20 0 9 0;
+#X connect 21 0 30 0;
+#X connect 22 0 8 0;
+#X connect 22 0 4 1;
+#X connect 23 0 22 1;
+#X connect 25 0 30 1;
+#X connect 30 0 18 0;
+#X connect 31 0 4 0;

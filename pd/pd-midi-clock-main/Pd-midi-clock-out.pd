@@ -1,0 +1,29 @@
+#N canvas 20 117 718 488 12;
+#X obj 67 177 tgl 15 0 empty empty play/stop 17 7 0 10 #fcfcfc #000000
+#000000 0 1;
+#X obj 150 282 midiout;
+#X obj 67 204 select 0 1;
+#X msg 67 238 252;
+#X msg 100 238 250;
+#X msg 150 238 248;
+#X floatatom 182 106 5 0 0 0 BPM - - 0;
+#X obj 150 192 metro;
+#X obj 182 37 loadbang;
+#X msg 182 61 120;
+#X text 234 108 this expression converts a BPM into a ms metro value
+;
+#X floatatom 182 163 5 0 0 0 - - - 0;
+#X obj 182 139 expr (60000/$f1/24);
+#X connect 0 0 7 0;
+#X connect 0 0 2 0;
+#X connect 2 0 3 0;
+#X connect 2 1 4 0;
+#X connect 3 0 1 0;
+#X connect 4 0 1 0;
+#X connect 5 0 1 0;
+#X connect 6 0 12 0;
+#X connect 7 0 5 0;
+#X connect 8 0 9 0;
+#X connect 9 0 6 0;
+#X connect 11 0 7 1;
+#X connect 12 0 11 0;

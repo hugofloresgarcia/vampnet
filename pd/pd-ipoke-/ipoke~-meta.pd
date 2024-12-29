@@ -1,0 +1,8 @@
+#N canvas 37 58 370 230 10;
+#X text 10 10 META interpolating buffer~ writer;
+#X text 10 30 NAME ipoke~;
+#X text 10 50 AUTHOR Pierre Alexandre Tremblay;
+#X text 10 70 DESCRIPTION ipoke~ is an interpolating buffer~ writer
+;
+#X text 10 90 LICENSE BSD;
+#X text 10 110 VERSION 0.5.0;

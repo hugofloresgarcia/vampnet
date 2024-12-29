@@ -1,0 +1,8 @@
+#N canvas 224 241 354 205 10;
+#X obj 157 82 table \$0-ipokebuf 44100;
+#X obj 31 82 ipoke~ \$0-ipokebuf;
+#X obj 31 39 inlet~;
+#X obj 136 40 inlet~;
+#X text 35 131 Abstraction for [ipoke~] performance test;
+#X connect 2 0 1 0;
+#X connect 3 0 1 1;

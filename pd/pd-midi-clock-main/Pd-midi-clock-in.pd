@@ -1,0 +1,107 @@
+#N canvas 1986 27 861 645 10;
+#X obj 103 43 midirealtimein;
+#X floatatom 103 67 5 0 0 0 - - -;
+#X obj 103 110 counter 0 0 5;
+#X obj 103 132 select 0;
+#X obj 103 358 bng 15 70 50 0 empty empty pulse 17 7 0 10 -262144 -1
+-1;
+#X obj 103 88 select 248 250 252;
+#X obj 138 217 bng 15 70 50 0 empty empty play 17 7 0 10 -262144 -1
+-1;
+#X obj 173 241 bng 15 70 50 0 empty empty stop 17 7 0 10 -262144 -1
+-1;
+#X floatatom 297 127 5 0 0 0 BAR - -;
+#X msg 138 326 0;
+#X text 409 392 visual and sound indication with this basic 4/4 metronome
+;
+#N canvas 2075 45 1865 1027 metro 0;
+#X obj 101 -14 inlet, f 6;
+#X obj 101 104 bng 15 70 50 0 empty empty empty 17 7 0 10 -262144 -1
+-1;
+#X obj 121 104 bng 15 70 50 0 empty empty empty 17 7 0 10 -262144 -1
+-1;
+#X obj 141 104 bng 15 70 50 0 empty empty empty 17 7 0 10 -262144 -1
+-1;
+#X obj 161 104 bng 15 70 50 0 empty empty empty 17 7 0 10 -262144 -1
+-1;
+#X msg 101 174 1;
+#X msg 131 174 2;
+#X msg 161 174 3;
+#X msg 191 174 4;
+#X floatatom 111 125 5 0 0 3 METRONOME - -;
+#X obj 101 82 loadbang;
+#X obj 101 226 osc~;
+#X msg 101 196 880;
+#X msg 131 196 440;
+#X obj 101 304 *~;
+#X obj 116 275 line~;
+#X obj 101 326 *~;
+#X obj 181 104 vsl 15 47 0 127 0 0 empty empty empty 0 -9 0 10 -262144
+-1 -1 0 1;
+#X obj 331 306 / 127;
+#X obj 101 348 dac~;
+#X msg 116 253 1 \, 0 70;
+#X obj 101 38 mod 16;
+#X obj 101 60 select 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15;
+#X obj 479 160 loadbang;
+#X msg 479 182 0;
+#X msg 511 183 70;
+#X obj 101 12 f;
+#X obj 138 12 + 1;
+#X connect 0 0 26 0;
+#X connect 1 0 5 0;
+#X connect 1 0 20 0;
+#X connect 2 0 6 0;
+#X connect 2 0 20 0;
+#X connect 3 0 7 0;
+#X connect 3 0 20 0;
+#X connect 4 0 8 0;
+#X connect 4 0 20 0;
+#X connect 5 0 9 0;
+#X connect 5 0 12 0;
+#X connect 6 0 9 0;
+#X connect 6 0 13 0;
+#X connect 7 0 9 0;
+#X connect 7 0 13 0;
+#X connect 8 0 9 0;
+#X connect 8 0 13 0;
+#X connect 10 0 1 0;
+#X connect 11 0 14 0;
+#X connect 12 0 11 0;
+#X connect 13 0 11 0;
+#X connect 14 0 16 0;
+#X connect 15 0 14 1;
+#X connect 16 0 19 0;
+#X connect 16 0 19 1;
+#X connect 17 0 18 0;
+#X connect 18 0 16 1;
+#X connect 20 0 15 0;
+#X connect 21 0 22 0;
+#X connect 22 0 1 0;
+#X connect 22 4 2 0;
+#X connect 22 8 3 0;
+#X connect 22 12 4 0;
+#X connect 23 0 5 0;
+#X connect 23 0 24 0;
+#X connect 23 0 25 0;
+#X connect 24 0 14 1;
+#X connect 25 0 17 0;
+#X connect 26 0 27 0;
+#X connect 26 0 21 0;
+#X connect 27 0 26 1;
+#X coords 0 -1 1 1 101 61 2 100 100;
+#X restore 207 399 pd metro;
+#X text 223 86 select is used as a filter to isolate the needed MIDI
+info;
+#X connect 0 0 1 0;
+#X connect 1 0 5 0;
+#X connect 2 0 3 0;
+#X connect 2 3 8 0;
+#X connect 3 0 4 0;
+#X connect 4 0 11 0;
+#X connect 5 0 2 0;
+#X connect 5 1 6 0;
+#X connect 5 2 7 0;
+#X connect 6 0 9 0;
+#X connect 7 0 9 0;
+#X connect 9 0 11 0;
