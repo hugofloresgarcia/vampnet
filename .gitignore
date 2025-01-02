@@ -190,3 +190,6 @@ pyharp
 
 models/vampnet/*
 models/*
+
+
+vampnet/lac/*

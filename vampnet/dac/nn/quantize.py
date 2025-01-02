@@ -1,11 +1,10 @@
-from typing import Union, Optional
+from typing import Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from einops.layers.torch import Rearrange
 from torch.nn.utils import weight_norm
 
 from vampnet.dac.nn.layers import WNConv1d
@@ -31,8 +30,6 @@ class VectorQuantize(nn.Module):
         self.in_proj = WNConv1d(input_dim, codebook_dim, kernel_size=1)
         self.out_proj = WNConv1d(codebook_dim, input_dim, kernel_size=1)
         self.codebook = nn.Embedding(codebook_size, codebook_dim)
-
-        self.rearrange_indices = Rearrange("b t -> (b t)")
 
     def forward(self, z):
         """Quantized the input tensor using a fixed codebook and returns
@@ -78,11 +75,8 @@ class VectorQuantize(nn.Module):
     def decode_code(self, embed_id):
         return self.embed_code(embed_id).transpose(1, 2)
 
-    def decode_latents(self, latents: torch.Tensor):
+    def decode_latents(self, latents):
         encodings = rearrange(latents, "b d t -> (b t) d")
-        # nb, nd, nt = latents.shape # THIS MAY HAVE BROKEN IT?
-        # encodings = latents.view(-1, nd)
-
         codebook = self.codebook.weight  # codebook: (N x D)
 
         # L2 normalize encodings and codebook (ViT-VQGAN)
@@ -95,10 +89,7 @@ class VectorQuantize(nn.Module):
             - 2 * encodings @ codebook.t()
             + codebook.pow(2).sum(1, keepdim=True).t()
         )
-
         indices = rearrange((-dist).max(1)[1], "(b t) -> b t", b=latents.size(0))
-        # indices = self.rearrange_indices((-dist).max(1)[1], b=latents.size(0)) # THIS MAY HAVE BROKEN IT?
-        # indices = (-dist).max(1)[1].view(nb, nt)
         z_q = self.decode_code(indices)
         return z_q, indices
 
@@ -115,7 +106,7 @@ class ResidualVectorQuantize(nn.Module):
         n_codebooks: int = 9,
         codebook_size: int = 1024,
         codebook_dim: Union[int, list] = 8,
-        quantizer_dropout: float = 0.0,
+        quantizer_dropout: bool = False,
     ):
         super().__init__()
         if isinstance(codebook_dim, int):
@@ -133,17 +124,7 @@ class ResidualVectorQuantize(nn.Module):
         )
         self.quantizer_dropout = quantizer_dropout
 
-    @torch.jit.unused
-    def quantizer_drop_train(self, z):
-        n_quantizers = torch.ones((z.shape[0],)) * self.n_codebooks + 1
-        dropout = torch.randint(1, self.n_codebooks + 1, (z.shape[0],))
-        n_dropout = int(z.shape[0] * int(self.quantizer_dropout))
-        n_quantizers[:n_dropout] = dropout[:n_dropout]
-        n_quantizers = n_quantizers.to(z.device)
-
-        return n_quantizers
-
-    def forward(self, z, n_quantizers: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, z, n_quantizers: int = None):
         """Quantized the input tensor using a fixed set of `n` codebooks and returns
         the corresponding codebook vectors
         Parameters
@@ -156,21 +137,16 @@ class ResidualVectorQuantize(nn.Module):
                 when in training mode, and a random number of quantizers is used.
         Returns
         -------
-        dict
-            A dictionary with the following keys:
-
-            "z" : Tensor[B x D x T]
-                Quantized continuous representation of input
-            "codes" : Tensor[B x N x T]
-                Codebook indices for each codebook
-                (quantized discrete representation of input)
-            "latents" : Tensor[B x N*D x T]
-                Projected latents (continuous representation of input before quantization)
-            "vq/commitment_loss" : Tensor[1]
-                Commitment loss to train encoder to predict vectors closer to codebook
-                entries
-            "vq/codebook_loss" : Tensor[1]
-                Codebook loss to update the codebook
+        Tensor[B x D x T]
+            Quantized continuous representation of input
+        Tensor[1]
+            Commitment loss to train encoder to predict vectors closer to codebook
+            entries
+        Tensor[1]
+            Codebook loss to update the codebook
+        Tensor[B x N x T]
+            Codebook indices for each codebook
+            (quantized discrete representation of input)
         """
         z_q = 0
         residual = z
@@ -182,18 +158,12 @@ class ResidualVectorQuantize(nn.Module):
 
         if n_quantizers is None:
             n_quantizers = self.n_codebooks
-        
-        if self.training:
-            n_quantizers = torch.ones((z.shape[0],)) * self.n_codebooks + 1
-            dropout = torch.randint(1, self.n_codebooks + 1, (z.shape[0],))
-            n_dropout = int(z.shape[0] * self.quantizer_dropout)
-            n_quantizers[:n_dropout] = dropout[:n_dropout]
-            n_quantizers = n_quantizers.to(z.device)
+        if self.training and self.quantizer_dropout:
+            n_quantizers = torch.randint(1, self.n_codebooks + 1, (z.shape[0],)).to(
+                z.device
+            )
 
         for i, quantizer in enumerate(self.quantizers):
-            if self.training is False and i >= n_quantizers:
-                break
-
             z_q_i, commitment_loss_i, codebook_loss_i, indices_i, z_e_i = quantizer(
                 residual
             )
@@ -212,12 +182,15 @@ class ResidualVectorQuantize(nn.Module):
             codebook_indices.append(indices_i)
             latents.append(z_e_i)
 
-        codes = torch.stack(codebook_indices, dim=1)
-        latents = torch.cat(latents, dim=1)
+        return {
+            "z": z_q,
+            "codes": torch.stack(codebook_indices, dim=1),
+            "latents": torch.cat(latents, dim=1),
+            "vq/commitment_loss": commitment_loss,
+            "vq/codebook_loss": codebook_loss,
+        }
 
-        return z_q, codes, latents, commitment_loss, codebook_loss
-
-    def from_codes(self: "ResidualVectorQuantize", codes: torch.Tensor):
+    def from_codes(self, codes: torch.Tensor):
         """Given the quantized codes, reconstruct the continuous representation
         Parameters
         ----------
@@ -268,6 +241,7 @@ class ResidualVectorQuantize(nn.Module):
             z_p_i, codes_i = self.quantizers[i].decode_latents(latents[:, j:k, :])
             z_p.append(z_p_i)
             codes.append(codes_i)
+
 
             z_q_i = self.quantizers[i].out_proj(z_p_i)
             z_q = z_q + z_q_i

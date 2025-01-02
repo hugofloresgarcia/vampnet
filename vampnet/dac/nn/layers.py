@@ -2,34 +2,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 from torch.nn.utils import weight_norm
 
 
 def WNConv1d(*args, **kwargs):
     return weight_norm(nn.Conv1d(*args, **kwargs))
 
-
 def WNConvTranspose1d(*args, **kwargs):
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
-
-def CausalConv1d(*args, **kwargs):
-    import cached_conv as cc
-    # grab the padding 
-    kernel_size=kwargs.get('kernel_size', 1)
-    stride=kwargs.get('stride', 1)
-    dilation=kwargs.get('dilation', 1)
-    kwargs['padding'] = cc.get_padding(
-        kernel_size=kernel_size, 
-        stride=stride, 
-        dilation=dilation, 
-        mode="causal"
-    )
-
-    return cc.Conv1d(*args, **kwargs)
-
-def CausalConvTranspose1d(*args, **kwargs):
-    import cached_conv as cc
-    return cc.ConvTranspose1d(*args, **kwargs, causal=True)
 
 
 # Scripting this brings model speed up 1.4x
