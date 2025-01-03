@@ -39,7 +39,7 @@ build_datasets.query: "
     FROM chunk 
     JOIN audio_file as af ON chunk.audio_file_id = af.id 
     JOIN dataset ON af.dataset_id = dataset.id
-    WHERE dataset.name IN ('choral-singing-dataset')
+    WHERE dataset.name IN ('mtg-jamendo', 'dagstuhl-choir-set', 'choral-singing-dataset')
 "
+    # WHERE dataset.name IN ('choral-singing-dataset')
 
-    # WHERE dataset.name IN ('mtg-jamendo', 'dagstuhl-choir-set', 'choral-singing-dataset')

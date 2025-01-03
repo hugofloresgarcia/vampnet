@@ -221,7 +221,7 @@ class AudioSampleLoggingCallback(Callback):
             
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.generate(z_mask)
+            z_hat = module.model.stemgen_generate(z_mask)
 
             outwav = module.codec.decode(
                 module.codec.quantizer.from_codes(z_hat)[0]
@@ -247,7 +247,7 @@ class AudioSampleLoggingCallback(Callback):
             mask = pmask.periodic_mask(z, period, 1, random_roll=True)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.generate(z_mask)
+            z_hat = module.model.stemgen_generate(z_mask)
 
             outwav = module.codec.decode(
                 module.codec.quantizer.from_codes(z_hat)[0]
@@ -412,6 +412,9 @@ class VampNetTrainer(L.LightningModule):
         t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
         output["loss/val"] = self.criterion(z_hat, t_masked)
 
+        # update flat mask for metrics
+        flat_mask = flat_mask.masked_fill(ii.bool(), 0)
+
         _metrics(
             r=r,
             z_hat=z_hat,
@@ -489,7 +492,7 @@ if __name__ == "__main__":
             max_epochs=-1,
             limit_val_batches=20, 
             gradient_clip_val=5.0,
-            val_check_interval=39,
+            val_check_interval=1000,
             # val_check_interval=1000,
             callbacks=callbacks,
             precision="bf16-mixed", 

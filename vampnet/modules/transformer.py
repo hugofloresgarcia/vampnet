@@ -40,9 +40,9 @@ class VampNet(L.LightningModule):
         self,
         n_heads: int = 8,
         n_layers: int = 8,
-        n_codebooks: int = 4,
+        n_codebooks: int = 9,
         n_conditioning_codebooks: int = 0,
-        embedding_dim: int = 768,
+        embedding_dim: int = 774,
         vocab_size: int = 1024,
         flash_attn: bool = True,
         dropout: float = 0.0
@@ -265,7 +265,7 @@ class VampNet(L.LightningModule):
 
     @torch.inference_mode()
     def generate(self, 
-            codes: Optional[torch.Tensor] = None, 
+            codes: torch.Tensor = None, 
             sampling_steps: int = 12, 
             temperature: float = 1.0, 
             mask_temperature: float = 10.5, 
@@ -298,63 +298,43 @@ class VampNet(L.LightningModule):
 
         return state.z_masked[:state.nb] if cfg_guidance is not None else state.z_masked
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def stemgen_generate(
         self,
-        codec,
-        time_steps: int = 300,
-        _sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
-        start_tokens: Optional[torch.Tensor] = None,
-        sampling_temperature: float = 1.0,
-        mask: Optional[torch.Tensor] = None,
+        codes: torch.Tensor,
+        sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
+        temperature: float = 1.0,
         mask_temperature: float = 10.5,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
         top_p=None,
-        seed: int = None, 
         sample_cutoff: float = 1.0,
-        return_signal=True,
         debug=False,
         causal_weight: float = 0.0,
     ):
-        
-        if seed is not None:
-            at.util.seed(seed)
+
 
         #####################
         # resolve initial z #
         #####################
-        z = start_tokens
-
-        if z is None:
-            z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
-                self.device
-            )
-
-        print(f"created z with shape {z.shape}")
+        z = codes
 
         #################
         # resolve mask #
         #################
-
-        if mask is None:
-            mask = torch.ones_like(z).to(self.device).int()
-            mask[:, : self.n_conditioning_codebooks, :] = 0.0
-        if mask.ndim == 2:
-            mask = mask[:, None, :].repeat(1, z.shape[1], 1)
-        orig_mask = mask
-        print(f"created mask with shape {mask.shape}")
+        # get the mask from the z
+        mask = z == self.mask_token
+        orig_mask = mask.clone()
 
         ###########
         # set up #
         ##########
         # apply the mask to z
-        z_masked = z.masked_fill(mask.bool(), self.mask_token)
+        z_masked = z.clone()
 
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
-        print(f"n infer codebooks: {n_infer_codebooks}")
 
         #################
         # begin sampling #
@@ -362,7 +342,7 @@ class VampNet(L.LightningModule):
         # add one sampling step for each codebook level
         print(f"initial mask: {mask}")
         print(f"adding {n_infer_codebooks} sampling steps")
-        steps = _sampling_steps + [1 for _ in range(n_infer_codebooks - len(_sampling_steps))]
+        steps = sampling_steps + [1 for _ in range(n_infer_codebooks - len(sampling_steps))]
         # truncate if we have too many
         steps = steps[:n_infer_codebooks]
         for codebook_level, nsteps in enumerate(steps):
@@ -394,22 +374,16 @@ class VampNet(L.LightningModule):
                 # get latents
                 print("z_masked before forward", z_masked)
                 _debug_z_masked_before_forward = z_masked.clone()
-                latents = self.embedding.from_codes(z_masked, codec)
-                print(f"computed latents with shape: {latents.shape}")
 
-                # infer from latents
-                # NOTE: this collapses the codebook dimension into the sequence dimension
-                logits = self.forward(
-                    latents, 
-                )  # b, prob, seq
-                logits = logits.permute(0, 2, 1)  # b, seq, prob
-                print(f"permuted logits with shape: {logits.shape}")
+                logits = self.forward(z_masked)  # b, prob, seq
+                logits = rearrange(logits, "b p t -> b t p")
+                # print(f"permuted logits with shape: {logits.shape}")
 
                 sampled_z, selected_probs = sample_from_logits(
                     logits, sample=(
-                    (i / nsteps) <= sample_cutoff
+                        (i / nsteps) <= sample_cutoff
                     ), 
-                    temperature=sampling_temperature,
+                    temperature=temperature,
                     typical_filtering=typical_filtering, typical_mass=typical_mass,
                     typical_min_tokens=typical_min_tokens,
                     top_k=None, top_p=top_p, return_probs=True,
@@ -419,13 +393,12 @@ class VampNet(L.LightningModule):
                 # find out which codebook we are sampling from
                 selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
                 selected_probs[:,  codebook_level+1:, :,] = -float("inf") # all the ones above
-                # selected_probs[:, :codebook_level, :,] = -float("inf")
                 print(f"masking all but codebook {codebook_level}")
                 print(f"selected probs: {selected_probs}")
                 print(mask)
                 selected_probs = codebook_flatten(selected_probs)
 
-                print(f"sampled z with shape: {sampled_z.shape}")
+                # print(f"sampled z with shape: {sampled_z.shape}")
 
                 # flatten z_masked and mask, so we can deal with the sampling logic
                 # we'll unflatten them at the end of the loop for the next forward pass
@@ -433,7 +406,7 @@ class VampNet(L.LightningModule):
                 z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])      
 
                 mask = (z_masked == self.mask_token).int()
-                print(f"mask now: {mask}")
+                print(f"mask now: {codebook_unflatten(mask, n_infer_codebooks)}")
                 
                 # update the mask, remove conditioning codebooks from the mask
                 print(f"updated mask with shape: {mask.shape}")
@@ -464,12 +437,10 @@ class VampNet(L.LightningModule):
             
                 # ignore any tokens that weren't masked
                 selected_probs = torch.where(
-                   mask.bool(), selected_probs, torch.inf
+                   (mask.bool()), selected_probs, torch.inf
                 )
 
                 # add a causal weight to the selected probs
-                # NOTE: some experiments i did showed that this didn't help. 
-                # set it to 0 until further eval
                 causal_probs = torch.linspace(1, 0, z_masked.shape[-1], device=z_masked.device)
                 causal_probs = causal_probs.repeat(z_masked.shape[0], 1)
                 selected_probs = selected_probs + causal_probs * causal_weight
@@ -482,7 +453,7 @@ class VampNet(L.LightningModule):
                 # only consider probs at current level
                 selected_probs_cur_level = selected_probs[:, codebook_level, :]
                 mask_cur_level = mask_by_random_topk(
-                    num_to_mask, selected_probs_cur_level, mask_temperature * (1-r.unsqueeze(1))
+                    num_to_mask, selected_probs_cur_level, mask_temperature * (1-r)
                 )  
                 mask[:, codebook_level, :] = mask_cur_level
 
@@ -508,8 +479,6 @@ class VampNet(L.LightningModule):
                 print(f"added conditioning codebooks back to z_masked with shape: {z_masked.shape}")
                 print(f"\n\n\n")
 
-
-                debug=True
                 if debug:
                     import matplotlib.pyplot as plt
                     from pathlib import Path
@@ -521,13 +490,15 @@ class VampNet(L.LightningModule):
                     plt.subplot(4, 1, 1)
                     # sig =  self.to_signal(sampled_z, codec)
                     # sig.cpu().specshow()
+                    # save the orig mask
+                    plt.imshow(orig_mask[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r',interpolation='none')
 
                     plt.subplot(4, 1, 2)       
                     # since z_masked is a codebook, we want to plot the colormap
                     # with distinct colors for each codebook index
                     # plt.imshow(_debug_z_masked_before_forward[0].cpu().numpy(), aspect='auto', origin='lower', cmap="tab20")
                     # make it so that anywhere where the mask is 1, we make that pixel black
-                    plt.imshow(_debug_z_masked_before_forward[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r',)
+                    plt.imshow(_debug_z_masked_before_forward[0].cpu().numpy(), aspect='auto', origin='lower', cmap='gray_r',interpolation='none')
 
 
                     plt.subplot(4, 1, 3)
@@ -536,7 +507,7 @@ class VampNet(L.LightningModule):
                     plt.subplot(4, 1, 4)
                     # replace any inf or -inf with 0
                     _selected_probs = torch.where(
-                        selected_probs == torch.inf, torch.zeros_like(selected_probs), selected_probs
+                        selected_probs == torch.inf, torch.ones_like(selected_probs), selected_probs
                     )
                     _selected_probs = torch.where(
                         selected_probs == -torch.inf, torch.zeros_like(selected_probs), selected_probs
@@ -544,7 +515,7 @@ class VampNet(L.LightningModule):
                     # fig = plt.gcf()
                     # fig.set_figheight(15)
                     # fig.set_figwidth(15)
-                    plt.imshow(codebook_unflatten(_selected_probs, n_infer_codebooks)[0].cpu().numpy(), aspect='auto', origin='lower', cmap="viridis" )
+                    plt.imshow(codebook_unflatten(_selected_probs, n_infer_codebooks)[0].cpu().numpy(), aspect='auto', origin='lower', cmap="viridis", interpolation='none') 
                     # plt.show()
                     plt.savefig(f".vampnet/c={codebook_level}_{i}.png")
                     plt.close('all')
@@ -557,12 +528,7 @@ class VampNet(L.LightningModule):
         )
 
         print(f"finished sampling")
-
-
-        if return_signal:
-            return self.to_signal(sampled_z, codec)
-        else:
-            return sampled_z
+        return sampled_z
         
 def sample_from_logits(
         logits, 

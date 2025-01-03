@@ -86,9 +86,9 @@ def stemgen_random(x: torch.Tensor, r: torch.Tensor):
         ignore_indices_mask[i, c[i]+1:] = 1
 
     # save a debug mask to np txt
-    import numpy as np
-    np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
-    np.savetxt("ignore_indices_mask.txt", ignore_indices_mask[0].cpu().numpy(), fmt="%d")
+    # import numpy as np
+    # np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
+    # np.savetxt("ignore_indices_mask.txt", ignore_indices_mask[0].cpu().numpy(), fmt="%d")
 
     return mask.int(), ignore_indices_mask.bool()
 
