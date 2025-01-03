@@ -65,7 +65,7 @@ mask = mask[:, : vn.n_codebooks, :]
 from vampnet.mask import apply_mask
 z = apply_mask(z, mask, vn.mask_token)
 with torch.autocast(device,  dtype=torch.bfloat16):
-    zv = vn.stemgen_generate(
+    zv = vn.generate(
         codes=z,
         temperature=1.0,
         # mask_temperature=1.0,

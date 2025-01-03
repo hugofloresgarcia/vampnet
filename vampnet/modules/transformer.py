@@ -34,12 +34,79 @@ def gumbel_noise_like(t: Tensor):
 def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise_like(t)).argmax(dim=dim)
 
+class CodebookEmbedding(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        latent_dim: int,
+        n_codebooks: int,
+        emb_dim: int,
+        special_tokens: Optional[Tuple[str]] = None
+    ):
+        super().__init__()
+        self.n_codebooks = n_codebooks
+        self.emb_dim = emb_dim
+        self.latent_dim = latent_dim
+        self.vocab_size = vocab_size
+
+        if special_tokens is not None:
+            for tkn in special_tokens:
+                self.special = nn.ParameterDict(
+                    {
+                        tkn: nn.Parameter(torch.randn(n_codebooks, self.latent_dim))
+                        for tkn in special_tokens
+                    }
+                )
+                self.special_idxs = {
+                    tkn: i + vocab_size for i, tkn in enumerate(special_tokens)
+                }
+
+        self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
+        from vampnet.dac.nn.quantize import ResidualVectorQuantize
+        self.quantizer = ResidualVectorQuantize(
+            input_dim=latent_dim,
+            n_codebooks=n_codebooks,
+            codebook_size=vocab_size,
+            codebook_dim=latent_dim,
+        )
+
+    def from_codes(self, codes: torch.Tensor):
+        """ 
+        get a sequence of continuous embeddings from a sequence of discrete codes. 
+        unlike it's counterpart in the original VQ-VAE, this function adds for any special tokens
+        necessary for the language model, like <MASK>. 
+        """
+        n_codebooks = codes.shape[1]
+        latent = []
+        for i in range(n_codebooks):
+            c = codes[:, i, :]
+
+            lookup_table = self.quantizer.quantizers[i].codebook.weight
+            if hasattr(self, "special"):
+                special_lookup = torch.cat(
+                    [self.special[tkn][i : i + 1] for tkn in self.special], dim=0
+                )
+                lookup_table = torch.cat([lookup_table, special_lookup], dim=0)
+
+            l = F.embedding(c, lookup_table).transpose(1, 2)
+            latent.append(l)
+
+        latent = torch.cat(latent, dim=1)
+        return latent
+
+    def forward(self, latents: torch.Tensor):
+        """
+        project a sequence of latents to a sequence of embeddings
+        """
+        x = self.out_proj(latents)
+        return x
 
 class VampNet(L.LightningModule):
     def __init__(
         self,
         n_heads: int = 8,
         n_layers: int = 8,
+        latent_dim: int = 8,
         n_codebooks: int = 9,
         n_conditioning_codebooks: int = 0,
         embedding_dim: int = 774,
@@ -57,11 +124,19 @@ class VampNet(L.LightningModule):
         self.flash_attn = flash_attn
 
         # add an embedding layer per codebook
-        assert embedding_dim % n_codebooks == 0, f"embedding_dim must be divisible by n_codebooks, but got {embedding_dim} and {n_codebooks}"
-        self.embedding = nn.Embedding(
-            ((vocab_size) * n_codebooks) + 1, embedding_dim // n_codebooks
+        # assert embedding_dim % n_codebooks == 0, f"embedding_dim must be divisible by n_codebooks, but got {embedding_dim} and {n_codebooks}"
+        # self.embedding = nn.Embedding(
+        #     ((vocab_size) * n_codebooks) + 1, embedding_dim // n_codebooks
+        # )
+        # self.mask_token = (vocab_size * n_codebooks)
+        self.embedding = CodebookEmbedding(
+            latent_dim=latent_dim,
+            n_codebooks=n_codebooks,
+            vocab_size=vocab_size,
+            emb_dim=embedding_dim,
+            special_tokens=["MASK"],
         )
-        self.mask_token = (vocab_size * n_codebooks)
+        self.mask_token = self.embedding.special_idxs["MASK"]
 
         self.lm = TransformerWrapper(
             num_tokens=self.embedding_dim,
@@ -113,14 +188,17 @@ class VampNet(L.LightningModule):
         return codes
 
     def forward(self, x, return_activations: bool = False):
-        # input should be shape (batch, codebook, seq)
-        x = self.codebook_idx_to_global_idx(x)
-        # pass through the embedding layer, output shape (batch, codebook, seq, emb)
-        x = self.embedding(x)
-        # concat the embds along the codebook dimension
-        x = rearrange(x, "b c n d -> b n (c d)")
-        # sum the embds along the codebook dimension
+        # # input should be shape (batch, codebook, seq)
+        # x = self.codebook_idx_to_global_idx(x)
+        # # pass through the embedding layer, output shape (batch, codebook, seq, emb)
+        # x = self.embedding(x)
+        # # concat the embds along the codebook dimension
+        # x = rearrange(x, "b c n d -> b n (c d)")
+        # # sum the embds along the codebook dimension
         # x = x.sum(dim=1)
+
+        x = self.embedding(self.embedding.from_codes(x))
+        x = rearrange(x, "b n d -> b d n")
 
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :, :1].squeeze(2)
 

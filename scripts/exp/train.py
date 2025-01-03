@@ -164,7 +164,7 @@ class AudioSampleLoggingCallback(Callback):
             n_batch = z.shape[0]
             r = rs[i] * torch.ones(n_batch).to(z.device)
 
-            mask, ii = pmask.stemgen_random(z, r)
+            mask, ii = pmask.random(z, r)
             mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
@@ -221,7 +221,7 @@ class AudioSampleLoggingCallback(Callback):
             
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.stemgen_generate(z_mask)
+            z_hat = module.model.generate(z_mask)
 
             outwav = module.codec.decode(
                 module.codec.quantizer.from_codes(z_hat)[0]
@@ -247,7 +247,7 @@ class AudioSampleLoggingCallback(Callback):
             mask = pmask.periodic_mask(z, period, 1, random_roll=True)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.stemgen_generate(z_mask)
+            z_hat = module.model.generate(z_mask)
 
             outwav = module.codec.decode(
                 module.codec.quantizer.from_codes(z_hat)[0]
@@ -281,6 +281,7 @@ class VampNetTrainer(L.LightningModule):
         self.codec = torch.compile(self.codec)
 
         self.model = VampNet()
+        self.model.embedding.quantizer = self.codec.quantizer # share the quantizer
         # self.model = torch.compile(self.model)
 
         self.outpaint_prob = outpaint_prob
@@ -321,7 +322,7 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask, ii = pmask.stemgen_random(z, r)
+        mask, ii = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         if torch.rand(1).item() < self.outpaint_prob:
             # sample how many tokens to outpaint
@@ -380,7 +381,7 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask, ii = pmask.stemgen_random(z, r)
+        mask, ii = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
 
         if torch.rand(1).item() < self.outpaint_prob:
@@ -444,17 +445,30 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
 
     return train_dataloader, val_dataloader
 
-def print_model_summary(model):
+def print_model_summary(model, max_depth=3):
+    def human_readable(num):
+        if num >= 1e6:
+            return f"{num / 1e6:.1f}M"
+        elif num >= 1e3:
+            return f"{num / 1e3:.1f}K"
+        else:
+            return str(num)
+
+    def depth(name):
+        return name.count('.')
+
     total_params = 0
     print(f"{'Layer':<30} {'Parameters':>10}")
     print("=" * 40)
     for name, module in model.named_modules():
-        if len(list(module.children())) == 0:  # Only leaf modules
-            num_params = sum(p.numel() for p in module.parameters())
-            total_params += num_params
-            print(f"{name:<30} {num_params:>10}")
+        if depth(name) <= max_depth:  # Respect max depth
+            num_params = sum(p.numel() for p in module.parameters(recurse=True))
+            if num_params > 0:  # Only display layers with parameters
+                total_params += num_params
+                print(f"{name:<30} {human_readable(num_params):>10}")
     print("=" * 40)
-    print(f"Total parameters: {total_params}")
+    print(f"Total parameters: {human_readable(total_params)}")
+
 
 if __name__ == "__main__":
     build_datasets = argbind.bind(build_datasets)
