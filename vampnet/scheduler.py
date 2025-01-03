@@ -12,8 +12,8 @@ class NoamScheduler:
         self,
         optimizer: torch.optim.Optimizer,
         d_model: int = 512,
-        factor: float = 1.0,
-        warmup: int = 4000,
+        factor: float = 2.0,
+        warmup: int = 10000,
     ):
         # Store hparams
         self.warmup = warmup
