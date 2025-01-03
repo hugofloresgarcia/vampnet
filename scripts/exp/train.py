@@ -15,6 +15,7 @@ import torch._dynamo
 torch._dynamo.config.verbose=True
 import lightning as L
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.utilities import grad_norm
 
 import vampnet
 from vampnet.modules.transformer import VampNet
@@ -45,7 +46,7 @@ IGNORE_INDEX = -100
 
 def build_transform():
     def transform(sig):
-        sig = sn.normalize(sig, -24.0)
+        sig = sn.normalize(sig, -16.0)
         return sig
     return transform
 
@@ -60,6 +61,7 @@ def get_checkpoint_path(resume_ckpt: str = None):
 
 def build_datasets(
     sample_rate: int,
+    seed: int = 0, 
     db_path: str = None, 
     query: str = None, 
 ):    
@@ -73,7 +75,7 @@ def build_datasets(
     print(f"loading data from {db_path}")
 
     df = pd.read_sql(query, conn)
-    tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=1)
+    tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=seed)
 
     train_data = Dataset(
         tdf, sample_rate=sample_rate, transform=train_tfm
@@ -162,7 +164,7 @@ class AudioSampleLoggingCallback(Callback):
             n_batch = z.shape[0]
             r = rs[i] * torch.ones(n_batch).to(z.device)
 
-            mask = pmask.random(z, r)
+            mask, ii = pmask.stemgen_random(z, r)
             mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
@@ -211,6 +213,12 @@ class AudioSampleLoggingCallback(Callback):
             z = z[:, : module.model.n_codebooks, :]
 
             mask = pmask.full_mask(z)
+            if module.outpaint_prob > 0:
+                # sample how many tokens to outpaint
+                n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
+                outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
+                mask = pmask.mask_and(mask, outpaint_mask)
+            
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
             z_hat = module.model.generate(z_mask)
@@ -261,7 +269,10 @@ class AudioSampleLoggingCallback(Callback):
 
 class VampNetTrainer(L.LightningModule):
 
-    def __init__(self, codec_ckpt: str):
+    def __init__(self, 
+        codec_ckpt: str,
+        outpaint_prob: float = 0.0
+    ):
         super().__init__()
         self.save_hyperparameters()
         
@@ -271,6 +282,8 @@ class VampNetTrainer(L.LightningModule):
 
         self.model = VampNet()
         # self.model = torch.compile(self.model)
+
+        self.outpaint_prob = outpaint_prob
 
         self.criterion = CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
@@ -283,6 +296,12 @@ class VampNetTrainer(L.LightningModule):
         optimizer = AdamW(self.model.parameters())
         scheduler = NoamScheduler(optimizer)
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def on_before_optimizer_step(self, optimizer):
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = grad_norm(self.model, norm_type=2)
+        self.log_dict(norms)
 
     def lr_scheduler_step(self, scheduler, metric):
         scheduler.step()
@@ -302,8 +321,17 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask = pmask.random(z, r)
+        mask, ii = pmask.stemgen_random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+        if torch.rand(1).item() < self.outpaint_prob:
+            # sample how many tokens to outpaint
+            n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
+            outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
+            mask = pmask.mask_and(mask, outpaint_mask)
+            # save the mask as txt
+            import numpy as np
+            np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
+
         z_mask = pmask.apply_mask(z, mask, vn.mask_token)
         
         # TODOO: use embedding instead
@@ -320,6 +348,11 @@ class VampNetTrainer(L.LightningModule):
 
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        
+        # add the ignore indices from the mask generator
+        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
+        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
+
         output["loss"] = self.criterion(z_hat, t_masked)
 
         _metrics(
@@ -347,8 +380,15 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask = pmask.random(z, r)
+        mask, ii = pmask.stemgen_random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+
+        if torch.rand(1).item() < self.outpaint_prob:
+            # sample how many tokens to outpaint
+            n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
+            outpaint_mask = pmask.inpaint(z, 0, n_outpaint)
+            mask = pmask.mask_and(mask, outpaint_mask)
+
         z_mask = pmask.apply_mask(z, mask, vn.mask_token)
 
         # TODOO: use embedding instead
@@ -367,6 +407,9 @@ class VampNetTrainer(L.LightningModule):
         output = {}
         # replace target with ignore index for masked tokens
         t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        # # add the ignore indices from the mask generator
+        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
+        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
         output["loss/val"] = self.criterion(z_hat, t_masked)
 
         _metrics(
@@ -428,7 +471,7 @@ if __name__ == "__main__":
         callbacks.append(ModelCheckpoint(
             monitor="loss/val",
             mode="min",
-            save_top_k=3,
+            save_top_k=1,
             save_last=True,
             filename="vampnet-{epoch:02d}-{step}",
         ))
@@ -446,11 +489,16 @@ if __name__ == "__main__":
             max_epochs=-1,
             limit_val_batches=20, 
             gradient_clip_val=5.0,
-            val_check_interval=1000,
+            val_check_interval=39,
+            # val_check_interval=1000,
             callbacks=callbacks,
             precision="bf16-mixed", 
-            strategy="ddp_find_unused_parameters_true"
+            strategy="ddp_find_unused_parameters_true", 
+            detect_anomaly=True
         )
+
+        train_data.seed = (trainer.local_rank + train_data.seed)
+        model.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1 + trainer.local_rank)
 
         trainer.fit(
             model=model, 

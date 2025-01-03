@@ -15,11 +15,11 @@ CrossEntropyLoss.label_smoothing: 0.0
 AdamW.lr: 0.001
 
 VampNet.vocab_size: 1024
-VampNet.n_codebooks: 4
+VampNet.n_codebooks: 9
 VampNet.n_conditioning_codebooks: 0
 VampNet.r_cond_dim: 0
 VampNet.noise_mode: mask
-VampNet.embedding_dim: 768
+VampNet.embedding_dim: 774
 VampNet.n_layers: 8
 VampNet.n_heads: 8
 VampNet.flash_attn: true
@@ -39,5 +39,7 @@ build_datasets.query: "
     FROM chunk 
     JOIN audio_file as af ON chunk.audio_file_id = af.id 
     JOIN dataset ON af.dataset_id = dataset.id
+    WHERE dataset.name IN ('choral-singing-dataset')
 "
 
+    # WHERE dataset.name IN ('mtg-jamendo', 'dagstuhl-choir-set', 'choral-singing-dataset')

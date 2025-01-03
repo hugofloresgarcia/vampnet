@@ -52,7 +52,115 @@ def random(
     mask = torch.bernoulli(probs)
     mask = mask.round().int()
 
-    return mask
+    return mask, torch.zeros_like(mask).bool()
+
+def stemgen_random(x: torch.Tensor, r: torch.Tensor):
+    assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
+    if not isinstance(r, torch.Tensor):
+        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
+
+    # Assuming x is your input tensor and r is the probability for the Bernoulli distribution
+    nb, nc, nt = x.shape
+
+    # Randomly sample a codebook level to infer for each item in the batch
+    c = torch.randint(0, nc, (nb,)).to(x.device)
+
+    # Create a mask tensor of the same shape as x, initially filled with ones
+    mask = torch.ones_like(x).long().to(x.device)
+    ignore_indices_mask = torch.zeros_like(x).long().to(x.device)
+
+    # Iterate over each item in the batch
+    for i in range(nb):
+        # Create the Bernoulli mask for the sampled level
+        level_mask = torch.bernoulli(torch.ones(nt).to(x.device) * r[i]).long()
+
+        # Apply the mask to the sampled level
+        mask[i, c[i]] = level_mask
+
+        # All levels below the sampled level are unmasked (zeros)
+        mask[i, :c[i]] = 0
+        ignore_indices_mask[i, :c[i]] = 1
+
+        # All levels above the sampled level are masked (ones)
+        mask[i, c[i]+1:] = 1
+        ignore_indices_mask[i, c[i]+1:] = 1
+
+    # save a debug mask to np txt
+    import numpy as np
+    np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
+    np.savetxt("ignore_indices_mask.txt", ignore_indices_mask[0].cpu().numpy(), fmt="%d")
+
+    return mask.int(), ignore_indices_mask.bool()
+
+
+def hugo_random(x: torch.Tensor, r:torch.Tensor):
+    assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
+    if not isinstance(r, torch.Tensor):
+        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device).float()
+    
+    r = _gamma(r)[:, None, None]
+    
+    nb, nc, nt = x.shape
+
+    probs = torch.ones_like(x) * r
+    mask = torch.bernoulli(probs)
+    # alternatively, the mask level could be the cumsum of the mask
+    mask = mask.round().long().to(x.device)
+    mask_levels = nc - mask.sum(dim=1) - 1
+
+    # create a new mask, where all levels below the mask level are masked
+    # shape (nb, nc, nt) where new_mask[i, CB:, t] = 1, CB = mask_level[i, t] 
+    # mask = mask_levels[:, :, None] > torch.arange(nc)[None, None, :]
+    mask = (mask_levels[:, None, :] < torch.arange(nc, device=x.device)[None, :, None]).long()
+
+    ignore_levels = mask_levels + 1
+    ignore_indices_mask = (ignore_levels[:, None, :] < torch.arange(nc, device=x.device)[None, :, None]).long()
+
+    # for _b in range(nb):
+    #     for _t in range(nt):
+    #         for _c in range(nc):
+    #             if mask[_b, _c, _t] == 1:
+    #                 mask[_b, _c:, _t] = 1
+    #                 ignore_indices_mask[_b, _c + 1:, _t] = 1
+    #                 break
+    
+    return mask.long(), ignore_indices_mask.bool()
+
+
+def better_cond_random_but_not_working(x: torch.Tensor, r:torch.Tensor):
+    assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
+    if not isinstance(r, torch.Tensor):
+        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device).float()
+    
+    r = _gamma(r)[:, None, None]
+    
+    nb, nc, nt = x.shape
+
+    probs = torch.ones_like(x) * r
+    mask = torch.bernoulli(probs)
+
+    mask = mask.round().long().to(x.device)
+
+    # there cannot be anything unmasked if there's an masked token
+    # in the same timestep and below it 
+    for i in range(nb):
+        for j in range(nc):
+            for t in range(nt):
+                if mask[i, j, t] == 1:
+                    mask[i, j:, t] = 1
+                    break
+    
+    # an ignore indices mask, since we can truly only predict one token
+    # per timestep
+    ignore_indices = torch.zeros_like(x)
+    for i in range(nb):
+        for j in range(nc):
+            for t in range(nt):
+                if mask[i, j, t] == 1:
+                    ignore_indices[i, j, t+1:] = 1
+                    break
+    return mask.int(), ignore_indices
+
 
 @torch.jit.script_if_tracing
 def linear_random(
