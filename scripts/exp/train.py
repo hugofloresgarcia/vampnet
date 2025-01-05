@@ -3,7 +3,9 @@ import sys
 import warnings
 from pathlib import Path
 from typing import Optional
+import random
 from dataclasses import dataclass
+import copy
 
 import argbind
 import torch
@@ -44,8 +46,28 @@ Dataset = argbind.bind(sm.dataset.Dataset, "train", "val")
 
 IGNORE_INDEX = -100
 
+def flip_coin(prob):
+    return torch.rand(1).item() < prob
+
+from torch_pitch_shift import *
+# only a fifth up or down
+SHIFTS = get_fast_shifts(44100, lambda x : x != 1 and x <1.5 and x > 0.5)
+AUGMENT = False
+
 def build_transform():
     def transform(sig):
+        # TODO: maybe figure out a nicer way to do these augment probs
+        if AUGMENT:
+            if flip_coin(0.5):
+                # sig = sn.pitch_shift(sig, random.randint(-7, 7))
+                #pick a shift
+                shift = random.choice(SHIFTS)
+                sig.wav = pitch_shift(sig.wav, shift, sig.sr)
+            if flip_coin(0.3):
+                sig = sn.low_pass(sig, random.randint(1000, 16000))
+            if flip_coin(0.3):
+                sig = sn.high_pass(sig, random.randint(40, 200))
+
         sig = sn.normalize(sig, -16.0)
         return sig
     return transform
@@ -277,12 +299,17 @@ class VampNetTrainer(L.LightningModule):
         self.save_hyperparameters()
         
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
-        self.codec.eval()
         self.codec = torch.compile(self.codec)
+        # to speed up the first steps of training
 
         self.model = VampNet()
-        self.model.embedding.quantizer = self.codec.quantizer # share the quantizer
+        self.model.embedding.quantizer.load_state_dict(
+            self.codec.quantizer.state_dict()
+        ) # initialize VampNet's embedding layers with the codec's quantizers
+        self.codec.eval()
         # self.model = torch.compile(self.model)
+        
+        self.codec.requires_grad_(False)
 
         self.outpaint_prob = outpaint_prob
 
@@ -445,30 +472,6 @@ def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
 
     return train_dataloader, val_dataloader
 
-def print_model_summary(model, max_depth=3):
-    def human_readable(num):
-        if num >= 1e6:
-            return f"{num / 1e6:.1f}M"
-        elif num >= 1e3:
-            return f"{num / 1e3:.1f}K"
-        else:
-            return str(num)
-
-    def depth(name):
-        return name.count('.')
-
-    total_params = 0
-    print(f"{'Layer':<30} {'Parameters':>10}")
-    print("=" * 40)
-    for name, module in model.named_modules():
-        if depth(name) <= max_depth:  # Respect max depth
-            num_params = sum(p.numel() for p in module.parameters(recurse=True))
-            if num_params > 0:  # Only display layers with parameters
-                total_params += num_params
-                print(f"{name:<30} {human_readable(num_params):>10}")
-    print("=" * 40)
-    print(f"Total parameters: {human_readable(total_params)}")
-
 
 if __name__ == "__main__":
     build_datasets = argbind.bind(build_datasets)
@@ -476,8 +479,6 @@ if __name__ == "__main__":
     args = argbind.parse_args()
     with argbind.scope(args):
         model = VampNetTrainer(args["codec_ckpt"])
-
-        print_model_summary(model)
 
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
