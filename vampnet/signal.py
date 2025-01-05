@@ -46,6 +46,9 @@ class Signal:
     def to(self, device: str):
         return Signal(self.wav.to(device), self.sr)
 
+    def view(self,):
+        return Signal(self.wav, self.sr)
+
 # ~ signal creation utils ~
 def batch(
     audio_signals: list[Signal],
@@ -99,6 +102,18 @@ def batch(
 # ~ transform ~
 def pitch_shift(sig: Signal, semitones: int) -> Signal:
     tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
+    return Signal(tfm(sig.wav), sig.sr)
+
+import audiotools as at
+def low_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
+    sig = sig.view()
+    sig.wav = at.AudioSignal(sig.wav, sig.sr).low_pass(cutoff, zeros).samples
+    return sig
+
+def high_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
+    sig = sig.view()
+    sig.wav = at.AudioSignal(sig.wav, sig.sr).high_pass(cutoff, zeros).samples
+    return sig
 
 def to_mono(sig: Signal) -> Signal:
     """Converts a stereo signal to mono by averaging the channels."""
