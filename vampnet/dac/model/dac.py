@@ -2,6 +2,7 @@ import math
 from typing import List
 from typing import Union, List, Optional
 
+import numpy as np
 import torch
 from audiotools import AudioSignal
 from audiotools.ml import BaseModel
@@ -170,7 +171,7 @@ class DAC(BaseModel, CodecMixin):
 
         self.latent_dim = latent_dim
 
-        self.hop_length = torch.prod(torch.tensor(encoder_rates)).item()
+        self.hop_length = np.prod(encoder_rates)
         self.encoder = Encoder(encoder_dim, encoder_rates, latent_dim)
 
         self.n_codebooks = n_codebooks
@@ -340,30 +341,26 @@ class DAC(BaseModel, CodecMixin):
 
 
 if __name__ == "__main__":
+    import numpy as np
     from functools import partial
 
     model = DAC().to("cpu")
 
     for n, m in model.named_modules():
         o = m.extra_repr()
-        p = sum([torch.prod(p.size()) for p in m.parameters()])
+        p = sum([np.prod(p.size()) for p in m.parameters()])
         fn = lambda o, p: o + f" {p/1e6:<.3f}M params."
         setattr(m, "extra_repr", partial(fn, o=o, p=p))
     print(model)
-    print("Total # of params: ", sum([torch.prod(p.size()) for p in model.parameters()]))
+    print("Total # of params: ", sum([np.prod(p.size()) for p in model.parameters()]))
 
-    print(f"{model.encoder.cumulative_delay}")
-    print(f"{model.decoder.cumulative_delay}")
     length = 88200 * 2
     x = torch.randn(1, 1, length).to(model.device)
-
-    x = model.preprocess(x, model.sample_rate)
     x.requires_grad_(True)
     x.retain_grad()
 
     # Make a forward pass
-    out = model(x)
-    out = out["audio"]
+    out = model(x)["audio"]
     print("Input shape:", x.shape)
     print("Output shape:", out.shape)
 
