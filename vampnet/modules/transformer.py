@@ -41,6 +41,7 @@ class CodebookEmbedding(nn.Module):
         latent_dim: int,
         n_codebooks: int,
         emb_dim: int,
+        input_dim: int,
         special_tokens: Optional[Tuple[str]] = None
     ):
         super().__init__()
@@ -64,7 +65,7 @@ class CodebookEmbedding(nn.Module):
         self.out_proj = nn.Conv1d(n_codebooks * self.latent_dim, self.emb_dim, 1)
         from vampnet.dac.nn.quantize import ResidualVectorQuantize
         self.quantizer = ResidualVectorQuantize(
-            input_dim=latent_dim,
+            input_dim=input_dim,
             n_codebooks=n_codebooks,
             codebook_size=vocab_size,
             codebook_dim=latent_dim,
@@ -104,12 +105,12 @@ class CodebookEmbedding(nn.Module):
 class VampNet(L.LightningModule):
     def __init__(
         self,
-        n_heads: int = 8,
-        n_layers: int = 8,
+        n_heads: int = 12,
+        n_layers: int = 12,
         latent_dim: int = 8,
         n_codebooks: int = 9,
         n_conditioning_codebooks: int = 0,
-        embedding_dim: int = 774,
+        embedding_dim: int = 1026,
         vocab_size: int = 1024,
         flash_attn: bool = True,
         dropout: float = 0.0
@@ -134,6 +135,7 @@ class VampNet(L.LightningModule):
             n_codebooks=n_codebooks,
             vocab_size=vocab_size,
             emb_dim=embedding_dim,
+            input_dim=vocab_size,
             special_tokens=["MASK"],
         )
         self.mask_token = self.embedding.special_idxs["MASK"]
