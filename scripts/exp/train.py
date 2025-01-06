@@ -45,6 +45,7 @@ VampNet = argbind.bind(VampNet)
 Dataset = argbind.bind(sm.dataset.Dataset, "train", "val")
 
 IGNORE_INDEX = -100
+CODEC_CKPT = "/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 
 def flip_coin(prob):
     return torch.rand(1).item() < prob
@@ -186,7 +187,7 @@ class AudioSampleLoggingCallback(Callback):
             n_batch = z.shape[0]
             r = rs[i] * torch.ones(n_batch).to(z.device)
 
-            mask, ii = pmask.random(z, r)
+            mask, ii = module.model.random_mask(z, r)
             mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
@@ -292,8 +293,9 @@ class AudioSampleLoggingCallback(Callback):
 class VampNetTrainer(L.LightningModule):
 
     def __init__(self, 
-        codec_ckpt: str,
-        outpaint_prob: float = 0.0
+        codec_ckpt: str = CODEC_CKPT,
+        outpaint_prob: float = 0.0, 
+        mode: str = "stemgen"
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -302,7 +304,7 @@ class VampNetTrainer(L.LightningModule):
         self.codec = torch.compile(self.codec)
         # to speed up the first steps of training
 
-        self.model = VampNet()
+        self.model = VampNet(mode=mode)
         self.model.embedding.quantizer.load_state_dict(
             self.codec.quantizer.state_dict()
         ) # initialize VampNet's embedding layers with the codec's quantizers
@@ -349,7 +351,7 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask, ii = pmask.random(z, r)
+        mask, ii = self.model.random_mask(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         if torch.rand(1).item() < self.outpaint_prob:
             # sample how many tokens to outpaint
@@ -408,7 +410,7 @@ class VampNetTrainer(L.LightningModule):
         n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
-        mask, ii = pmask.random(z, r)
+        mask, ii = self.model.random_mask(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
 
         if torch.rand(1).item() < self.outpaint_prob:
@@ -478,7 +480,7 @@ if __name__ == "__main__":
 
     args = argbind.parse_args()
     with argbind.scope(args):
-        model = VampNetTrainer(args["codec_ckpt"])
+        model = VampNetTrainer()
 
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
@@ -506,7 +508,7 @@ if __name__ == "__main__":
             default_root_dir="runs/debug",
             max_epochs=-1,
             limit_val_batches=20, 
-            gradient_clip_val=5.0,
+            gradient_clip_val=1.0,
             val_check_interval=1000,
             # val_check_interval=1000,
             callbacks=callbacks,

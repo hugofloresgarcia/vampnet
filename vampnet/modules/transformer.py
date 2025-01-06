@@ -11,7 +11,7 @@ from einops.layers.torch import Rearrange
 import lightning as L
 from einops import rearrange
 
-from x_transformers import ContinuousTransformerWrapper, TransformerWrapper
+from x_transformers import TransformerWrapper
 from x_transformers import Encoder
 
 from .activations import get_activation
@@ -20,10 +20,7 @@ from .layers import FiLM
 from .layers import SequentialWithFiLM
 from .layers import WNConv1d
 from ..util import scalar_to_batch_tensor, codebook_flatten, codebook_unflatten
-from ..mask import _gamma
-from .lora import Linear
-
-LORA_R = 8
+from ..mask import _gamma, random, stemgen_random
 
 @torch.jit.script_if_tracing
 def gumbel_noise_like(t: Tensor):
@@ -35,6 +32,10 @@ def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise_like(t)).argmax(dim=dim)
 
 class CodebookEmbedding(nn.Module):
+    """ Codebook embedding that is meant to be initialized
+    with the codec's RVQ module, to take advantage of it's pre-initialized
+    embedding layers
+    """
     def __init__(
         self,
         vocab_size: int,
@@ -113,7 +114,8 @@ class VampNet(L.LightningModule):
         embedding_dim: int = 1026,
         vocab_size: int = 1024,
         flash_attn: bool = True,
-        dropout: float = 0.0
+        dropout: float = 0.0, 
+        mode: str = "vampnet"
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -124,12 +126,19 @@ class VampNet(L.LightningModule):
         self.vocab_size = vocab_size
         self.flash_attn = flash_attn
 
-        # add an embedding layer per codebook
-        # assert embedding_dim % n_codebooks == 0, f"embedding_dim must be divisible by n_codebooks, but got {embedding_dim} and {n_codebooks}"
-        # self.embedding = nn.Embedding(
-        #     ((vocab_size) * n_codebooks) + 1, embedding_dim // n_codebooks
-        # )
-        # self.mask_token = (vocab_size * n_codebooks)
+        self.mode = mode
+        assert self.mode in ["vampnet", "stemgen"], "mode must be vampnet or stemgen"
+        if self.mode == "stemgen":
+            self.generate = self.stemgen_generate
+            self.random_mask = stemgen_random
+        elif self.mode == "vampnet":
+            self.generate = self.generate
+            self.random_mask = random
+
+        print(("~" * 80 + "\n") * 4)
+        print(f"VampNet mode: {self.mode}")
+        print(("~" * 80 + "\n") * 4)
+
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
             n_codebooks=n_codebooks,
@@ -385,6 +394,7 @@ class VampNet(L.LightningModule):
         sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         temperature: float = 1.0,
         mask_temperature: float = 10.5,
+        random_remask: bool = False,
         typical_filtering=False,
         typical_mass=0.2,
         typical_min_tokens=1,
@@ -394,7 +404,7 @@ class VampNet(L.LightningModule):
         causal_weight: float = 0.0,
     ):
 
-
+        assert self.n_conditioning_codebooks == 0, "n_conditioning codebooks is an old vampnet construct"
         #####################
         # resolve initial z #
         #####################
@@ -420,11 +430,13 @@ class VampNet(L.LightningModule):
         # begin sampling #
         #################
         # add one sampling step for each codebook level
-        print(f"initial mask: {mask}")
-        print(f"adding {n_infer_codebooks} sampling steps")
+        logging.debug(f"initial mask: {mask}")
+        logging.debug(f"adding {n_infer_codebooks} sampling steps")
+
+        # append if we have too little, truncate if we have too many
         steps = sampling_steps + [1 for _ in range(n_infer_codebooks - len(sampling_steps))]
-        # truncate if we have too many
         steps = steps[:n_infer_codebooks]
+
         for codebook_level, nsteps in enumerate(steps):
 
             # apply the orig mask to z_masked, only in the current codebook level
@@ -433,26 +445,33 @@ class VampNet(L.LightningModule):
             z_masked[:, codebook_level, :] = torch.where(
                 orig_mask[:, codebook_level, :].bool(), 
                 self.mask_token, 
-                z_masked[:, codebook_level, :]
+                z[:, codebook_level, :]
             )
+
+            # mask everything above the current codebook level
+            z_masked[:, codebook_level+1:, :] = self.mask_token
+
+            # assert that any codebook below us is fully unmasked
+            if codebook_level > 0:
+                assert (z_masked[:, codebook_level-1, :] != self.mask_token).all()
 
             # how many mask tokens to begin with?
             num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.mask_token).sum(dim=-1)
-            print(f"num mask tokens at start: {num_mask_tokens_at_start}")
+            logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
             for i in range(nsteps):
-                print(f"processing cb level {codebook_level} of {len(steps)}")
-                print(f"step {i} of {nsteps}")
+                logging.debug(f"processing cb level {codebook_level} of {len(steps)}")
+                logging.debug(f"step {i} of {nsteps}")
 
                 # our current schedule step
                 r = scalar_to_batch_tensor(
                     (i + 1) / nsteps, 
                     z.shape[0]
                 ).to(z.device)
-                print(f"r: {r}")
+                logging.debug(f"r: {r}")
 
                 # get latents
-                print("z_masked before forward", z_masked)
+                logging.debug("z_masked before forward", z_masked)
                 _debug_z_masked_before_forward = z_masked.clone()
 
                 logits = self.forward(z_masked)  # b, prob, seq
@@ -473,9 +492,8 @@ class VampNet(L.LightningModule):
                 # find out which codebook we are sampling from
                 selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
                 selected_probs[:,  codebook_level+1:, :,] = -float("inf") # all the ones above
-                print(f"masking all but codebook {codebook_level}")
-                print(f"selected probs: {selected_probs}")
-                print(mask)
+                logging.debug(f"selected probs: {selected_probs}")
+                logging.debug(mask)
                 selected_probs = codebook_flatten(selected_probs)
 
                 # print(f"sampled z with shape: {sampled_z.shape}")
@@ -486,36 +504,39 @@ class VampNet(L.LightningModule):
                 z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])      
 
                 mask = (z_masked == self.mask_token).int()
-                print(f"mask now: {codebook_unflatten(mask, n_infer_codebooks)}")
+                logging.debug(f"mask now: {codebook_unflatten(mask, n_infer_codebooks)}")
                 
                 # update the mask, remove conditioning codebooks from the mask
-                print(f"updated mask with shape: {mask.shape}")
+                logging.debug(f"updated mask with shape: {mask.shape}")
                 
                 # add z back into sampled z where the mask was false
                 sampled_z = torch.where(
                     mask.bool(), sampled_z, z_masked
                 )
-                print(f"added z back into sampled z with shape: {sampled_z.shape}")
+                logging.debug(f"added z back into sampled z with shape: {sampled_z.shape}")
 
                 # get the num tokens to mask, according to the schedule
                 num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
-                # num_to_mask = torch.floor(r * num_mask_tokens_at_start).unsqueeze(1).long() # doesn't work at all this way
-                print(f"num to mask: {num_to_mask}")
-                print(f"masking {num_to_mask.sum()} tokens")
 
+                # num_to_mask = torch.floor(r * num_mask_tokens_at_start).unsqueeze(1).long() # doesn't work at all this way
+                logging.debug(f"num to mask: {num_to_mask}")
+                logging.debug(f"masking {num_to_mask.sum()} tokens")
+
+                # mask at least 1 token if we still have steps left? 
                 if i != (nsteps - 1):
+                    # TODO: hmm why does this make sense?  
                     mask = codebook_unflatten(mask, n_infer_codebooks)
-                    num_to_mask = torch.maximum(
+                    num_to_mask = torch.maximum( 
                         torch.tensor(1),
                         torch.minimum(
                             mask[:, codebook_level, :].sum(dim=-1, keepdim=True) - 1,
                             num_to_mask
                         )
                     )
-                    print(f"will mask {num_to_mask.sum()} tokens")
+                    logging.debug(f"will mask {num_to_mask.sum()} tokens")
                     mask = codebook_flatten(mask)
             
-                # ignore any tokens that weren't masked
+                # ignore any tokens that weren't masked (inf prob so that they definitely get kept)
                 selected_probs = torch.where(
                    (mask.bool()), selected_probs, torch.inf
                 )
@@ -532,9 +553,17 @@ class VampNet(L.LightningModule):
 
                 # only consider probs at current level
                 selected_probs_cur_level = selected_probs[:, codebook_level, :]
-                mask_cur_level = mask_by_random_topk(
-                    num_to_mask, selected_probs_cur_level, mask_temperature * (1-r)
-                )  
+
+                # TODO: debugging this bad boy rn
+                if random_remask:
+                    mask_cur_level = mask_by_random(
+                        num_to_mask, selected_probs_cur_level
+                    )
+                else:
+                    mask_cur_level = mask_by_random_topk(
+                        num_to_mask, selected_probs_cur_level, mask_temperature * (1-r)
+                    )  
+
                 mask[:, codebook_level, :] = mask_cur_level
 
                 mask = codebook_flatten(mask)
@@ -546,18 +575,18 @@ class VampNet(L.LightningModule):
                 z_masked = torch.where(
                     mask.bool(), self.mask_token, sampled_z
                 )
-                print(f"updated z_masked with shape: {z_masked.shape}")
+                logging.debug(f"updated z_masked with shape: {z_masked.shape}")
 
                 z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
                 mask = codebook_unflatten(mask, n_infer_codebooks)
-                print(f"unflattened z_masked with shape: {z_masked.shape}")
+                logging.debug(f"unflattened z_masked with shape: {z_masked.shape}")
 
                 # add conditioning codebooks back to z_masked
                 z_masked = torch.cat(
                     (z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1
                 )
-                print(f"added conditioning codebooks back to z_masked with shape: {z_masked.shape}")
-                print(f"\n\n\n")
+                logging.debug(f"added conditioning codebooks back to z_masked with shape: {z_masked.shape}")
+                logging.debug(f"\n\n\n")
 
                 if debug:
                     import matplotlib.pyplot as plt
@@ -607,7 +636,7 @@ class VampNet(L.LightningModule):
             (z[:, :self.n_conditioning_codebooks, :], sampled_z), dim=1
         )
 
-        print(f"finished sampling")
+        logging.debug(f"finished sampling")
         return sampled_z
         
 def sample_from_logits(
@@ -694,6 +723,29 @@ def sample_from_logits(
     else:
         return token
     
+def mask_by_random(
+    num_to_mask: int, 
+    probs: torch.Tensor,
+):
+    # breakpoint()
+    # check which ones we CAN'T mask by looking for p == inf
+    cant_mask = probs == torch.inf
+
+    # now, pick random tokens to mask from the indices we can mask
+    can_mask_indices = torch.where(~cant_mask)
+    num_to_mask = min(num_to_mask, can_mask_indices[0].shape[0])
+    mask_indices = torch.randperm(can_mask_indices[0].shape[0])[:num_to_mask]
+
+    # make a mask from the indices
+    mask = torch.zeros_like(probs, dtype=torch.bool)
+    mask[can_mask_indices[0][mask_indices], can_mask_indices[1][mask_indices]] = True
+
+    # count how many tokens we masked
+    num_masked = mask.sum().item()
+    assert num_masked == num_to_mask, f"num masked: {num_masked}, num to mask: {num_to_mask}"
+
+    return mask
+
 
 
 def mask_by_random_topk(

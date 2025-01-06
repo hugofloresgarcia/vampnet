@@ -7,11 +7,9 @@ import torch
 
 from scripts.exp.train import VampNetTrainer
 
-ckpt = "/home/hugo/soup/runs/debug/lightning_logs/version_180/checkpoints/last.ckpt"
-codec_ckpt = "/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
+ckpt = "/home/hugo/soup/runs/debug/lightning_logs/version_189/checkpoints/last.ckpt"
 
-bundle = VampNetTrainer.load_from_checkpoint(ckpt, codec_ckpt=codec_ckpt) 
-bundle.codec = vampnet.dac.DAC.load(codec_ckpt)
+bundle = VampNetTrainer.load_from_checkpoint(ckpt) 
 codec = bundle.codec
 vn = bundle.model
 vn.eval()
@@ -22,7 +20,7 @@ eiface = Interface(
     vn=vn,
 )
 
-at.util.seed(0)
+# at.util.seed(1)
 
 # load the dataset for playing w/
 # from scripts.exp.train import build_datasets
@@ -54,7 +52,7 @@ codes = eiface.encode(sig.wav)
 print(codes.shape)
 
 # make a mask
-mask = eiface.build_mask(codes, periodic_prompt=0, upper_codebook_mask=4)
+mask = eiface.build_mask(codes, periodic_prompt=3, upper_codebook_mask=14)
 
 # vamp on the codes
 # chop off, leave only the top  codebooks
@@ -65,16 +63,20 @@ mask = mask[:, : vn.n_codebooks, :]
 # apply the mask
 from vampnet.mask import apply_mask
 z = apply_mask(z, mask, vn.mask_token)
+
+mtemp =  5.0
 with torch.autocast(device,  dtype=torch.bfloat16):
     zv = vn.generate(
         codes=z,
         temperature=1.0,
-        # mask_temperature=1.0,
+        mask_temperature=mtemp,
         typical_filtering=False,
         typical_mass=0.15,
-        typical_min_tokens=64,
-        sampling_steps=12, 
-        causal_weight=0.0
+        # typical_min_tokens=64,
+        sampling_steps=[16, 8, 4, 4], 
+        # sampling_steps=16, 
+        causal_weight=0.0, 
+        debug=True
     )
 
 
@@ -88,4 +90,4 @@ sn.write(outsig, "scratch/ex-recons.wav")
 
 # save generated
 generated_wav = eiface.decode(zv)
-sn.write(sn.Signal(generated_wav, sig.sr), "scratch/ex-gen.wav")
+sn.write(sn.Signal(generated_wav, sig.sr), f"scratch/ex-gen-mtemp{mtemp}.wav")

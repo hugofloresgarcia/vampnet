@@ -1,6 +1,4 @@
 
-codec_ckpt: /home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth 
-save_path: ckpt
 
 num_iters: 1000000000
 save_iters: [10000, 50000, 100000, 300000, 500000]
