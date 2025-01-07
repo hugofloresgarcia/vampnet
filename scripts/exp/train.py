@@ -309,7 +309,7 @@ class VampNetTrainer(L.LightningModule):
     def __init__(self, 
         codec_ckpt: str = CODEC_CKPT,
         outpaint_prob: float = 0.0, 
-        mode: str = "vampnet", 
+        mode: str = "stemgen", 
         ctrl_keys: list[str] = ["rms"]
     ):
         super().__init__()
@@ -524,7 +524,12 @@ if __name__ == "__main__":
 
     args = argbind.parse_args()
     with argbind.scope(args):
-        model = VampNetTrainer()
+        resume_ckpt_path = get_checkpoint_path()
+        model = (
+            VampNetTrainer.load_from_checkpoint(resume_ckpt_path)
+                if resume_ckpt_path is not None
+                else VampNetTrainer()
+        )
 
         train_data, val_data = build_datasets(model.codec.sample_rate)
         train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
@@ -568,5 +573,5 @@ if __name__ == "__main__":
             model=model, 
             train_dataloaders=train_dataloader, 
             val_dataloaders=val_dataloader, 
-            ckpt_path=get_checkpoint_path()
+            ckpt_path=resume_ckpt_path
         )
