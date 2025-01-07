@@ -45,15 +45,16 @@ VampNet = argbind.bind(VampNet)
 Dataset = argbind.bind(sm.dataset.Dataset, "train", "val")
 
 IGNORE_INDEX = -100
-CODEC_CKPT = "/home/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
+CODEC_CKPT = "~/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 
 def flip_coin(prob):
     return torch.rand(1).item() < prob
 
-from torch_pitch_shift import *
-# only a fifth up or down
-SHIFTS = get_fast_shifts(44100, lambda x : x != 1 and x <1.5 and x > 0.5)
+
 AUGMENT = False
+if AUGMENT:
+    from torch_pitch_shift import get_fast_shifts, pitch_shift
+    SHIFTS = get_fast_shifts(44100, lambda x : x != 1 and x <1.5 and x > 0.5)
 
 def build_transform():
     def transform(sig):
@@ -299,6 +300,8 @@ class VampNetTrainer(L.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+
+        codec_ckpt = Path(codec_ckpt).resolve()
         
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec = torch.compile(self.codec)

@@ -21,7 +21,7 @@ import math
 import torch
 import torch.nn as nn
 
-from .signal_meter import Meter, MIN_LOUDNESS
+from .meter import Meter, MIN_LOUDNESS
 
 GAIN_FACTOR = np.log(10) / 20
 """Gain factor for converting between amplitude and decibels."""

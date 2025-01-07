@@ -130,10 +130,15 @@ class VampNetDigitalInstrumentSystem:
 
             # run the vamp
             if self.is_vamping: 
+                print(f"interrupting!")
                 self._interrupt = True
+                self.interface.vn.interrupt = True
                 while self.is_vamping:
                     # print(f"Waiting for the current process to finish")
                     time.sleep(0.05)
+                print(f"interrupted!")
+                self.interface.vn.interrupt = False
+                self._interrupt = False
                 print(f"Current process has finished, starting new process")
             
             sig = self.vamp(sig)
@@ -216,44 +221,20 @@ class VampNetDigitalInstrumentSystem:
             self.interface.vn.mask_token
         )
 
-        state = self.interface.vn.initialize_state(
-            codes, 
-            self.SAMPLING_STEPS, 
-            cfg_guidance=cfg_guidance
-        )
-
         # seed
         if self.seed >= 0:
             torch.manual_seed(self.seed)
         else:
             torch.manual_seed(int(time.time()))
 
-        for i in tqdm(range(self.SAMPLING_STEPS)):
-
-            # check for an interrupt 
-            if self._interrupt:
-                print(f'INTERRUPTED at step {i}')
-                self._interrupt = False
-                self.is_vamping = False
-                return
-
-            # apply mask
-
-            state = self.interface.vn.generate_step(
-                state,
-                temperature=self.temperature,
-                mask_temperature=10.5,
-                typical_filtering=False,
-                typical_mass=0.15,
-                typical_min_tokens=64,
-                top_p=None,
-                sample_cutoff=1.0,
-                # causal_weight=0.0,
-                # cfg_guidance=cfg_guidance
-            )
+        z = self.interface.vn.generate(
+            codes=codes, 
+        )
+        if z is None:
+            # we were interrupted
+            self.is_vamping = False
+            return None
         timer.tock("sample")
-
-        z = state.z_masked[:state.nb] if cfg_guidance is not None else state.z_masked
 
         # decode
         timer.tick("decode")
@@ -281,7 +262,7 @@ def start_server():
     server.serve_forever()
 
 interface = vampnet.interface.load_from_trainer_ckpt(
-    ckpt_path="mtg-ok.ckpt", 
+    ckpt_path="v189-stemgenmode.ckpt", 
     codec_ckpt="/Users/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
 )
 

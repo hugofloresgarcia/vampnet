@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 import lightning as L
 from einops import rearrange
+import tqdm
 
 from x_transformers import TransformerWrapper
 from x_transformers import Encoder
@@ -26,7 +27,6 @@ from ..mask import _gamma, random, stemgen_random
 def gumbel_noise_like(t: Tensor):
     noise = torch.zeros_like(t).uniform_(1e-20, 1.0)
     return -torch.log(-torch.log(noise))
-
 
 def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise_like(t)).argmax(dim=dim)
@@ -135,6 +135,7 @@ class VampNet(L.LightningModule):
             self.generate = self.generate
             self.random_mask = random
 
+
         print(("~" * 80 + "\n") * 4)
         print(f"VampNet mode: {self.mode}")
         print(("~" * 80 + "\n") * 4)
@@ -182,7 +183,8 @@ class VampNet(L.LightningModule):
             ) for _ in range(self.n_predict_codebooks)
         ])
 
-        # self.rearrange_bpct_bptc = Rearrange("b (p c) t -> b p (t c)", c=self.n_predict_codebooks)
+        # a thread-safe-ish interrupt for the generate function
+        self.interrupt = False
     
     def codebook_idx_to_global_idx(self, codes: Tensor):
         # codes is shape (b, n_codebooks, t)
@@ -374,6 +376,11 @@ class VampNet(L.LightningModule):
         state = self.initialize_state(codes, sampling_steps, cfg_guidance)
 
         for _ in tqdm(range(sampling_steps)):
+
+            if self.interrupt:
+                self.interrupt = False
+                return None
+            
             state = self.generate_step(
                 state,
                 temperature,
@@ -403,32 +410,19 @@ class VampNet(L.LightningModule):
         debug=False,
         causal_weight: float = 0.0,
     ):
-
         assert self.n_conditioning_codebooks == 0, "n_conditioning codebooks is an old vampnet construct"
-        #####################
-        # resolve initial z #
-        #####################
-        z = codes
 
-        #################
-        # resolve mask #
-        #################
         # get the mask from the z
+        z = codes
         mask = z == self.mask_token
         orig_mask = mask.clone()
 
-        ###########
-        # set up #
-        ##########
         # apply the mask to z
         z_masked = z.clone()
 
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
 
-        #################
-        # begin sampling #
-        #################
         # add one sampling step for each codebook level
         logging.debug(f"initial mask: {mask}")
         logging.debug(f"adding {n_infer_codebooks} sampling steps")
@@ -459,7 +453,12 @@ class VampNet(L.LightningModule):
             num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.mask_token).sum(dim=-1)
             logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
-            for i in range(nsteps):
+            for i in tqdm.tqdm(range(nsteps)):
+                if self.interrupt: 
+                    print(f"vampnet: INTERRUPTED! returning None")
+                    self.interrupt = False
+                    return None
+
                 logging.debug(f"processing cb level {codebook_level} of {len(steps)}")
                 logging.debug(f"step {i} of {nsteps}")
 
@@ -476,7 +475,6 @@ class VampNet(L.LightningModule):
 
                 logits = self.forward(z_masked)  # b, prob, seq
                 logits = rearrange(logits, "b p t -> b t p")
-                # print(f"permuted logits with shape: {logits.shape}")
 
                 sampled_z, selected_probs = sample_from_logits(
                     logits, sample=(
@@ -546,8 +544,7 @@ class VampNet(L.LightningModule):
                 causal_probs = causal_probs.repeat(z_masked.shape[0], 1)
                 selected_probs = selected_probs + causal_probs * causal_weight
 
-                # # get our new mask
-                ############
+                # get our new mask
                 mask = codebook_unflatten(mask, n_infer_codebooks)
                 selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
 
@@ -568,8 +565,6 @@ class VampNet(L.LightningModule):
 
                 mask = codebook_flatten(mask)
                 selected_probs = codebook_flatten(selected_probs)
-                ###############
-
 
                 # update the mask
                 z_masked = torch.where(
@@ -727,7 +722,6 @@ def mask_by_random(
     num_to_mask: int, 
     probs: torch.Tensor,
 ):
-    # breakpoint()
     # check which ones we CAN'T mask by looking for p == inf
     cant_mask = probs == torch.inf
 
@@ -745,8 +739,6 @@ def mask_by_random(
     assert num_masked == num_to_mask, f"num masked: {num_masked}, num to mask: {num_to_mask}"
 
     return mask
-
-
 
 def mask_by_random_topk(
         num_to_mask: int, 
@@ -822,39 +814,4 @@ def typical_filter(
     logits = x_flat.view(nb, nt, nl)
 
     return logits
-
-
-if __name__ == "__main__":
-    # import argbind
-    from .layers import num_params
-
-    VampNet = argbind.bind(VampNet)
-
-    @argbind.bind(without_prefix=True)
-    def try_model(device: str = "cuda", batch_size: int = 2, seq_len_s: float = 10.0):
-        seq_len = int(32000 / 512 * seq_len_s)
-
-        model = VampNet().to(device)
-
-        z = torch.randint(
-            0, model.vocab_size, size=(batch_size, model.n_codebooks, seq_len)
-        ).to(device)
-
-        r = torch.zeros(batch_size).to(device)
-        
-        z_mask_latent = torch.rand(
-            batch_size, model.latent_dim * model.n_codebooks, seq_len
-        ).to(device)
-        z_hat = model(z_mask_latent)
-
-        pred = z_hat.argmax(dim=1)
-        pred = model.embedding.unflatten(pred, n_codebooks=model.n_predict_codebooks)
-
-        logging.debug(f"model has {num_params(model)/1e6:<.3f}M parameters")
-        logging.debug(f"prediction has shape {pred.shape}")
-
-    args = argbind.parse_args()
-    with argbind.scope(args):
-        try_model()
-
 
