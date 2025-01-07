@@ -52,9 +52,10 @@ class ControlEncoder(nn.Module):
         embedding_dim: int,
         cfg_dropout_prob: float
     ):
+        super().__init__()
         self.ctrl_encoders = nn.ModuleDict({
             key: nn.Linear(dim, embedding_dim)
-                for key, dim in ctrl_dims.values()
+                for key, dim in ctrl_dims.items()
         })
 
         self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
@@ -75,7 +76,7 @@ class ControlEncoder(nn.Module):
             ctrld = ctrls[ck]
             ctrlmask = ctrl_masks[ck]
 
-            assert ctrld.shape[-1] == x.shape[-1], "ctrls should match x along time dimension"
+            assert ctrld.shape[-1] == embedding.shape[-1], "ctrls should match x along time dimension"
             assert ctrlmask.ndim == 2, "ctrlmask should be 2d"
             assert ctrlmask.shape[-1] == ctrld.shape[-1], "ctrlmask should match ctrld along time dimension"
 
@@ -86,7 +87,7 @@ class ControlEncoder(nn.Module):
             ctrl_emb = rearrange(ctrl_emb, "b n d -> b d n")
 
             # apply ctrl mask
-            ctrl_emb = ctrl_emb * ctrlmask
+            ctrl_emb = ctrl_emb * ctrlmask[:, None, :]
 
             # apply cfg dropout
             ctrl_emb = self.cfg_dropout(ctrl_emb)
@@ -199,7 +200,6 @@ class VampNet(L.LightningModule):
             self.generate = self.stemgen_generate
             self.random_mask = stemgen_random
         elif self.mode == "vampnet":
-            assert False, "vampnet mode disabled until we rewrite generate more concisely, which we should do"
             self.generate = self.generate
             self.random_mask = random
         print(f"VampNet modeling mode: {self.mode}")
@@ -326,7 +326,7 @@ class VampNet(L.LightningModule):
         cfg_scale: float = 3.0,
         sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         temperature: float = 1.0,
-        mask_temperature: float = 10.5,
+        mask_temperature: float = 5.0,
         random_remask: bool = False,
         typical_filtering=False,
         typical_mass=0.2,
@@ -415,7 +415,7 @@ class VampNet(L.LightningModule):
 
                 logits = self.forward(
                     z_masked, 
-                    ctrl=ctrls, 
+                    ctrls=ctrls, 
                     ctrl_masks=ctrl_masks
                 )  # b, prob, seq
                 logits = fromcfg(logits)
@@ -578,7 +578,156 @@ class VampNet(L.LightningModule):
 
         logging.debug(f"finished sampling")
         return sampled_z
+    
+    @torch.inference_mode()
+    def generate(
+        self, 
+        codes: Optional[torch.Tensor] = None,
+        ctrls: dict[str, Tensor] = None,
+        ctrl_masks: dict[str, Tensor] = None,
+        cfg_scale: float = 3.0,
+        sampling_steps: int = 12,
+        temperature: float = 1.0,
+        mask_temperature: float = 10.5,
+        typical_filtering=True,
+        typical_mass=0.15,
+        typical_min_tokens=64,
+        top_p=None,
+        seed: int = None,
+        sample_cutoff: float = 1.0,
+        causal_weight: float = 0.0,
+    ):
+
+        use_cfg = ctrls is not None
+        tocfg = lambda x: x.repeat(2, 1, 1) if use_cfg else x
+        tocfgblank = lambda x: torch.cat([x, torch.zeros_like(x)], dim=0) if use_cfg else x
+        def fromcfg(x):
+            if use_cfg:
+                xcond, xuncond = x.chunk(2)
+                return xuncond + cfg_scale * (xcond - xuncond)
+            return x
+
+        if seed is not None:
+            torch.manual_seed(seed)
+        logging.debug(f"beginning generation with {sampling_steps} steps")
+
+        codes = tocfg(codes)
+        if ctrls is not None:
+            ctrls = {k: tocfg(v) for k, v in ctrls.items()}
+            ctrl_masks = {k: tocfgblank(v) for k, v in ctrl_masks.items()}
         
+        # apologies for the confusing interchangeability of z and codes
+        z = codes
+        nb = z.shape[0]
+
+        # get the mask from the start tokens
+        mask = z == self.mask_token
+
+        # apply the mask to z
+        z_masked = z.masked_fill(mask.bool(), self.mask_token)
+        # logging.debug(f"z_masked: {z_masked}")
+
+        # how many mask tokens to begin with?
+        num_mask_tokens_at_start = (z_masked == self.mask_token).sum()
+
+        # how many codebooks are we inferring vs conditioning on?
+        n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
+
+
+        from tqdm import tqdm
+        for i in range(sampling_steps):
+            if self.interrupt: # interrupt if another thread wants to interrupt
+                print(f"vampnet: INTERRUPTED! returning None")
+                self.interrupt = False
+                return None
+
+            # our current schedule step
+            r = scalar_to_batch_tensor(
+                (i + 1) / sampling_steps, 
+                z.shape[0]
+            ).to(z.device)
+
+            # infer from latents
+            logits = self.forward(
+                z_masked, 
+                ctrls=ctrls, 
+                ctrl_masks=ctrl_masks
+            )  # b, prob, seq
+            logits = fromcfg(logits)
+
+            logits = logits.permute(0, 2, 1)  # b, seq, prob
+            b = logits.shape[0]
+
+            sampled_z, selected_probs = sample_from_logits(
+                logits, sample=(
+                   (i / sampling_steps) <= sample_cutoff
+                ), 
+                temperature=temperature,
+                typical_filtering=typical_filtering, typical_mass=typical_mass,
+                typical_min_tokens=typical_min_tokens,
+                top_k=None, top_p=top_p, return_probs=True,
+            )
+
+
+            # flatten z_masked and mask, so we can deal with the sampling logic
+            # we'll unflatten them at the end of the loop for the next forward pass
+            # remove conditioning codebooks, we'll add them back at the end
+            z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])           
+
+            mask = (z_masked == self.mask_token).int()
+            
+            # update the mask, remove conditioning codebooks from the mask
+            # add z back into sampled z where the mask was false
+            sampled_z = torch.where(
+                mask.bool(), sampled_z, z_masked
+            )
+
+            # ignore any tokens that weren't masked
+            selected_probs = torch.where(
+                mask.bool(), selected_probs, torch.inf
+            )
+
+            # get the num tokens to mask, according to the schedule
+            num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
+            logging.debug(f"num to mask: {num_to_mask}")
+
+            if i != (sampling_steps - 1):
+                num_to_mask = torch.maximum(
+                    torch.tensor(1),
+                    torch.minimum(
+                        mask.sum(dim=-1, keepdim=True) - 1,
+                        num_to_mask
+                    )
+                )
+
+
+            # get our new mask
+            mask = mask_by_random_topk(
+                num_to_mask, selected_probs, mask_temperature * (1-r)
+            )  
+
+            # update the mask
+            z_masked = torch.where(
+                mask.bool(), self.mask_token, sampled_z
+            )
+
+            z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
+            mask = codebook_unflatten(mask, n_infer_codebooks)
+
+            # add conditioning codebooks back to z_masked
+            z_masked = torch.cat(
+                (z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1
+            )
+
+        # add conditioning codebooks back to sampled_z
+        sampled_z = codebook_unflatten(sampled_z, n_infer_codebooks)
+        sampled_z = torch.cat(
+            (z[:, :self.n_conditioning_codebooks, :], sampled_z), dim=1
+        )
+
+
+        return sampled_z
+
 def sample_from_logits(
         logits, 
         sample: bool = True,
