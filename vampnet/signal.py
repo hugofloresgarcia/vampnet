@@ -12,6 +12,7 @@ import numpy as np
 from torch import Tensor
 import torchaudio.transforms as T
 import torch.nn.functional as F
+from einops import rearrange
 
 import soundfile as sf
 from flatten_dict import flatten
@@ -98,12 +99,50 @@ def batch(
     )
     return batched_signal
 
+# ~ stft ~
+def stft(sig: Signal, 
+        hop_length: int, window_length: int, 
+        center=True
+    ):
+        nb = sig.wav.shape[0]
+        wav = rearrange(sig.wav, 'b c n -> (b c) n')
+        stft_d = torch.stft(
+            wav, 
+            n_fft=window_length, 
+            hop_length=hop_length, 
+            center=center,
+            window=torch.hann_window(window_length).to(wav),
+            return_complex=True
+        )
+        stft_d = rearrange(stft_d, '(b c) f t -> b c f t', b=nb)
+        return stft_d
+
+def rms(sig: Signal, window_length: int, **kwargs):
+    # thank you librosa!
+    stft_d = stft(sig, window_length=window_length, **kwargs)
+
+    assert stft_d.shape[-2] == window_length // 2 + 1, "invalid window length"
+
+    # power spectrogram
+    x = torch.abs(stft_d) ** 2
+
+    # adjust the DC and sr / 2 component
+    x[..., 0, :] *= 0.5
+    if window_length % 2 == 0:
+        x[..., -1, :] *= 0.5
+    
+    # calculate power
+    power = 2 * torch.sum(x, axis=-2, keepdims=False) / window_length ** 2
+
+    rms_d = torch.sqrt(power)
+    return rms_d
 
 # ~ transform ~
 def pitch_shift(sig: Signal, semitones: int) -> Signal:
     tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
     return Signal(tfm(sig.wav), sig.sr)
 
+# TODO: remove audiotools. 
 import audiotools as at
 def low_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
     sig = sig.view()
@@ -199,7 +238,6 @@ def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
 def trim_to_s(sig: Signal, duration: float) -> Tensor:
     length = int(duration * sig.sr)
     return Signal(sig.wav[..., :length], sig.sr)
-
 
 def ensure_tensor(
     x: np.ndarray | torch.Tensor | float | int,
@@ -570,3 +608,10 @@ def torch_info(audio_path: str):
     except:  # pragma: no cover
         info = torchaudio.backend.soundfile_backend.info(str(audio_path))
     return info
+
+if __name__ == "__main__":
+    sig = read_from_file(
+        "assets/example.wav"
+    )
+    rms_d = rms(sig, window_length=2048, hop_length=512)
+    print(f"given sig of shape {sig.wav.shape}, rms_d has shape {rms_d.shape}")

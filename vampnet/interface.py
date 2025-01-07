@@ -7,7 +7,6 @@ import torch
 from torch import nn
 from torch import Tensor
 from torch import tensor as tt
-from audiotools import AudioSignal
 import tqdm
 
 from .modules.transformer import VampNet

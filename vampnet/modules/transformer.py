@@ -31,6 +31,71 @@ def gumbel_noise_like(t: Tensor):
 def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise_like(t)).argmax(dim=dim)
 
+class CFGDropout(nn.Module):
+    
+    def __init__(self, p: float = 0.2):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x: Tensor):
+        # dropout along the batch dim
+        if self.training:
+            mask = torch.rand(x.shape[0], 1, 1, device=x.device) > self.p
+        else:
+            mask = torch.ones(x.shape[0], 1, 1, device=x.device)
+        return x * mask
+
+class ControlEncoder(nn.Module):
+
+    def __init__(self, 
+        ctrl_dims: dict[str, int], 
+        embedding_dim: int,
+        cfg_dropout_prob: float
+    ):
+        self.ctrl_encoders = nn.ModuleDict({
+            key: nn.Linear(dim, embedding_dim)
+                for key, dim in ctrl_dims.values()
+        })
+
+        self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
+
+    def forward(self, 
+        embedding: Tensor, # embedding to which we will add ctrls
+        ctrls: dict[str, Tensor], 
+        ctrl_masks: dict[str, Tensor]
+    ):
+        # INPUT: ctrl tensor should be shape (b d n)
+
+        # assert that we got all the right ctrls and ctrl_masks according to the encoders that we have
+        assert list(sorted(ctrls.keys())) == list(sorted(self.ctrl_encoders.keys())), "ctrls and ctrl_encoders keys do not match"
+        assert list(sorted(ctrl_masks.keys())) == list(sorted(self.ctrl_encoders.keys())), "ctrl_masks and ctrl_encoders keys do not match"
+
+        out_emb = torch.zeros_like(embedding)
+        for ck in ctrls:
+            ctrld = ctrls[ck]
+            ctrlmask = ctrl_masks[ck]
+
+            assert ctrld.shape[-1] == x.shape[-1], "ctrls should match x along time dimension"
+            assert ctrlmask.ndim == 2, "ctrlmask should be 2d"
+            assert ctrlmask.shape[-1] == ctrld.shape[-1], "ctrlmask should match ctrld along time dimension"
+
+            # project ctrl with encoder
+            ctrld = rearrange(ctrld, "b d n -> b n d")
+            ctrl_emb = self.ctrl_encoders[ck](ctrld)
+            ctrld = rearrange(ctrld, "b n d -> b d n")
+            ctrl_emb = rearrange(ctrl_emb, "b n d -> b d n")
+
+            # apply ctrl mask
+            ctrl_emb = ctrl_emb * ctrlmask
+
+            # apply cfg dropout
+            ctrl_emb = self.cfg_dropout(ctrl_emb)
+
+            # add to the out_emb
+            out_emb = out_emb + ctrl_emb
+
+        return out_emb
+    
 class CodebookEmbedding(nn.Module):
     """ Codebook embedding that is meant to be initialized
     with the codec's RVQ module, to take advantage of it's pre-initialized
@@ -115,7 +180,9 @@ class VampNet(L.LightningModule):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         dropout: float = 0.0, 
-        mode: str = "vampnet"
+        mode: str = "vampnet", 
+        ctrl_dims: Optional[dict[str, int]] = None, 
+        cfg_dropout_prob: float = 0.2
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -132,13 +199,10 @@ class VampNet(L.LightningModule):
             self.generate = self.stemgen_generate
             self.random_mask = stemgen_random
         elif self.mode == "vampnet":
+            assert False, "vampnet mode disabled until we rewrite generate more concisely, which we should do"
             self.generate = self.generate
             self.random_mask = random
-
-
-        print(("~" * 80 + "\n") * 4)
-        print(f"VampNet mode: {self.mode}")
-        print(("~" * 80 + "\n") * 4)
+        print(f"VampNet modeling mode: {self.mode}")
 
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
@@ -169,7 +233,6 @@ class VampNet(L.LightningModule):
             emb_dropout=dropout,
         )
 
-
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks
 
@@ -185,6 +248,15 @@ class VampNet(L.LightningModule):
 
         # a thread-safe-ish interrupt for the generate function
         self.interrupt = False
+
+        self.ctrl_dims = ctrl_dims
+        if self.ctrl_dims is not None:
+            self.ctrl_encoder = ControlEncoder(
+                ctrl_dims, 
+                embedding_dim=embedding_dim, 
+                cfg_dropout_prob=cfg_dropout_prob
+            )
+
     
     def codebook_idx_to_global_idx(self, codes: Tensor):
         # codes is shape (b, n_codebooks, t)
@@ -200,7 +272,11 @@ class VampNet(L.LightningModule):
         codes[mask] = self.mask_token
         return codes
 
-    def forward(self, x, return_activations: bool = False):
+    def forward(self, x, 
+            ctrls: dict[str, Tensor],
+            ctrl_masks: dict[str, Tensor], 
+            return_activations: bool = False
+        ):
         # # input should be shape (batch, codebook, seq)
         # x = self.codebook_idx_to_global_idx(x)
         # # pass through the embedding layer, output shape (batch, codebook, seq, emb)
@@ -211,8 +287,12 @@ class VampNet(L.LightningModule):
         # x = x.sum(dim=1)
 
         x = self.embedding(self.embedding.from_codes(x))
-        x = rearrange(x, "b n d -> b d n")
 
+        if self.ctrl_dims is not None:
+            # apply controls
+            x = x + self.ctrl_encoder(x, ctrls, ctrl_masks)
+
+        x = rearrange(x, "b n d -> b d n")
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :, :1].squeeze(2)
 
         assert return_activations == False, "return_activations not supported sry :( would happily implement if you need it"
@@ -224,10 +304,9 @@ class VampNet(L.LightningModule):
         out = rearrange(out, "b n d -> b d n")
 
         # run through each classifier
-        # (b n (c d)) -> (b n
         out = torch.stack([
             classifier(out) for classifier in self.classifiers
-        ], dim=1) # b, c, t, p
+        ], dim=1) 
 
         # b, pc, t = out.shape
         out = rearrange(out, "b c p t -> b p (t c)")
@@ -238,166 +317,13 @@ class VampNet(L.LightningModule):
             return out
 
 
-    @dataclass
-    class GenerationState:
-        z_masked: torch.Tensor
-        z: torch.Tensor
-        mask: torch.Tensor
-        num_mask_tokens_at_start: int
-        n_infer_codebooks: int
-        step: int
-        sampling_steps: int
-        cfg_guidance: Optional[float]
-        nb: int
-
-    @torch.inference_mode()
-    def initialize_state(
-            self, 
-            codes: torch.Tensor, 
-            sampling_steps: int, 
-            cfg_guidance: Optional[float]
-        ) -> GenerationState:
-        z = codes
-        nb = z.shape[0]
-
-        mask = z == self.mask_token
-        z_masked = z.masked_fill(mask.bool(), self.mask_token)
-        num_mask_tokens_at_start = (z_masked == self.mask_token).sum().item()
-        n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
-
-        if cfg_guidance is not None:
-            z_uncond = torch.full_like(z, self.mask_token)
-            z_masked = torch.cat((z_masked, z_uncond), dim=0)
-            z = torch.cat((z, z_uncond), dim=0)
-            mask = torch.cat((mask, torch.full_like(mask, 1)), dim=0)
-
-        return self.GenerationState(
-            z_masked=z_masked,
-            z=z,
-            mask=mask,
-            num_mask_tokens_at_start=num_mask_tokens_at_start,
-            n_infer_codebooks=n_infer_codebooks,
-            step=0,
-            sampling_steps=sampling_steps,
-            cfg_guidance=cfg_guidance,
-            nb=nb,
-        )
-
-    @torch.inference_mode()
-    def generate_step(self, 
-            state: GenerationState, 
-            temperature: float, 
-            mask_temperature: float, 
-            typical_filtering: bool, 
-            typical_mass: float, 
-            typical_min_tokens: int, 
-            top_p: Optional[float], 
-            sample_cutoff: float
-        ):
-        step = state.step
-        z_masked, z, mask = state.z_masked, state.z, state.mask
-        num_mask_tokens_at_start = state.num_mask_tokens_at_start
-        n_infer_codebooks = state.n_infer_codebooks
-        cfg_guidance = state.cfg_guidance
-        nb = state.nb
-        sampling_steps = state.sampling_steps
-
-        # Schedule step
-        r = scalar_to_batch_tensor(
-            (step + 1) / sampling_steps, z.shape[0]
-        ).to(z.device)
-
-        # Forward pass
-        logits = self.forward(z_masked)
-
-        if cfg_guidance is not None:
-            logits_cond, logits_uncond = logits[:nb], logits[nb:]
-            logits = cfg_guidance * logits_cond + (1 - cfg_guidance) * logits_uncond
-
-        logits = logits.permute(0, 2, 1)  # b, seq, prob
-        sampled_z, selected_probs = sample_from_logits(
-            logits,
-            sample=((step / sampling_steps) <= sample_cutoff),
-            temperature=temperature,
-            typical_filtering=typical_filtering,
-            typical_mass=typical_mass,
-            typical_min_tokens=typical_min_tokens,
-            top_k=None,
-            top_p=top_p,
-            return_probs=True,
-        )
-
-        z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])
-        mask = (z_masked == self.mask_token).int()
-
-        sampled_z = torch.where(mask.bool(), sampled_z, z_masked)
-        selected_probs = torch.where(mask.bool(), selected_probs, torch.inf)
-
-        num_to_mask = torch.floor(_gamma(r) * num_mask_tokens_at_start).unsqueeze(1).long()
-
-        if step != (sampling_steps - 1):
-            num_to_mask = torch.maximum(
-                torch.tensor(1),
-                torch.minimum(mask.sum(dim=-1, keepdim=True) - 1, num_to_mask),
-            )
-
-        mask = mask_by_random_topk(num_to_mask, selected_probs, mask_temperature * (1 - r))
-        z_masked = torch.where(mask.bool(), self.mask_token, sampled_z)
-
-        z_masked = codebook_unflatten(z_masked, n_infer_codebooks)
-        mask = codebook_unflatten(mask, n_infer_codebooks)
-        z_masked = torch.cat((z[:, :self.n_conditioning_codebooks, :], z_masked), dim=1)
-
-        state.z_masked = z_masked
-        state.mask = mask
-        state.step += 1
-
-        return state
-
-    @torch.inference_mode()
-    def generate(self, 
-            codes: torch.Tensor = None, 
-            sampling_steps: int = 12, 
-            temperature: float = 1.0, 
-            mask_temperature: float = 10.5, 
-            typical_filtering=False, 
-            typical_mass=0.15, 
-            typical_min_tokens=64, 
-            top_p=None, 
-            seed: int = None, 
-            sample_cutoff: float = 1.0, 
-            causal_weight: float = 0.0, 
-            cfg_guidance: float = None
-        ):
-        from tqdm import tqdm
-        if seed is not None:
-            torch.manual_seed(seed)
-
-        state = self.initialize_state(codes, sampling_steps, cfg_guidance)
-
-        for _ in tqdm(range(sampling_steps)):
-
-            if self.interrupt:
-                self.interrupt = False
-                return None
-            
-            state = self.generate_step(
-                state,
-                temperature,
-                mask_temperature,
-                typical_filtering,
-                typical_mass,
-                typical_min_tokens,
-                top_p,
-                sample_cutoff
-            )
-
-        return state.z_masked[:state.nb] if cfg_guidance is not None else state.z_masked
-
     @torch.inference_mode()
     def stemgen_generate(
         self,
         codes: torch.Tensor,
+        ctrls: dict[str, Tensor] = None,
+        ctrl_masks: dict[str, Tensor] = None,
+        cfg_scale: float = 3.0,
         sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         temperature: float = 1.0,
         mask_temperature: float = 10.5,
@@ -411,6 +337,20 @@ class VampNet(L.LightningModule):
         causal_weight: float = 0.0,
     ):
         assert self.n_conditioning_codebooks == 0, "n_conditioning codebooks is an old vampnet construct"
+
+        use_cfg = ctrls is not None
+        tocfg = lambda x: x.repeat(2, 1, 1) if use_cfg else x
+        tocfgblank = lambda x: torch.cat([x, torch.zeros_like(x)], dim=0) if use_cfg else x
+        def fromcfg(x):
+            if use_cfg:
+                xcond, xuncond = x.chunk(2)
+                return xuncond + cfg_scale * (xcond - xuncond)
+            return x
+    
+        codes = tocfg(codes)
+        if ctrls is not None:
+            ctrls = {k: tocfg(v) for k, v in ctrls.items()}
+            ctrl_masks = {k: tocfgblank(v) for k, v in ctrl_masks.items()}
 
         # get the mask from the z
         z = codes
@@ -473,7 +413,12 @@ class VampNet(L.LightningModule):
                 logging.debug("z_masked before forward", z_masked)
                 _debug_z_masked_before_forward = z_masked.clone()
 
-                logits = self.forward(z_masked)  # b, prob, seq
+                logits = self.forward(
+                    z_masked, 
+                    ctrl=ctrls, 
+                    ctrl_masks=ctrl_masks
+                )  # b, prob, seq
+                logits = fromcfg(logits)
                 logits = rearrange(logits, "b p t -> b t p")
 
                 sampled_z, selected_probs = sample_from_logits(

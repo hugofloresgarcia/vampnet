@@ -54,6 +54,21 @@ def random(
 
     return mask, torch.zeros_like(mask).bool()
 
+def random_along_time(x: torch.Tensor, r: torch.Tensor):
+    assert x.ndim == 3, "x must be (batch, channel, seq)"
+    if not isinstance(r, torch.Tensor):
+        r = scalar_to_batch_tensor(r, x.shape[0]).to(x.device)
+    
+    x = x[:, 0, :]
+    r = _gamma(r)[:, None]
+    probs = torch.ones_like(x) * r
+
+    mask = torch.bernoulli(probs)
+    mask = mask.round().int()
+
+    return mask
+    
+
 def stemgen_random(x: torch.Tensor, r: torch.Tensor):
     assert x.ndim == 3, "x must be (batch, n_codebooks, seq)"
     if not isinstance(r, torch.Tensor):

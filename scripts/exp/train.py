@@ -20,6 +20,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.utilities import grad_norm
 
 import vampnet
+from vampnet.control import Sketch2SoundController
 from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
@@ -138,7 +139,7 @@ def accuracy(
 
     return accuracy
 
-def _metrics(z_hat, r, target, flat_mask, output):
+def log_accuracy_metrics(z_hat, r, target, flat_mask, output):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
         unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
         masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
@@ -182,6 +183,16 @@ class AudioSampleLoggingCallback(Callback):
         rs = torch.linspace(0, 1, self.num_samples+1)[1:]
         for i in range(self.num_samples):
             sig = self.dataset[i]["sig"].to(module.device)
+
+            if len(module.ctrl_keys) > 0:
+                ctrls = module.controller.extract(sig)
+                ctrl_masks = {
+                    k: torch.ones_like(v[:, 0, :]) for k, v in ctrls.items()
+                } # no masking for onestep
+            else:
+                ctrls = None
+                ctrl_masks = None
+
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : module.model.n_codebooks, :]
 
@@ -226,12 +237,19 @@ class AudioSampleLoggingCallback(Callback):
                 sample_rate=sig.sr,
             )
 
-
-            
     @torch.inference_mode()
     def _save_generations(self, module):
         for i in range(self.num_samples):
             sig = self.dataset[i]["sig"].to(module.device)
+
+            if len(module.ctrl_keys) > 0:
+                ctrls = module.controller.extract(sig)
+                ctrl_masks = {
+                    k: torch.ones_like(v[:, 0, :]) for k, v in ctrls.items()
+                } # no masking for onestep
+            else:
+                ctrls = None
+                ctrl_masks = None
 
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : module.model.n_codebooks, :]
@@ -263,6 +281,15 @@ class AudioSampleLoggingCallback(Callback):
         for i in range(self.num_samples):
             sig = self.dataset[i]["sig"].to(module.device)
 
+            if len(module.ctrl_keys) > 0:
+                ctrls = module.controller.extract(sig)
+                ctrl_masks = {
+                    k: torch.ones_like(v[:, 0, :]) for k, v in ctrls.items()
+                } # no masking for onestep
+            else:
+                ctrls = None
+                ctrl_masks = None
+
             period = periods[i % len(periods)]
 
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
@@ -271,7 +298,11 @@ class AudioSampleLoggingCallback(Callback):
             mask = pmask.periodic_mask(z, period, 1, random_roll=True)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.generate(z_mask)
+            z_hat = module.model.generate(
+                z_mask, 
+                ctrls=ctrls, 
+                ctrl_masks=ctrl_masks
+            )
 
             outwav = module.codec.decode(
                 module.codec.quantizer.from_codes(z_hat)[0]
@@ -296,28 +327,46 @@ class VampNetTrainer(L.LightningModule):
     def __init__(self, 
         codec_ckpt: str = CODEC_CKPT,
         outpaint_prob: float = 0.0, 
-        mode: str = "stemgen"
+        mode: str = "stemgen", 
+        ctrl_keys: list[str] = ["rms"]
     ):
         super().__init__()
         self.save_hyperparameters()
 
         codec_ckpt = Path(codec_ckpt).resolve()
         
+        # the codec
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec = torch.compile(self.codec)
-        # to speed up the first steps of training
 
-        self.model = VampNet(mode=mode)
+        # the controller
+        if len(ctrl_keys) > 0:
+            self.controller = Sketch2SoundController(
+                ctrl_keys=ctrl_keys, 
+                hop_length=self.codec.hop_length,
+            )
+        else:
+            self.controller = None
+
+        # the vampnet
+        self.model = VampNet(
+            mode=mode, 
+            latent_dim=self.codec.quantizer.codebook_dim,
+            ctrl_dims=self.controller.ctrl_dims, 
+        )
+
+        # to speed up the first steps of training, 
+        # initialize VampNet's embedding layers with the codec's quantizers
         self.model.embedding.quantizer.load_state_dict(
             self.codec.quantizer.state_dict()
-        ) # initialize VampNet's embedding layers with the codec's quantizers
-        self.codec.eval()
-        # self.model = torch.compile(self.model)
+        ) 
         
+        self.codec.eval()
         self.codec.requires_grad_(False)
 
         self.outpaint_prob = outpaint_prob
 
+        # trainer things
         self.criterion = CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
 
@@ -343,6 +392,19 @@ class VampNetTrainer(L.LightningModule):
         self.model.train()
         batch = sn.prepare_batch(batch, self.device)
         sig = batch["sig"]
+        n_batch = sig.wav.shape[0]
+
+        # get controls
+        if len(ctrl_keys) > 0:
+            ctrls = self.controller.extract(sig)
+            # draw control masks NOTE: this mask will be the same for all controls. 
+            ctrl_masks = self.controller.random_mask(
+                ctrls, 
+                r=self.rng.draw(n_batch)[:, 0].to(self.device)
+            )
+        else:
+            ctrls = None
+            ctrl_masks = None
 
         output = {}
         vn = self.model
@@ -351,25 +413,22 @@ class VampNetTrainer(L.LightningModule):
             z = self.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : vn.n_codebooks, :]
 
-        n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
         mask, ii = self.model.random_mask(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+
+        # outpaint? 
         if torch.rand(1).item() < self.outpaint_prob:
             # sample how many tokens to outpaint
             n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
             outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
             mask = pmask.mask_and(mask, outpaint_mask)
-            # save the mask as txt
-            import numpy as np
-            np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
 
         z_mask = pmask.apply_mask(z, mask, vn.mask_token)
         
         # TODOO: use embedding instead
-        # z_mask_latent = vn.embedding.from_codes(z_mask)
-        z_hat = self.model(z_mask)
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -388,14 +447,6 @@ class VampNetTrainer(L.LightningModule):
 
         output["loss"] = self.criterion(z_hat, t_masked)
 
-        _metrics(
-            r=r,
-            z_hat=z_hat,
-            target=target,
-            flat_mask=flat_mask,
-            output=output,
-        )
-
         self.log("loss/train", output["loss"], on_step=True, prog_bar=True, sync_dist=True)
 
         return output["loss"]
@@ -405,12 +456,25 @@ class VampNetTrainer(L.LightningModule):
         self.codec.eval()
         batch = sn.prepare_batch(batch, self.device)
         sig = batch["sig"]
+        n_batch = z.shape[0]
+
+        # get controls
+        if len(ctrl_keys) > 0:
+            ctrls = self.controller.extract(sig)
+            # draw control masks NOTE: this mask will be the same for all controls. 
+            ctrl_masks = self.controller.random_mask(
+                ctrls, 
+                r=self.rng.draw(n_batch)[:, 0].to(self.device)
+            )
+        else:
+            ctrls = None
+            ctrl_masks = None
+
 
         vn = self.model
         z = self.codec.encode(sig.wav, sig.sr)["codes"]
         z = z[:, : vn.n_codebooks, :]
 
-        n_batch = z.shape[0]
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
         mask, ii = self.model.random_mask(z, r)
@@ -426,8 +490,7 @@ class VampNetTrainer(L.LightningModule):
 
         # TODOO: use embedding instead
         # z_mask_latent = vn.embedding.from_codes(z_mask)
-
-        z_hat = self.model(z_mask)
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -448,7 +511,9 @@ class VampNetTrainer(L.LightningModule):
         # update flat mask for metrics
         flat_mask = flat_mask.masked_fill(ii.bool(), 0)
 
-        _metrics(
+        # TODO: add ctrl adherence metrics
+
+        log_accuracy_metrics(
             r=r,
             z_hat=z_hat,
             target=target,
