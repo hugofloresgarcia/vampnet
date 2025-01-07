@@ -17,8 +17,8 @@ class RMS:
     def extract(self, sig: Signal) -> Tensor:
         return sn.rms(sig, 
             window_length=self.window_length, 
-            hop_length=self.hop_length
-        )
+            hop_length=self.hop_length, 
+        )[:, :, :-1] # TODO: cutting the last frame to match DAC tokens but why :'(
 
 
 CONTROLLERS = {
@@ -44,7 +44,7 @@ class Sketch2SoundController:
     @property
     def ctrl_dims(self, ) -> dict[str, int]:
         return {
-            k: controller.dim for k in self.ctrl_keys
+            k: controller.dim for k, controller in self.controllers.items()
         }
 
     def extract(self, sig: Signal) -> dict[str, Tensor]:
