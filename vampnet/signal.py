@@ -140,13 +140,14 @@ def pitch_shift(sig: Signal, semitones: int) -> Signal:
     return Signal(tfm(sig.wav), sig.sr)
 
 # TODO: remove audiotools. 
-import audiotools as at
 def low_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
+    import audiotools as at
     sig = sig.view()
     sig.wav = at.AudioSignal(sig.wav, sig.sr).low_pass(cutoff, zeros).samples
     return sig
 
 def high_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
+    import audiotools as at
     sig = sig.view()
     sig.wav = at.AudioSignal(sig.wav, sig.sr).high_pass(cutoff, zeros).samples
     return sig

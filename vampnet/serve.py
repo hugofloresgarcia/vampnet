@@ -2,8 +2,9 @@ from threading import Lock
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import argbind
 
-from pythonosc.osc_server import ThreadingOSCUDPServer, BlockingOSCUDPServer
+from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 from pythonosc.dispatcher import Dispatcher
 
@@ -11,18 +12,50 @@ import torch
 import vampnet
 import vampnet.signal as sn
 from vampnet.mask import apply_mask
+from scripts.train import VampNetTrainer
 from tqdm import tqdm
 
-ip = "localhost"
-s_port = 8002
-r_port = 8001
-DEVICE="mps"
 
 @dataclass
 class Param:
     name: str
     value: any
-    _t: type
+    param_type: type
+    range: tuple = None  # Optional range for validation
+
+    def set_value(self, new_value):
+        if self.range and not (self.range[0] <= new_value <= self.range[1]):
+            raise ValueError(f"Value {new_value} for {self.name} is out of range {self.range}")
+        self.value = self.param_type(new_value)
+
+
+class ParamManager:
+    def __init__(self):
+        self._params = {}
+        self._lock = Lock()
+
+    def register_param(self, name, initial_value, param_type, range=None):
+        with self._lock:
+            if name in self._params:
+                raise ValueError(f"Parameter {name} already registered")
+            self._params[name] = Param(name, initial_value, param_type, range)
+
+    def set_param(self, name, value):
+        with self._lock:
+            if name not in self._params:
+                raise ValueError(f"Parameter {name} not registered")
+            self._params[name].set_value(value)
+
+    def get_param(self, name):
+        with self._lock:
+            if name not in self._params:
+                raise ValueError(f"Parameter {name} not registered")
+            return self._params[name].value
+
+    def list_params(self):
+        with self._lock:
+            return {name: param.value for name, param in self._params.items()}
+
 
 # a timer that allows recording things with timer.tick(name="name")
 class Timer:
@@ -45,32 +78,45 @@ class Timer:
 # and provides a way to interact with it
 # over OSC with digital musical instruments
 class VampNetDigitalInstrumentSystem:
-    CORRUPT_TYPES = ("periodic", "random", "onsets", "all")
     SAMPLING_STEPS = 12
     
-    def __init__(self, interface: vampnet.interface.Interface):
+    def __init__(self, 
+        interface: vampnet.interface.Interface, 
+        ip: str,
+        s_port: int, r_port: int,
+        device: str
+    ):
+        self.ip = ip
+        self.s_port = s_port
+        self.r_port = r_port
+        self.device = device
+
+        # set up interface
         self.interface = interface
+        self.interface.to(device)
+
         self.interface.vn = torch.compile(self.interface.vn)
+
         print(f"will send to {ip}:{s_port}")
         self.client = SimpleUDPClient(ip, s_port)
 
+        # set up timer
         self.timer = Timer()
 
-        # interrupt
+        # interrupts
         self._interrupt = False
         self.is_vamping = False
 
-        # a params lock
+        # a lock for the parameters
         self._param_lock = Lock()
     
-
         # the 'knobs'
         # TODO: need a better way to store these
         # and set these. maybe a Param class is needed
         self.temperature: float = 1.0
-        self.corrupt_time_amt: float = 0.1 # a combination of periodic propmt and droput
-        self.corrupt_type: str = "periodic"
-        self.corrupt_timbre: int = 4 # upper codebook mask
+        self.periodic_tokens: int = 3 # a combination of periodic propmt and droput
+        self.periodic_rms: int = 3 # a combination of periodic propmt and droput
+        self.upper_codebook_mask: int = 4 # upper codebook mask
         self.seed: int = -1 # TODO: instrument should have saveable seed slots
 
         self.param_keys = (
@@ -95,15 +141,28 @@ class VampNetDigitalInstrumentSystem:
                 self.temperature = args[0]
             elif address == "/corrupt_time_amt":
                 self.corrupt_time_amt = args[0]
-            elif address == "/corrupt_type":
-                self.corrupt_type = args[0]
-                assert self.corrupt_type in self.CORRUPT_TYPES, f"corrupt type must be one of {self.CORRUPT_TYPES}"
             elif address == "/corrupt_timbre":
                 self.corrupt_timbre = int(args[0])
             elif address == "/seed":
                 self.seed = args[0]
             else:
                 print(f"Unknown address {address}")
+            
+    def calculate_mask(self, z: torch.Tensor):
+        raise NotImplementedError()
+
+        mask = self.interface.build_mask(
+            z, 
+            periodic_prompt=periodic_prompt,
+            upper_codebook_mask=upper_codebook_mask,
+            dropout_amt=dropout_amt, 
+        )
+
+        # save the mask as a txt file (numpy)
+        import numpy as np
+        np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
+
+        return mask
 
 
     def process(self, address: str, *args) -> None:
@@ -125,8 +184,7 @@ class VampNetDigitalInstrumentSystem:
             
             # load the audio
             sig = sn.read_from_file(audio_path)
-            sig = sig.to(DEVICE)
-            # sig = sn.transpose(sig, self.transpose)
+            sig = sig.to(self.interface.device)
 
             # run the vamp
             if self.is_vamping: 
@@ -157,44 +215,6 @@ class VampNetDigitalInstrumentSystem:
             print(f"PROC: Unknown address {address}")
         timer.tock("process")
             
-
-    def calculate_mask(self, z: torch.Tensor):
-        with self._param_lock:
-            def float_index(alist, value):
-                return alist[int(value * (len(alist) - 1))]
-            # compute the periodic prompt, dropout amt
-            assert not self.corrupt_type == "onsets", "onsets not supported yet"
-            # periodic_prompt = self.corrupt_time_amt if self.corrupt_type == "periodic" else 1
-            if self.corrupt_type == "periodic":
-                periods = [1, 3, 5, 7, 11, 13, 17, 21, 0]
-                # map corrupt_time_amt to a periodic prompt
-                periodic_prompt = float_index(periods, self.corrupt_time_amt)
-                print(f"periodic prompt: {periodic_prompt}")
-            elif self.corrupt_type == "onsets":
-                raise NotImplementedError()
-                periodic_prompt = [1, 2, 3]
-                onset_masks = [1, 2, 3, 5, 7, 11, 13]
-                onset_masks.reverse()
-                onset_masks = [(o, p) for o in onset_masks for p in periodic_prompt]
-                onset_mask = float_index(onset_masks, self.corrupt_time_amt)
-                print(f"onset mask: {onset_mask}")
-
-            dropout_amt = self.corrupt_time_amt if self.corrupt_type == "random" else 0.0
-            upper_codebook_mask = self.corrupt_timbre
-
-        mask = self.interface.build_mask(
-            z, 
-            periodic_prompt=periodic_prompt,
-            upper_codebook_mask=upper_codebook_mask,
-            dropout_amt=dropout_amt, 
-        )
-
-        # save the mask as a txt file (numpy)
-        import numpy as np
-        np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
-
-        return mask
-
 
     @torch.inference_mode()
     def vamp(self, sig: sn.Signal):
@@ -245,29 +265,43 @@ class VampNetDigitalInstrumentSystem:
         return sig
     
 
+    def start_server(self,):
+        dispatcher = Dispatcher()
+        dispatcher.map("/process", self.process)
 
-def start_server():
-    dispatcher = Dispatcher()
-    dispatcher.map("/process", system.process)
+        dispatcher.map("/temperature", self.set_parameter)
+        dispatcher.map("/corrupt_time_amt", self.set_parameter)
+        dispatcher.map("/corrupt_type", self.set_parameter)
+        dispatcher.map("/corrupt_timbre", self.set_parameter)
+        dispatcher.map("/seed", self.set_parameter)
+        dispatcher.set_default_handler(lambda a, *r: print(a, r))
 
-    dispatcher.map("/temperature", system.set_parameter)
-    dispatcher.map("/corrupt_time_amt", system.set_parameter)
-    dispatcher.map("/corrupt_type", system.set_parameter)
-    dispatcher.map("/corrupt_timbre", system.set_parameter)
-    dispatcher.map("/seed", system.set_parameter)
-    dispatcher.set_default_handler(lambda a, *r: print(a, r))
+        server = ThreadingOSCUDPServer((self.ip, self.r_port), dispatcher)
+        print(f"Serving on {server.server_address}")
+        server.serve_forever()
 
-    server = ThreadingOSCUDPServer((ip, r_port), dispatcher)
-    print(f"Serving on {server.server_address}")
-    server.serve_forever()
 
-interface = vampnet.interface.load_from_trainer_ckpt(
-    ckpt_path="v189-stemgenmode.ckpt", 
-    codec_ckpt="/Users/hugo/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
-)
+@argbind.bind()
+def main(ip = "localhost", s_port = 8002, r_port = 8001, 
+         device="mps", ckpt: str = "hugggof/vampnetv2-mode-vampnet_rms-latest"):
 
-system = VampNetDigitalInstrumentSystem(interface)
+    bundle = VampNetTrainer.from_pretrained(ckpt)
 
-system.interface.to(DEVICE)
+    interface = vampnet.interface.Interface(
+        bundle.codec, 
+        bundle.model, 
+        bundle.controller
+    )
 
-start_server()
+    system = VampNetDigitalInstrumentSystem(
+        interface, ip=ip, s_port=s_port,
+        r_port=r_port, device=device
+    )
+
+    system.start_server()
+
+if __name__ == "__main__":
+    args = argbind.parse_args()
+
+    with argbind.scope(args):
+        main()

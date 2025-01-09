@@ -20,45 +20,35 @@ codec = bundle.codec # grab the codec
 vn = bundle.model # and the vampnet
 controller = bundle.controller # and the controller
 
-# eval mode!
-vn.eval()
-codec.eval()
-
 # create an interface with our pretrained shizzle
 eiface = Interface(
     codec=codec,
     vn=vn,
     controller=controller
 )
+eiface.to(device)
 
 # load an audio file
 sig = sn.read_from_file("assets/example.wav")
 
 # preprocess the signal
 sig = sn.trim_to_s(sig, 5.0)
-sig.wav = sn.cut_to_hop_length(sig.wav, eiface.codec.hop_length)
-sig = sn.normalize(sig, -16) # TODO: we should refactor this magic number
-sig = sig.to(device)
+sig = eiface.preprocess(sig)
 
 # extract controls and build a mask for them
 ctrls = controller.extract(sig)
-ctrl_mask =  eiface.build_mask(
-    first_dict_value(ctrls), 
-    periodic_prompt=7, 
-    upper_codebook_mask=1)[:, 0, :]
-ctrl_masks = {
-    k: ctrl_mask for k in ctrls.keys()
-}
-
-# move to gpu
-codec.to(device)
+ctrl_masks = eiface.build_ctrl_masks(ctrls,
+    periodic_prompt=5
+)
 
 # encode the signal
 codes = eiface.encode(sig.wav)
 print(f"encoded to codes of shape {codes.shape}")
 
 # make a mask for the codes
-mask = eiface.build_mask(codes, periodic_prompt=0, upper_codebook_mask=4)
+mask = eiface.build_codes_mask(codes, 
+    periodic_prompt=0, upper_codebook_mask=4
+)
 
 # apply the mask
 codes = apply_mask(codes, mask, vn.mask_token)

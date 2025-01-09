@@ -40,7 +40,6 @@ make a table of 5 second chunks to uniformly sample from them.
 python -m soundmaterial.chunk sm.db 5.0 # creates a table of 5 second chunks
 ```
 
-
 ## training a model
 
 To train a model, run the following script: 
@@ -112,7 +111,7 @@ first, start a gloop server.
 
 **TODO**: needs an ability to select a checkpoint
 ```bash
-python -m vampnet.serve
+python -m vampnet.serve --ckpt hugggof/vampnetv2-mode-vampnet_rms-latest --device mps
 ```
 
 then, start the gloop puredata patch. 
