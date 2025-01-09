@@ -9,10 +9,9 @@ from torch import Tensor
 from torch import tensor as tt
 import tqdm
 
-from .modules.transformer import VampNet
-from .mask import *
-from .signal import cut_to_hop_length, write, trim_to_s
-
+from vampnet.modules.transformer import VampNet
+from vampnet.mask import *
+from vampnet.signal import cut_to_hop_length, write, trim_to_s
 from vampnet.dac.model.dac import DAC
 from vampnet.control import Sketch2SoundController
 
