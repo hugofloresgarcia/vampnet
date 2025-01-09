@@ -39,6 +39,7 @@ class HarmonicChroma:
     window_length: int = 4096
     n_chroma: int = 48
 
+    @property
     def dim(self):
         return self.n_chroma
 
