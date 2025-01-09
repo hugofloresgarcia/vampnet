@@ -1,7 +1,8 @@
 torch
+torchaudio
 argbind
 numpy
 gradio
 einops
 lightning
-torchaudio
+huggingface_hub

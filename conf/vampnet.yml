@@ -1,39 +1,23 @@
+VampNetTrainer.embedding_dim: 1026
+VampNetTrainer.n_layers: 12
+VampNetTrainer.n_heads: 12
+VampNetTrainer.mode: vampnet
+VampNetTrainer.outpaint_prob: 0.0
+VampNetTrainer.ctrl_keys: ['rms', ]
 
-
-num_iters: 1000000000
-save_iters: [10000, 50000, 100000, 300000, 500000]
-val_idx: [0,1,2,3,4,5,6,7,8,9]
-sample_freq: 10000
-val_freq: 1000
-
-
-# Optimization
-CrossEntropyLoss.label_smoothing: 0.0
-
-AdamW.lr: 0.001
-
-VampNet.vocab_size: 1024
-VampNet.n_codebooks: 9
-VampNet.n_conditioning_codebooks: 0
-VampNet.r_cond_dim: 0
-VampNet.noise_mode: mask
-VampNet.embedding_dim: 1026
-VampNet.n_layers: 12
-VampNet.n_heads: 12
-VampNet.flash_attn: true
-VampNet.dropout: 0.0
+VampNetTrainer.lr: 0.001
 
 # Data
-batch_size: 32
-num_workers: 10
-# Dataset.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
-# Dataset.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
-Dataset.n_samples: 132096 # roughly 2.99 seconds, matching a 512 sample hop len at 44.1k
-Dataset.use_chunk_table: true
+VampNetDataModule.batch_size: 32
+VampNetDataModule.num_workers: 10
+# VampNetDataModule.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
+VampNetDataModule.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 132096 # roughly 2.99 seconds, matching a 512 sample hop len at 44.1k
+VampNetDataModule.use_chunk_table: true
 
 # build_datasets.db_path: /media/pancho/sm.db
-build_datasets.db_path: /home/hugo/soup/scratch/data-fast/sm.db
-build_datasets.query: "
+VampNetDataModule.db_path: /home/hugo/soup/scratch/data-fast/sm.db
+VampNetDataModule.query: "
     SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
     FROM chunk 
     JOIN audio_file as af ON chunk.audio_file_id = af.id 

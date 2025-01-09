@@ -4,6 +4,11 @@ import torch
 import numpy as np
 from einops import rearrange
 
+def flip_coin(prob):
+    return torch.rand(1).item() < prob
+
+def first_dict_value(d):
+    return next(iter(d.values()))
 
 @torch.jit.script
 def scalar_to_batch_tensor(x: int | float, batch_size: int):

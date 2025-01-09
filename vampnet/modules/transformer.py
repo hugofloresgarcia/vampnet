@@ -16,9 +16,6 @@ from x_transformers import TransformerWrapper
 from x_transformers import Encoder
 
 from .activations import get_activation
-from .layers import CodebookEmbedding
-from .layers import FiLM
-from .layers import SequentialWithFiLM
 from .layers import WNConv1d
 from ..util import scalar_to_batch_tensor, codebook_flatten, codebook_unflatten
 from ..mask import _gamma, random, stemgen_random
@@ -202,7 +199,9 @@ class VampNet(L.LightningModule):
         elif self.mode == "vampnet":
             self.generate = self.generate
             self.random_mask = random
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
         print(f"VampNet modeling mode: {self.mode}")
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
         self.embedding = CodebookEmbedding(
             latent_dim=latent_dim,
@@ -326,7 +325,7 @@ class VampNet(L.LightningModule):
         cfg_scale: float = 3.0,
         sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         temperature: float = 1.0,
-        mask_temperature: float = 5.0,
+        mask_temperature: float = 10.0,
         random_remask: bool = False,
         typical_filtering=False,
         typical_mass=0.2,
@@ -371,7 +370,7 @@ class VampNet(L.LightningModule):
         steps = sampling_steps + [1 for _ in range(n_infer_codebooks - len(sampling_steps))]
         steps = steps[:n_infer_codebooks]
 
-        for codebook_level, nsteps in enumerate(steps):
+        for codebook_level, nsteps in tqdm.tqdm(enumerate(steps), total=len(steps)):
 
             # apply the orig mask to z_masked, only in the current codebook level
             # this is crucial due to the stemgen random masking we did during training
@@ -393,7 +392,7 @@ class VampNet(L.LightningModule):
             num_mask_tokens_at_start = (z_masked[:, codebook_level, :] == self.mask_token).sum(dim=-1)
             logging.debug(f"num mask tokens at start: {num_mask_tokens_at_start}")
 
-            for i in tqdm.tqdm(range(nsteps)):
+            for i in range(nsteps):
                 if self.interrupt: 
                     print(f"vampnet: INTERRUPTED! returning None")
                     self.interrupt = False
@@ -596,7 +595,10 @@ class VampNet(L.LightningModule):
         seed: int = None,
         sample_cutoff: float = 1.0,
         causal_weight: float = 0.0,
+        debug=False,
     ):
+        if isinstance(sampling_steps, list):
+            sampling_steps = sum(sampling_steps)
 
         use_cfg = ctrls is not None
         tocfg = lambda x: x.repeat(2, 1, 1) if use_cfg else x
@@ -633,9 +635,7 @@ class VampNet(L.LightningModule):
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
 
-
-        from tqdm import tqdm
-        for i in range(sampling_steps):
+        for i in tqdm.tqdm(range(sampling_steps)):
             if self.interrupt: # interrupt if another thread wants to interrupt
                 print(f"vampnet: INTERRUPTED! returning None")
                 self.interrupt = False

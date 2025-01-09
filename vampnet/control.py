@@ -4,6 +4,7 @@ import vampnet.signal as sn
 from vampnet.signal import Signal
 from vampnet.mask import random_along_time
 from torch import Tensor
+import torch
 
 @dataclass
 class RMS:
@@ -20,9 +21,31 @@ class RMS:
             hop_length=self.hop_length, 
         )[:, :, :-1] # TODO: cutting the last frame to match DAC tokens but why :'(
 
+@dataclass
+class RMSQ:
+    hop_length: int
+    window_length: int = 2048
+    
+    @property
+    def dim(self):
+        return 1
+
+    def extract(self, sig: Signal) -> Tensor:
+        rmsd = sn.rms(sig,
+            window_length=self.window_length, 
+            hop_length=self.hop_length, 
+        )[:, :, :-1]
+
+        # standardize to 0-1
+        rmsd = (rmsd - rmsd.min()) / (rmsd.max() - rmsd.min())
+
+        # quantize to 32 steps
+        rmsd = torch.round(rmsd * 32)
+        return rmsd / 32
 
 CONTROLLERS = {
-    "rms": RMS
+    "rms": RMS, 
+    "rmsq": RMSQ,
 }
 class Sketch2SoundController:
 

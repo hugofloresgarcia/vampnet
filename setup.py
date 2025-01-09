@@ -4,30 +4,19 @@ from setuptools import setup
 with open("README.md") as f:
     long_description = f.read()
 
+with open("requirements.txt") as f:
+    requirements = f.read().splitlines()
+
 setup(
     name="vampnet",
     version="0.0.1",
-    classifiers=[
-        "Intended Audience :: Developers",
-        "Natural Language :: English",
-        "Programming Language :: Python :: 3.7",
-        "Topic :: Artistic Software",
-        "Topic :: Multimedia",
-        "Topic :: Multimedia :: Sound/Audio",
-        "Topic :: Multimedia :: Sound/Audio :: Editors",
-        "Topic :: Software Development :: Libraries",
-    ],
-    description="Generative Music Modeling.",
+    description="generative musical instrument system.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Hugo Flores García, Prem Seetharaman",
-    author_email="hfgacrcia@descript.com",
+    author_email="huferflo@gmail.com",
     url="https://github.com/hugofloresgarcia/vampnet",
     license="MIT",
     packages=find_packages(),
-    install_requires=[
-        "torch",
-        "argbind>=0.3.2",
-        "gradio", 
-    ],
+    install_requires=requirements,
 )

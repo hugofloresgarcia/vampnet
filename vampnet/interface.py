@@ -14,6 +14,7 @@ from .mask import *
 from .signal import cut_to_hop_length, write, trim_to_s
 
 from vampnet.dac.model.dac import DAC
+from vampnet.control import Sketch2SoundController
 
 
 # an interface suitable for interfacing with unloop
@@ -22,10 +23,12 @@ class Interface(nn.Module):
     def __init__(self,
         codec: DAC, 
         vn: VampNet,
+        controller: Sketch2SoundController = None,
     ):
         super().__init__()
         self.codec = codec
         self.vn = vn
+        self.controller = controller
 
         self.codec.eval()
         self.vn.eval()

@@ -6,51 +6,258 @@ from typing import Optional
 import random
 from dataclasses import dataclass
 import copy
+import os
 
 import argbind
 import torch
 import torch.nn as nn
 from einops import rearrange
-from torch.utils.tensorboard import SummaryWriter
-import loralib as lora
-import torch._dynamo
-torch._dynamo.config.verbose=True
+import pandas as pd
+from huggingface_hub import PyTorchModelHubMixin
+
 import lightning as L
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.utilities import grad_norm
+from lightning.pytorch.callbacks import Callback
+
+import soundmaterial as sm
+from soundmaterial.dataset import Dataset
 
 import vampnet
 from vampnet.control import Sketch2SoundController
 from vampnet.modules.transformer import VampNet
-from vampnet.util import codebook_unflatten, codebook_flatten
+from vampnet.util import codebook_unflatten, codebook_flatten, flip_coin
 from vampnet import mask as pmask
 from vampnet.dac.model.dac import DAC
 import vampnet.signal as sn
 
-import soundmaterial as sm
 
 # Enable cudnn autotuner to speed up training
 # (can be altered by the funcs.seed function)
 torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
 # Uncomment to trade memory for speed.
 
-# optim
-CrossEntropyLoss = argbind.bind(nn.CrossEntropyLoss)
-AdamW = argbind.bind(torch.optim.AdamW)
-NoamScheduler = argbind.bind(vampnet.scheduler.NoamScheduler)
-
-# model
-VampNet = argbind.bind(VampNet)
-
-# Data
-Dataset = argbind.bind(sm.dataset.Dataset, "train", "val")
-
 IGNORE_INDEX = -100
 CODEC_CKPT = "~/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
+SEED = 1
 
-def flip_coin(prob):
-    return torch.rand(1).item() < prob
+DEFAULT_QUERY = """
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+"""
 
+class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
+
+    def __init__(self,
+        # ~~~ codec ~~~
+        codec_ckpt: str = CODEC_CKPT,
+        # ~~~ model ~~~
+        mode: str = "stemgen",
+        ctrl_keys: tuple[str] = ("rms", ),
+        n_heads: int = 12, 
+        n_layers: int = 12, 
+        embedding_dim: int = 1026,
+        # ~~~ training // behavior ~~~
+        outpaint_prob: float = 0.0, 
+        lr: float = 0.001 
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+
+        codec_ckpt = Path(codec_ckpt).expanduser().resolve()
+        
+        # the codec
+        self.codec = DAC.load(codec_ckpt, map_location="cpu")
+        self.codec = torch.compile(self.codec)
+
+        # the controller
+        if len(ctrl_keys) > 0:
+            self.controller = Sketch2SoundController(
+                ctrl_keys=ctrl_keys, 
+                hop_length=self.codec.hop_length,
+            )
+        else:
+            self.controller = None
+
+        # the vampnet
+        self.model = VampNet(
+            n_heads=n_heads,
+            n_layers=n_layers,
+            embedding_dim=embedding_dim,
+            latent_dim=self.codec.quantizer.quantizers[0].codebook_dim,
+            mode=mode,
+            ctrl_dims=self.controller.ctrl_dims, 
+            vocab_size=self.codec.quantizer.quantizers[0].codebook_size,
+        )
+
+        # to speed up the first steps of training, 
+        # initialize VampNet's embedding layers with the codec's quantizers
+        self.model.embedding.quantizer.load_state_dict(
+            self.codec.quantizer.state_dict()
+        ) 
+        
+        self.codec.eval()
+        self.codec.requires_grad_(False)
+
+        self.outpaint_prob = outpaint_prob
+
+        # trainer things
+        self.criterion = nn.CrossEntropyLoss()
+        self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
+
+        # tag for saving
+        self.tag = get_model_tag(self)
+
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.hparams.lr)
+        scheduler = vampnet.scheduler.NoamScheduler(optimizer)
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+
+    def on_before_optimizer_step(self, optimizer):
+        # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = grad_norm(self.model, norm_type=2)
+        self.log_dict(norms)
+
+    def lr_scheduler_step(self, scheduler, metric):
+        scheduler.step()
+
+    def get_controls(self, sig: sn.Signal):
+        # get controls
+        n_batch = sig.wav.shape[0]  
+        if self.controller is not None:
+            ctrls = self.controller.extract(sig)
+            # draw control masks NOTE: this mask will be the same for all controls. 
+            ctrl_masks = self.controller.random_mask(
+                ctrls, 
+                r=self.rng.draw(n_batch)[:, 0].to(self.device)
+            )
+        else:
+            ctrls = None
+            ctrl_masks = None
+        
+        return ctrls, ctrl_masks
+
+    def generate_z_mask(self, z, vn, n_batch):
+        r = self.rng.draw(n_batch)[:, 0].to(self.device)
+
+        mask, ii = self.model.random_mask(z, r)
+        mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+
+        # outpaint? 
+        if torch.rand(1).item() < self.outpaint_prob:
+            # sample how many tokens to outpaint
+            n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
+            outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
+            mask = pmask.mask_and(mask, outpaint_mask)
+
+        z_mask = pmask.apply_mask(z, mask, vn.mask_token)
+        
+        return z_mask, mask, ii, r
+
+    def training_step(self, batch, batch_idx):
+        self.model.train()
+        batch = sn.prepare_batch(batch, self.device)
+        sig = batch["sig"]
+        sig.wav = sn.cut_to_hop_length(sig.wav, self.codec.hop_length)
+        n_batch = sig.wav.shape[0]
+
+        ctrls, ctrl_masks = self.get_controls(sig)
+
+        output = {}
+        vn = self.model
+        with torch.inference_mode():
+            self.codec.to(self.device)
+            z = self.codec.encode(sig.wav, sig.sr)["codes"]
+            z = z[:, : vn.n_codebooks, :]
+
+
+        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
+        
+        # TODOO: use embedding instead
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
+
+        target = codebook_flatten(
+            z[:, vn.n_conditioning_codebooks :, :],
+        )
+
+        flat_mask = codebook_flatten(
+            mask[:, vn.n_conditioning_codebooks :, :],
+        )
+
+        # replace target with ignore index for masked tokens
+        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        
+        # add the ignore indices from the mask generator
+        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
+        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
+
+        output["loss"] = self.criterion(z_hat, t_masked)
+
+        self.log("loss/train", output["loss"], on_step=True, prog_bar=True, sync_dist=True)
+
+        return output["loss"]
+
+    def validation_step(self, batch, batch_idx):
+        self.model.eval()
+        self.codec.eval()
+        batch = sn.prepare_batch(batch, self.device)
+        sig = batch["sig"]
+        sig.wav = sn.cut_to_hop_length(sig.wav, self.codec.hop_length)
+        n_batch = sig.wav.shape[0]
+
+        ctrls, ctrl_masks = self.get_controls(sig)
+
+
+        vn = self.model
+        z = self.codec.encode(sig.wav, sig.sr)["codes"]
+        z = z[:, : vn.n_codebooks, :]
+
+        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
+
+        # TODOO: use embedding instead
+        # z_mask_latent = vn.embedding.from_codes(z_mask)
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
+
+        target = codebook_flatten(
+            z[:, vn.n_conditioning_codebooks :, :],
+        )
+
+        flat_mask = codebook_flatten(
+            mask[:, vn.n_conditioning_codebooks :, :]
+        )
+
+        output = {}
+        # replace target with ignore index for masked tokens
+        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
+        # # add the ignore indices from the mask generator
+        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
+        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
+        output["loss/val"] = self.criterion(z_hat, t_masked)
+
+        # update flat mask for metrics
+        flat_mask = flat_mask.masked_fill(ii.bool(), 0)
+
+        # TODO: add ctrl adherence metrics
+        log_accuracy_metrics(
+            r=r,
+            z_hat=z_hat,
+            target=target,
+            flat_mask=flat_mask,
+            dict_to_update=output,
+        )
+
+        self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        
+        return output
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~ datasets // transforms ~~~~ 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 AUGMENT = False
 if AUGMENT:
@@ -76,39 +283,77 @@ def build_transform():
     return transform
 
 
-@argbind.bind(without_prefix=True)
-def get_checkpoint_path(resume_ckpt: str = None):
-    print("~~~~")
-    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
-    print("~~~~")
-    return resume_ckpt
+class VampNetDataModule(L.LightningDataModule):
+
+    def __init__(self,
+        db_path: str = "sm.db", 
+        query: str = DEFAULT_QUERY, 
+        sample_rate: int = 44100,
+        n_samples: int = 132096,
+        use_chunk_table: bool = True,
+        batch_size: int = 16,
+        num_workers: int = 12, 
+        augment: bool = False
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.db_path = db_path
+        self.query = query
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.n_samples = n_samples
+        self.use_chunk_table = use_chunk_table
+
+        self.train_data, self.val_data = None, None
+
+        self.train_tfm = build_transform() if augment else None
+        self.val_tfm = build_transform() if augment else None
+
+    def setup(self, stage: Optional[str] = None):
+        sample_rate = self.sample_rate
+        n_samples = self.n_samples
+
+        conn = sm.connect(self.db_path)
+        print(f"loading data from {self.db_path}")
+
+        df = pd.read_sql(self.query, conn)
+        tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=SEED)
+
+        self.train_data = Dataset(
+            tdf, sample_rate=sample_rate, n_samples=n_samples,
+            transform=self.train_tfm, use_chunk_table=self.use_chunk_table, 
+            seed=SEED
+        )
+        self.val_data = Dataset(
+            vdf, sample_rate=sample_rate, n_samples=n_samples,
+            transform=self.val_tfm, use_chunk_table=self.use_chunk_table,
+            max_examples=2000, 
+            seed=SEED
+        )
 
 
-def build_datasets(
-    sample_rate: int,
-    seed: int = 0, 
-    db_path: str = None, 
-    query: str = None, 
-):    
-    assert db_path is not None, "db_path is required"
-    assert query is not None, "query is required"
-    train_tfm = build_transform()    
-    val_tfm = build_transform()   
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.train_data, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            num_workers=self.num_workers, 
+            collate_fn=Dataset.collate
+        )
 
-    import pandas as pd
-    conn = sm.connect(db_path)
-    print(f"loading data from {db_path}")
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.val_data, 
+            batch_size=self.batch_size, 
+            shuffle=False, 
+            num_workers=self.num_workers, 
+            collate_fn=Dataset.collate
+        )
 
-    df = pd.read_sql(query, conn)
-    tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=seed)
 
-    train_data = Dataset(
-        tdf, sample_rate=sample_rate, transform=train_tfm
-    )
-    val_data = Dataset(
-        vdf, sample_rate=sample_rate, transform=val_tfm, max_examples=2000
-    )
-    return train_data, val_data
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~ metrics ~~~~ 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def accuracy(
     preds: torch.Tensor,
@@ -135,11 +380,11 @@ def accuracy(
     correct = torch.sum(torch.eq(pred_indices, target.unsqueeze(1)), dim=1)
 
     # Calculate the accuracy
-    accuracy = torch.mean(correct.float())
+    acc = torch.mean(correct.float())
 
-    return accuracy
+    return acc
 
-def log_accuracy_metrics(z_hat, r, target, flat_mask, output):
+def log_accuracy_metrics(z_hat, r, target, flat_mask, dict_to_update):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
         unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
         masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
@@ -157,20 +402,19 @@ def log_accuracy_metrics(z_hat, r, target, flat_mask, output):
             s, e = r_range
             tag = f"accuracy-{s}-{e}/top{topk}"
 
-            output[f"{tag}/unmasked"] = accuracy(
+            dict_to_update[f"{tag}/unmasked"] = accuracy(
                 preds=r_z_hat,
                 target=r_unmasked_target,
                 ignore_index=IGNORE_INDEX,
                 top_k=topk,
             )
-            output[f"{tag}/masked"] = accuracy(
+            dict_to_update[f"{tag}/masked"] = accuracy(
                 preds=r_z_hat,
                 target=r_masked_target,
                 ignore_index=IGNORE_INDEX,
                 top_k=topk,
             )
 
-from lightning.pytorch.callbacks import Callback
 class AudioSampleLoggingCallback(Callback):
 
     def __init__(self, dataset: Dataset, num_samples: int = 10):
@@ -304,249 +548,66 @@ class AudioSampleLoggingCallback(Callback):
         self._save_periodic_prompt(module)
 
 
-class VampNetTrainer(L.LightningModule):
-
-    def __init__(self, 
-        codec_ckpt: str = CODEC_CKPT,
-        outpaint_prob: float = 0.0, 
-        mode: str = "stemgen", 
-        ctrl_keys: list[str] = ["rms"]
-    ):
-        super().__init__()
-        self.save_hyperparameters()
-
-        codec_ckpt = Path(codec_ckpt).expanduser().resolve()
-        
-        # the codec
-        self.codec = DAC.load(codec_ckpt, map_location="cpu")
-        self.codec = torch.compile(self.codec)
-
-        # the controller
-        if len(ctrl_keys) > 0:
-            self.controller = Sketch2SoundController(
-                ctrl_keys=ctrl_keys, 
-                hop_length=self.codec.hop_length,
-            )
-        else:
-            self.controller = None
-
-        # the vampnet
-        self.model = VampNet(
-            mode=mode, 
-            ctrl_dims=self.controller.ctrl_dims, 
-        )
-
-        # to speed up the first steps of training, 
-        # initialize VampNet's embedding layers with the codec's quantizers
-        self.model.embedding.quantizer.load_state_dict(
-            self.codec.quantizer.state_dict()
-        ) 
-        
-        self.codec.eval()
-        self.codec.requires_grad_(False)
-
-        self.outpaint_prob = outpaint_prob
-
-        # trainer things
-        self.criterion = CrossEntropyLoss()
-        self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
-
-        assert (
-            self.model.vocab_size == self.codec.quantizer.quantizers[0].codebook_size
-        )
-
-    def configure_optimizers(self):
-        optimizer = AdamW(self.model.parameters())
-        scheduler = NoamScheduler(optimizer)
-        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
-
-    def on_before_optimizer_step(self, optimizer):
-        # Compute the 2-norm for each layer
-        # If using mixed precision, the gradients are already unscaled here
-        norms = grad_norm(self.model, norm_type=2)
-        self.log_dict(norms)
-
-    def lr_scheduler_step(self, scheduler, metric):
-        scheduler.step()
-
-    def get_controls(self, sig: sn.Signal):
-        # get controls
-        n_batch = sig.wav.shape[0]  
-        if self.controller is not None:
-            ctrls = self.controller.extract(sig)
-            # draw control masks NOTE: this mask will be the same for all controls. 
-            ctrl_masks = self.controller.random_mask(
-                ctrls, 
-                r=self.rng.draw(n_batch)[:, 0].to(self.device)
-            )
-        else:
-            ctrls = None
-            ctrl_masks = None
-        
-        return ctrls, ctrl_masks
-
-    def generate_z_mask(self, z, vn, n_batch):
-        r = self.rng.draw(n_batch)[:, 0].to(self.device)
-
-        mask, ii = self.model.random_mask(z, r)
-        mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
-
-        # outpaint? 
-        if torch.rand(1).item() < self.outpaint_prob:
-            # sample how many tokens to outpaint
-            n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
-            outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
-            mask = pmask.mask_and(mask, outpaint_mask)
-
-        z_mask = pmask.apply_mask(z, mask, vn.mask_token)
-        
-        return z_mask, mask, ii, r
-
-    def training_step(self, batch, batch_idx):
-        self.model.train()
-        batch = sn.prepare_batch(batch, self.device)
-        sig = batch["sig"]
-        sig.wav = sn.cut_to_hop_length(sig.wav, self.codec.hop_length)
-        n_batch = sig.wav.shape[0]
-
-        ctrls, ctrl_masks = self.get_controls(sig)
-
-        output = {}
-        vn = self.model
-        with torch.inference_mode():
-            self.codec.to(self.device)
-            z = self.codec.encode(sig.wav, sig.sr)["codes"]
-            z = z[:, : vn.n_codebooks, :]
-
-
-        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
-        
-        # TODOO: use embedding instead
-        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
-
-        target = codebook_flatten(
-            z[:, vn.n_conditioning_codebooks :, :],
-        )
-
-        flat_mask = codebook_flatten(
-            mask[:, vn.n_conditioning_codebooks :, :],
-        )
-
-        # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-        
-        # add the ignore indices from the mask generator
-        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
-        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
-
-        output["loss"] = self.criterion(z_hat, t_masked)
-
-        self.log("loss/train", output["loss"], on_step=True, prog_bar=True, sync_dist=True)
-
-        return output["loss"]
-
-    def validation_step(self, batch, batch_idx):
-        self.model.eval()
-        self.codec.eval()
-        batch = sn.prepare_batch(batch, self.device)
-        sig = batch["sig"]
-        sig.wav = sn.cut_to_hop_length(sig.wav, self.codec.hop_length)
-        n_batch = sig.wav.shape[0]
-
-        ctrls, ctrl_masks = self.get_controls(sig)
-
-
-        vn = self.model
-        z = self.codec.encode(sig.wav, sig.sr)["codes"]
-        z = z[:, : vn.n_codebooks, :]
-
-        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
-
-        # TODOO: use embedding instead
-        # z_mask_latent = vn.embedding.from_codes(z_mask)
-        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
-
-        target = codebook_flatten(
-            z[:, vn.n_conditioning_codebooks :, :],
-        )
-
-        flat_mask = codebook_flatten(
-            mask[:, vn.n_conditioning_codebooks :, :]
-        )
-
-        output = {}
-        # replace target with ignore index for masked tokens
-        t_masked = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
-        # # add the ignore indices from the mask generator
-        ii = codebook_flatten(ii[:, vn.n_conditioning_codebooks :, :])
-        t_masked = t_masked.masked_fill(ii.bool(), IGNORE_INDEX)
-        output["loss/val"] = self.criterion(z_hat, t_masked)
-
-        # update flat mask for metrics
-        flat_mask = flat_mask.masked_fill(ii.bool(), 0)
-
-        # TODO: add ctrl adherence metrics
-
-        log_accuracy_metrics(
-            r=r,
-            z_hat=z_hat,
-            target=target,
-            flat_mask=flat_mask,
-            output=output,
-        )
-
-        self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        
-        return output
-
-@argbind.bind(without_prefix=True)
-def prepare_dataloaders(train_data, val_data, batch_size=16, num_workers=4):
-    train_dataloader = torch.utils.data.DataLoader(
-        train_data, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        num_workers=num_workers, 
-        collate_fn=Dataset.collate)
-    val_dataloader = torch.utils.data.DataLoader(
-        val_data, 
-        batch_size=batch_size, 
-        shuffle=False, 
-        num_workers=num_workers, 
-        collate_fn=Dataset.collate)
-
-    return train_dataloader, val_dataloader
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~ ~~~~ training setup ~~~~ ~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return f"vampnet-{model.hparams.mode}-{'-'.join(model.hparams.ctrl_keys)}"
+    return f"mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+
+
+@argbind.bind(without_prefix=True)
+def get_checkpoint_path(resume_ckpt: str = None):
+    print("~~~~")
+    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
+    print("~~~~")
+    return resume_ckpt
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~ ~~~~ the recipe ~~~~ ~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 if __name__ == "__main__":
-    build_datasets = argbind.bind(build_datasets)
-
     args = argbind.parse_args()
+    args["args.debug"] = int(os.getenv("LOCAL_RANK", 0)) == 0
+
+    VampNetTrainer = argbind.bind(VampNetTrainer)
+    VampNetDataModule = argbind.bind(VampNetDataModule)
+
     with argbind.scope(args):
-        resume_ckpt_path = get_checkpoint_path()
+        # ~~~~ resume from checkpoint? ~~~~
+        resume_ckpt = get_checkpoint_path()
+        if resume_ckpt is not None:
+            assert resume_ckpt.endswith(".ckpt"), f"checkpoint path must end with .ckpt, got {resume_ckpt}"
+
+        # ~~~~ set up model ~~~~~
         model = (
-            VampNetTrainer.load_from_checkpoint(resume_ckpt_path)
-                if resume_ckpt_path is not None
+            VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt)
+                if resume_ckpt is not None
                 else VampNetTrainer()
         )
 
-        train_data, val_data = build_datasets(model.codec.sample_rate)
-        train_dataloader, val_dataloader = prepare_dataloaders(train_data, val_data)
+        # ~~~~ set up data ~~~~
+        dm = VampNetDataModule(sample_rate=model.codec.sample_rate)
+        dm.prepare_data()
+        dm.setup()
+        train_dataloader = dm.train_dataloader()
+        val_dataloader = dm.val_dataloader()
 
+        # ~~~~ callbacks ~~~~~
         callbacks = []
-        callbacks.append(AudioSampleLoggingCallback(val_data))
+        callbacks.append(AudioSampleLoggingCallback(dm.val_data))
         callbacks.append(LearningRateMonitor(logging_interval="step"))
         callbacks.append(ModelCheckpoint(
             monitor="loss/val",
             mode="min",
             save_top_k=1,
             save_last=True,
-            filename="vampnet-{epoch:02d}-{step}",
+            filename="best",
         ))
         
         # figure out how many gpus we have
-        import os
         cuda_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "")
         n_gpus = len(cuda_visible_devices.split(","))
         print(f"using {n_gpus} gpus")
@@ -556,22 +617,22 @@ if __name__ == "__main__":
             devices=n_gpus,
             default_root_dir=f"runs/{get_model_tag(model)}",
             max_epochs=-1,
-            limit_val_batches=20, 
+            limit_val_batches=20,
             gradient_clip_val=1.0,
+            # val_check_interval=100,
             val_check_interval=1000,
-            # val_check_interval=1000,
             callbacks=callbacks,
             precision="bf16-mixed", 
             strategy="ddp_find_unused_parameters_true", 
             detect_anomaly=True
         )
 
-        train_data.seed = (trainer.local_rank + train_data.seed)
-        model.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1 + trainer.local_rank)
+        dm.train_data.seed = SEED + trainer.local_rank
+        model.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=SEED + trainer.local_rank)
 
         trainer.fit(
             model=model, 
-            train_dataloaders=train_dataloader, 
-            val_dataloaders=val_dataloader, 
-            ckpt_path=resume_ckpt_path
+            train_dataloaders=dm.train_dataloader(), 
+            val_dataloaders=dm.val_dataloader(), 
+            ckpt_path=resume_ckpt
         )
