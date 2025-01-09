@@ -1,6 +1,5 @@
 import random
 from vampnet.interface import Interface
-import audiotools as at
 import torch
 
 import vampnet
