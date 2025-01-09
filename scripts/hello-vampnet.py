@@ -65,8 +65,7 @@ gcodes = vn.generate(
     ctrls=ctrls,
     ctrl_masks=ctrl_masks,
     typical_min_tokens=64,
-    sampling_steps=[16, 8, 4, 4] if vn.mode == "stemgen" else 16,
-    # sampling_steps=16,
+    sampling_steps=16 if vn.mode == "vampnet" else [16, 8, 4, 4],
     causal_weight=0.0,
     debug=False
 )
