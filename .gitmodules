@@ -1,3 +1,6 @@
 [submodule "x-transformers"]
 	path = x-transformers
 	url = https://github.com/lucidrains/x-transformers/
+[submodule "soundmaterial"]
+	path = soundmaterial
+	url = https://github.com/hugofloresgarcia/soundmaterial

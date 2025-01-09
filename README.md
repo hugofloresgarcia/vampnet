@@ -12,16 +12,13 @@ conda create -n vampnet python=3.11
 conda activate vampnet
 ```
 
-install soundmaterial (hugo's audio dataset management tool)
+install vampnet and its dependencies
 ```bash
-git clone https://github.com/hugofloresgarcia/soundmaterial.git
+git clone --recurse-submodules https://github.com/hugofloresgarcia/vampnet.git
+cd vampnet
+pip install -e .
+pip install -e ./x-transformers
 pip install -e ./soundmaterial
-```
-
-install vampnet
-```bash
-git clone https://github.com/hugofloresgarcia/vampnet.git
-pip install -e ./vampnet
 ```
 
 # usage
