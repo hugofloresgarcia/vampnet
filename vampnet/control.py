@@ -156,7 +156,8 @@ class Sketch2SoundController:
 if __name__ == "__main__":
     controller = Sketch2SoundController(
         ctrl_keys=["rms", "hchroma"], 
-        hop_length=512
+        hop_length=512, 
+        sample_rate=44100
     )
 
     sig = sn.read_from_file("assets/example.wav")
