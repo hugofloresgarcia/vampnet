@@ -77,6 +77,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             self.controller = Sketch2SoundController(
                 ctrl_keys=ctrl_keys, 
                 hop_length=self.codec.hop_length,
+                sample_rate=self.codec.sample_rate
             )
         else:
             self.controller = None

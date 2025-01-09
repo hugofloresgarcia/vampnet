@@ -12,6 +12,7 @@ class RMS:
     hop_length: int
     window_length: int = 2048
     quantize: bool = False
+    sample_rate: int = 44100 # UNUSED
     
     @property
     def dim(self):
@@ -38,16 +39,24 @@ class HarmonicChroma:
     hop_length: int
     window_length: int = 4096
     n_chroma: int = 48
+    sample_rate: int = 44100
+
+
+    def __post_init__(self):
+        from torchaudio.prototype.transforms import ChromaScale
+        self.chroma = ChromaScale(
+            sample_rate=self.sample_rate,
+            n_freqs=self.window_length // 2 + 1,
+            n_chroma=self.n_chroma,
+            octwidth=5.0,
+        )
 
     @property
     def dim(self):
         return self.n_chroma
 
     def extract(self, sig: Signal) -> Tensor:
-        from torchaudio.prototype.transforms import ChromaScale
         from vampnet.dsp.hpss import hpss
-
-        sig = sn.normalize(sig, -16)
 
         # spectrogram 
         spec = sn.stft(sig, 
@@ -60,12 +69,7 @@ class HarmonicChroma:
         spec = hpss(spec, kernel_size=51, hard=True)[0]
 
         # chroma
-        chroma = ChromaScale(
-            sample_rate=sig.sr, 
-            n_freqs=spec.shape[-2],
-            n_chroma=self.n_chroma,
-            octwidth=5.0,
-        )(spec)
+        chroma = self.chroma(spec)
 
         # get the rms of this spec
         # power spectrogram
@@ -99,9 +103,7 @@ class HarmonicChroma:
         # apply the mask
         chroma = chroma * mask.unsqueeze(-2)
 
-        return chroma
-
-    
+        return chroma[:, 0, :, :-1] # mono only :(  FIX ME!
 
 
 CONTROLLERS = {
@@ -116,14 +118,16 @@ class Sketch2SoundController:
         self,
         ctrl_keys: list[str], 
         hop_length: str, 
+        sample_rate: int,
     ):
         assert all([k in CONTROLLERS for k in ctrl_keys]), f"got an unsupported control key in {ctrl_keys}!\n  supported: {CONTROLLERS.keys()}"
 
         self.hop_length = hop_length
         self.ctrl_keys = ctrl_keys
+        self.sample_rate = sample_rate
 
         self.controllers = {
-            k: CONTROLLERS[k](hop_length=hop_length)
+            k: CONTROLLERS[k](hop_length=hop_length, sample_rate=sample_rate)
             for k in self.ctrl_keys
         }
 
