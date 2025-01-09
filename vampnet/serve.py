@@ -34,25 +34,25 @@ class ParamManager:
         self._params = {}
         self._lock = Lock()
 
-    def register_param(self, name, initial_value, param_type, range=None):
+    def register(self, name, initial_value, param_type, range=None):
         with self._lock:
             if name in self._params:
                 raise ValueError(f"Parameter {name} already registered")
             self._params[name] = Param(name, initial_value, param_type, range)
 
-    def set_param(self, name, value):
+    def set(self, name, value):
         with self._lock:
             if name not in self._params:
                 raise ValueError(f"Parameter {name} not registered")
             self._params[name].set_value(value)
 
-    def get_param(self, name):
+    def get(self, name):
         with self._lock:
             if name not in self._params:
                 raise ValueError(f"Parameter {name} not registered")
             return self._params[name].value
 
-    def list_params(self):
+    def list(self):
         with self._lock:
             return {name: param.value for name, param in self._params.items()}
 

@@ -5,6 +5,7 @@ import warnings
 import subprocess
 from dataclasses import dataclass
 import numbers
+import time
 
 import torch 
 from torch import nn
@@ -477,35 +478,27 @@ def excerpt(
     total_duration = fast_get_duration(audio_path)
     if total_duration is None:
         print(f"had to to slow info fall back for {audio_path}")
-        info = util.info(audio_path)
-        total_duration = info.duration
+        _info = info(audio_path)
+        total_duration = _info.duration
     try: 
         # Hugo: I think this only works on wav files?
-        total_duration = util.fast_get_duration(audio_path)
-
-        util_time = time.time() - t0
-        # if we took more them 0.5s,log into a debug.txt file
-        if util_time > 0.5:
-            with open("debug.txt", "a") as f:
-                f.write(f"wave_info took {util_time} seconds for {audio_path} \n")
+        total_duration = fast_get_duration(audio_path)
     except Exception as e:
         print(e)
         print(f"failed to get fast duration. had to resort to slow info...")
-        info = util.info(audio_path)
-        total_duration = info.duration
-
-    info_time = time.time() - t0
+        _info = info(audio_path)
+        total_duration = _info.duration
 
     if duration is None:
         duration = total_duration
         
-    state = util.random_state(state)
+    state = random_state(state)
     lower_bound = 0 if offset is None else offset
     upper_bound = max(total_duration - duration, 0)
     offset = state.uniform(lower_bound, upper_bound)
 
-    wav, sr = read_from_file(audio_path, offset, duration, **kwargs)
-    return Signal(wav, sr)
+    sig = read_from_file(audio_path, offset, duration, **kwargs)
+    return sig
 
 # ~ io utils ~
 @dataclass

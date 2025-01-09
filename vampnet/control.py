@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 
 import vampnet.signal as sn
 from vampnet.signal import Signal
@@ -10,43 +11,104 @@ import torch
 class RMS:
     hop_length: int
     window_length: int = 2048
+    quantize: bool = False
     
     @property
     def dim(self):
         return 1
 
     def extract(self, sig: Signal) -> Tensor:
-        return sn.rms(sig, 
+        rmsd = sn.rms(sig, 
             window_length=self.window_length, 
             hop_length=self.hop_length, 
         )[:, :, :-1] # TODO: cutting the last frame to match DAC tokens but why :'(
 
+        if self.quantize:
+            # standardize to 0-1
+            rmsd = (rmsd - rmsd.min()) / (rmsd.max() - rmsd.min())
+
+            # quantize to 32 steps
+            rmsd = torch.round(rmsd * 32)
+            return rmsd / 32
+        else: 
+            return rmsd
+
 @dataclass
-class RMSQ:
+class HarmonicChroma:
     hop_length: int
-    window_length: int = 2048
-    
-    @property
+    window_length: int = 4096
+    n_chroma: int = 48
+
     def dim(self):
-        return 1
+        return self.n_chroma
 
     def extract(self, sig: Signal) -> Tensor:
-        rmsd = sn.rms(sig,
+        from torchaudio.prototype.transforms import ChromaScale
+        from vampnet.dsp.hpss import hpss
+
+        sig = sn.normalize(sig, -16)
+
+        # spectrogram 
+        spec = sn.stft(sig, 
             window_length=self.window_length, 
-            hop_length=self.hop_length, 
-        )[:, :, :-1]
+            hop_length=self.hop_length
+        )
+        # magnitudex
+        spec = torch.abs(spec)
+        # hpss
+        spec = hpss(spec, kernel_size=51, hard=True)[0]
+
+        # chroma
+        chroma = ChromaScale(
+            sample_rate=sig.sr, 
+            n_freqs=spec.shape[-2],
+            n_chroma=self.n_chroma,
+            octwidth=5.0,
+        )(spec)
+
+        # get the rms of this spec
+        # power spectrogram
+        x = spec ** 2
+
+        # adjust the DC and sr / 2 component
+        x[..., 0, :] *= 0.5
+        if self.window_length % 2 == 0:
+            x[..., -1, :] *= 0.5
+        
+        # calculate power
+        power = 2 * torch.sum(x, axis=-2, keepdims=False) / self.window_length ** 2
+
+        rms_d = torch.sqrt(power)
+
+        # convert the rms to db
+        rms_d = 10 * torch.log10(rms_d + 1e-7)
+        # make a mask based on the rms < -40
+        mask = torch.where(rms_d < -40, torch.zeros_like(rms_d), torch.ones_like(rms_d))
+
+        # convert to db (it's currently power)
+        # chroma = 10 * torch.log10(chroma + 1e-7)
+        # chroma = 
 
         # standardize to 0-1
-        rmsd = (rmsd - rmsd.min()) / (rmsd.max() - rmsd.min())
+        # chroma = (chroma - chroma.min()) / (chroma.max() - chroma.min())
 
-        # quantize to 32 steps
-        rmsd = torch.round(rmsd * 32)
-        return rmsd / 32
+        # remove anything below 80
+        chroma = torch.where(chroma < 100, torch.zeros_like(chroma), chroma)
+
+        # apply the mask
+        chroma = chroma * mask.unsqueeze(-2)
+
+        return chroma
+
+    
+
 
 CONTROLLERS = {
     "rms": RMS, 
-    "rmsq": RMSQ,
+    "rmsq": partial(RMS, quantize=True),
+    "hchroma": HarmonicChroma,
 }
+
 class Sketch2SoundController:
 
     def __init__(
@@ -88,11 +150,34 @@ class Sketch2SoundController:
 
 if __name__ == "__main__":
     controller = Sketch2SoundController(
-        ctrl_keys=["rms"], 
+        ctrl_keys=["rms", "hchroma"], 
         hop_length=512
     )
 
     sig = sn.read_from_file("assets/example.wav")
+    sig = sn.read_from_file("/Users/hugo/Downloads/DCS_SE_FullChoir_ScaleUpDown06_A2_DYN.wav")
+    sig = sn.excerpt('/Users/hugo/Downloads/(guitarra - hugo mix) bubararu - tambor negro.wav', offset=0, duration=10)
     ctrls = controller.extract(sig)
     print(f"given sig of shape {sig.wav.shape}, extracted controls: {ctrls}")
-    breakpoint()
+
+    # print the whole thing
+    # torch.set_printoptions(profile="full")
+    # print(ctrls["hchroma"][0][0][:, 200:210])
+
+    # imshow the chroma
+    import matplotlib.pyplot as plt
+
+    # Define relative heights for the subplots
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, 
+        sharex=True, 
+    )
+
+    # Display the spectrogram on the top
+    ax1.imshow(sn.stft(sig, hop_length=512, window_length=2048).abs()[0][0].cpu().numpy(), aspect='auto', origin='lower')
+    # Display the chroma on the bottom
+    ax2.imshow(ctrls["hchroma"][0][0].cpu().numpy(), aspect='auto', origin='lower')
+    # Show the plot
+    plt.tight_layout()  # Ensure proper spacing
+    plt.show()
+
