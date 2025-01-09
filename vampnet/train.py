@@ -131,7 +131,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         n_batch = sig.wav.shape[0]  
         if self.controller is not None:
             ctrls = self.controller.extract(sig)
-            # draw control masks NOTE: this mask will be the same for all controls. 
+            # draw control masks
             ctrl_masks = self.controller.random_mask(
                 ctrls, 
                 r=self.rng.draw(n_batch)[:, 0].to(self.device)

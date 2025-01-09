@@ -56,6 +56,7 @@ class ControlEncoder(nn.Module):
         })
 
         self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
+        self.all_dropout = CFGDropout(p=cfg_dropout_prob / 2)
 
     def forward(self, 
         embedding: Tensor, # embedding to which we will add ctrls
@@ -91,6 +92,9 @@ class ControlEncoder(nn.Module):
 
             # add to the out_emb
             out_emb = out_emb + ctrl_emb
+
+        # randomly dropout all ctrls
+        out_emb = self.all_dropout(out_emb)
 
         return out_emb
     

@@ -143,9 +143,10 @@ class Sketch2SoundController:
         }
 
     def random_mask(self, ctrls: dict[str, Tensor], r: float):
-        first_key = next(iter(ctrls))
-        mask = random_along_time(ctrls[first_key], r)
-        return {k: mask for k in ctrls}
+        masks = {}
+        for k, ctrl in ctrls.items():
+            masks[k] = random_along_time(ctrl, r)
+        return masks
 
     def empty_mask(self, ctrls: dict[str, Tensor]):
         first_key = next(iter(ctrls))
