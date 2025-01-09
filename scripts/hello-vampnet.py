@@ -9,36 +9,42 @@ from vampnet.mask import apply_mask
 
 from scripts.train import VampNetTrainer
 
+# pick a device and seed
+device = "cuda" if torch.cuda.is_available() else "cpu"
 seed(0)
 
+# load a pretrained model bundle
 bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-mode-vampnet_rms-latest") 
-codec = bundle.codec
-vn = bundle.model
+
+codec = bundle.codec # grab the codec
+vn = bundle.model # and the vampnet
+controller = bundle.controller # and the controller
+
+# eval mode!
 vn.eval()
 codec.eval()
 
+# create an interface with our pretrained shizzle
 eiface = Interface(
     codec=codec,
     vn=vn,
-    controller=bundle.controller
+    controller=controller
 )
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # load an audio file
 sig = sn.read_from_file("assets/example.wav")
 
-# cut sig to hop length
+# preprocess the signal
 sig = sn.trim_to_s(sig, 5.0)
 sig.wav = sn.cut_to_hop_length(sig.wav, eiface.codec.hop_length)
-sig = sn.normalize(sig, -16)
+sig = sn.normalize(sig, -16) # TODO: we should refactor this magic number
 sig = sig.to(device)
 
-# extract controls
-ctrls = eiface.controller.extract(sig)
+# extract controls and build a mask for them
+ctrls = controller.extract(sig)
 ctrl_mask =  eiface.build_mask(
     first_dict_value(ctrls), 
-    periodic_prompt=100, 
+    periodic_prompt=7, 
     upper_codebook_mask=1)[:, 0, :]
 ctrl_masks = {
     k: ctrl_mask for k in ctrls.keys()
@@ -47,15 +53,17 @@ ctrl_masks = {
 # move to gpu
 codec.to(device)
 
+# encode the signal
 codes = eiface.encode(sig.wav)
-print(codes.shape)
+print(f"encoded to codes of shape {codes.shape}")
 
-# make a mask
+# make a mask for the codes
 mask = eiface.build_mask(codes, periodic_prompt=0, upper_codebook_mask=4)
 
+# apply the mask
 codes = apply_mask(codes, mask, vn.mask_token)
 
-
+# generate!
 with torch.autocast(device,  dtype=torch.bfloat16):
     zv = vn.generate(
         codes=codes,
@@ -66,21 +74,23 @@ with torch.autocast(device,  dtype=torch.bfloat16):
         ctrls=ctrls,
         ctrl_masks=ctrl_masks,
         typical_min_tokens=64,
-        sampling_steps=[16, 8, 4, 4], 
-        # sampling_steps=16, 
-        causal_weight=0.0, 
-        debug=True
+        sampling_steps=[16, 8, 4, 4],
+        # sampling_steps=16,
+        causal_weight=0.0,
+        debug=False
     )
-
 
 # decode
 wav = eiface.decode(codes)
 outsig = sn.Signal(wav, sig.sr)
 print(wav.shape)
 
-# write to file
+# write the reconstructed signal
 sn.write(outsig, "scratch/reconstructed.wav")
 
-# save generated
+# write the generated signal
 generated_wav = eiface.decode(zv)
-sn.write(sn.Signal(generated_wav, sig.sr), f"scratch/generated.wav")
+sn.write(
+    sn.Signal(generated_wav, sig.sr),
+    "scratch/generated.wav"
+)
