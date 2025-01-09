@@ -45,7 +45,7 @@ python -m soundmaterial.chunk sm.db 5.0 # creates a table of 5 second chunks
 To train a model, run the following script: 
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python scripts/exp/train.py --args.load conf/vampnet.yml
+CUDA_VISIBLE_DEVICES=0 python -m vampnet.train --args.load conf/vampnet.yml
 ```
 
 you can resume from a checkpoint by specifying the `--resume_ckpt` flag. 
@@ -71,7 +71,7 @@ python scripts/export.py --ckpt runs/.../checkpoints/best.ckpt --hf_repo hugggof
 To debug training, it's easier to debug with 1 gpu and 0 workers
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
+CUDA_VISIBLE_DEVICES=0 python -m pdb -m vampnet.train --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
 ```
 
 

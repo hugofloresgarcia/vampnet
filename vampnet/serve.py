@@ -12,7 +12,7 @@ import torch
 import vampnet
 import vampnet.signal as sn
 from vampnet.mask import apply_mask
-from scripts.train import VampNetTrainer
+from vampnet.train import VampNetTrainer
 from tqdm import tqdm
 
 

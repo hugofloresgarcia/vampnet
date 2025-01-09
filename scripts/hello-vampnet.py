@@ -7,10 +7,11 @@ import vampnet.signal as sn
 from vampnet.util import first_dict_value, seed
 from vampnet.mask import apply_mask
 
-from scripts.train import VampNetTrainer
+from vampnet.train import VampNetTrainer
 
 # pick a device and seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
+# device = "mps"
 seed(0)
 
 # load a pretrained model bundle
@@ -54,21 +55,21 @@ mask = eiface.build_codes_mask(codes,
 codes = apply_mask(codes, mask, vn.mask_token)
 
 # generate!
-with torch.autocast(device,  dtype=torch.bfloat16):
-    zv = vn.generate(
-        codes=codes,
-        temperature=1.0,
-        mask_temperature=100.0,
-        typical_filtering=True,
-        typical_mass=0.15,
-        ctrls=ctrls,
-        ctrl_masks=ctrl_masks,
-        typical_min_tokens=64,
-        sampling_steps=[16, 8, 4, 4],
-        # sampling_steps=16,
-        causal_weight=0.0,
-        debug=False
-    )
+# with torch.autocast(device,  dtype=torch.bfloat16):
+gcodes = vn.generate(
+    codes=codes,
+    temperature=1.0,
+    mask_temperature=100.0,
+    typical_filtering=True,
+    typical_mass=0.15,
+    ctrls=ctrls,
+    ctrl_masks=ctrl_masks,
+    typical_min_tokens=64,
+    sampling_steps=[16, 8, 4, 4],
+    # sampling_steps=16,
+    causal_weight=0.0,
+    debug=False
+)
 
 # decode
 wav = eiface.decode(codes)
@@ -79,7 +80,7 @@ print(wav.shape)
 sn.write(outsig, "scratch/reconstructed.wav")
 
 # write the generated signal
-generated_wav = eiface.decode(zv)
+generated_wav = eiface.decode(gcodes)
 sn.write(
     sn.Signal(generated_wav, sig.sr),
     "scratch/generated.wav"

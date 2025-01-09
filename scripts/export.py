@@ -2,7 +2,7 @@ from pathlib import Path
 
 import argbind
 
-from scripts.train import VampNetTrainer
+from vampnet.train import VampNetTrainer
 
 
 @argbind.bind(without_prefix=True)

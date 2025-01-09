@@ -8,6 +8,7 @@ from torch import nn
 from torch import Tensor
 from torch import tensor as tt
 import tqdm
+from typing import Optional
 
 from vampnet.modules.transformer import VampNet
 from vampnet.mask import *
@@ -23,7 +24,8 @@ class Interface(nn.Module):
     def __init__(self,
         codec: DAC, 
         vn: VampNet,
-        controller: Sketch2SoundController = None,
+        controller: Optional[Sketch2SoundController] = None,
+        device="cuda" if torch.cuda.is_available() else "cpu"
     ):
         super().__init__()
         self.codec = codec
@@ -36,10 +38,18 @@ class Interface(nn.Module):
         # compile
         self.sample_rate = self.codec.sample_rate
         self.hop_length = self.codec.hop_length
+        self.device = device
+
+    def to(self, device):
+        self.device = device
+        self.codec.to(device)
+        self.vn.to(device)
+        return self
+
     def preprocess(self, sig: sn.Signal) -> sn.Signal:
-        sig.wav = sn.cut_to_hop_length(sig.wav, eiface.codec.hop_length)
+        sig.wav = sn.cut_to_hop_length(sig.wav, self.hop_length)
         sig = sn.normalize(sig, -16) # TODO: we should refactor this magic number
-        sig = sig.to(device)
+        sig = sig.to(self.device)
         return sig
 
     @torch.inference_mode()
