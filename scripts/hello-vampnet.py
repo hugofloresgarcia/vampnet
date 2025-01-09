@@ -52,12 +52,12 @@ mask = eiface.build_codes_mask(codes,
 )
 
 # apply the mask
-codes = apply_mask(codes, mask, vn.mask_token)
+mcodes = apply_mask(codes, mask, vn.mask_token)
 
 # generate!
 # with torch.autocast(device,  dtype=torch.bfloat16):
 gcodes = vn.generate(
-    codes=codes,
+    codes=mcodes,
     temperature=1.0,
     mask_temperature=100.0,
     typical_filtering=True,
@@ -65,7 +65,7 @@ gcodes = vn.generate(
     ctrls=ctrls,
     ctrl_masks=ctrl_masks,
     typical_min_tokens=64,
-    sampling_steps=[16, 8, 4, 4],
+    sampling_steps=[16, 8, 4, 4] if vn.mode == "stemgen" else 16,
     # sampling_steps=16,
     causal_weight=0.0,
     debug=False
