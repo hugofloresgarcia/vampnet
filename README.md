@@ -23,7 +23,7 @@ pip install -e ./soundmaterial
 
 # usage
 
-quick start! see `scripts/try.py` for an example of how to programmatically use a pretrained vampnet for inference. 
+quick start! see `scripts/hello-vampnet.py` for an example of how to programmatically use a pretrained vampnet for inference. 
 
 # training
 ## setting up a database for training
@@ -40,31 +40,6 @@ make a table of 5 second chunks to uniformly sample from them.
 python -m soundmaterial.chunk sm.db 5.0 # creates a table of 5 second chunks
 ```
 
-explore your dataset by listening to it
-```bash
-python -m soundmaterial.listen sm.db
-```
-
-or by looking each and every single file
-```bash
-pip install sqlite_web
-sqlite_web sm.db
-```
-
-now, you can train on subsets of the data with an sql query in `conf/vampnet.yml`
-
-for example: 
-```yaml
-build_datasets.db_path: sm.db
-build_datasets.query: "
-    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
-    FROM chunk 
-    JOIN audio_file as af ON chunk.audio_file_id = af.id 
-    JOIN dataset ON af.dataset_id = dataset.id
-    WHERE dataset.name IN ('my-dataset-1', 'my-dataset-2')
-"
-```
-NOTE: the SQL query **MUST** return the following columns: `path`, `offset`, `duration`, `total_duration`. see the example query above for reference.
 
 ## training a model
 
@@ -99,6 +74,35 @@ To debug training, it's easier to debug with 1 gpu and 0 workers
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
 ```
+
+
+## more database tricks
+
+(*optional*) explore your dataset by listening to it
+```bash
+python -m soundmaterial.listen sm.db
+```
+
+(*optional*) or by looking each and every single file
+```bash
+pip install sqlite_web
+sqlite_web sm.db
+```
+
+you can train on subsets of the data by modifying the sql query in `conf/vampnet.yml`
+
+for example: 
+```yaml
+build_datasets.db_path: sm.db
+build_datasets.query: "
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+    WHERE dataset.name IN ('my-dataset-1', 'my-dataset-2')
+"
+```
+NOTE: the SQL query **MUST** return the following columns: `path`, `offset`, `duration`, `total_duration`. see the example query above for reference.
 
 # gloop (generative looper)
 

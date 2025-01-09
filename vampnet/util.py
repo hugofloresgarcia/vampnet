@@ -4,6 +4,33 @@ import torch
 import numpy as np
 from einops import rearrange
 
+def seed(random_seed, set_cudnn=False):
+    """
+    Seeds all random states with the same random seed
+    for reproducibility. Seeds ``numpy``, ``random`` and ``torch``
+    random generators.
+    For full reproducibility, two further options must be set
+    according to the torch documentation:
+    https://pytorch.org/docs/stable/notes/randomness.html
+    To do this, ``set_cudnn`` must be True. It defaults to
+    False, since setting it to True results in a performance
+    hit.
+
+    Args:
+        random_seed (int): integer corresponding to random seed to
+        use.
+        set_cudnn (bool): Whether or not to set cudnn into determinstic
+        mode and off of benchmark mode. Defaults to False.
+    """
+
+    torch.manual_seed(random_seed)
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+
+    if set_cudnn:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
 def flip_coin(prob):
     return torch.rand(1).item() < prob
 

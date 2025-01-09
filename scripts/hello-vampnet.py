@@ -1,16 +1,18 @@
 import random
-import vampnet
-import vampnet.signal as sn
 from vampnet.interface import Interface
 import audiotools as at
 import torch
-from vampnet.util import first_dict_value
 
-from scripts.exp.train import VampNetTrainer
+import vampnet
+import vampnet.signal as sn
+from vampnet.util import first_dict_value, seed
+from vampnet.mask import apply_mask
 
-ckpt = "/home/hugo/soup/runs/vampnet-vampnet-rms/lightning_logs/version_1/checkpoints/last.ckpt"
+from scripts.train import VampNetTrainer
 
-bundle = VampNetTrainer.load_from_checkpoint(ckpt) 
+seed(0)
+
+bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-mode-vampnet_rms-latest") 
 codec = bundle.codec
 vn = bundle.model
 vn.eval()
@@ -52,18 +54,12 @@ print(codes.shape)
 # make a mask
 mask = eiface.build_mask(codes, periodic_prompt=0, upper_codebook_mask=4)
 
-# vamp on the codes
-# chop off, leave only the top  codebooks
-z = codes
-z = z[:, : vn.n_codebooks, :]
-mask = mask[:, : vn.n_codebooks, :]
+codes = apply_mask(codes, mask, vn.mask_token)
 
-# apply the mask
-from vampnet.mask import apply_mask
 
 with torch.autocast(device,  dtype=torch.bfloat16):
     zv = vn.generate(
-        codes=z,
+        codes=codes,
         temperature=1.0,
         mask_temperature=100.0,
         typical_filtering=True,
@@ -84,8 +80,8 @@ outsig = sn.Signal(wav, sig.sr)
 print(wav.shape)
 
 # write to file
-sn.write(outsig, "scratch/ex-recons.wav")
+sn.write(outsig, "scratch/reconstructed.wav")
 
 # save generated
 generated_wav = eiface.decode(zv)
-sn.write(sn.Signal(generated_wav, sig.sr), f"scratch/ex-gen.wav")
+sn.write(sn.Signal(generated_wav, sig.sr), f"scratch/generated.wav")
