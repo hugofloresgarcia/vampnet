@@ -116,13 +116,15 @@ def stft(sig: Signal,
         return stft_d
 
 def rms(sig: Signal, window_length: int, **kwargs):
-    # thank you librosa!
     stft_d = stft(sig, window_length=window_length, **kwargs)
+    return rms_from_spec(stft_d, window_length)
 
-    assert stft_d.shape[-2] == window_length // 2 + 1, "invalid window length"
+def rms_from_spec(spec: Tensor, window_length: int):
+    # thank you librosa!
+    assert spec.shape[-2] == window_length // 2 + 1, "invalid window length"
 
     # power spectrogram
-    x = torch.abs(stft_d) ** 2
+    x = torch.abs(spec) ** 2
 
     # adjust the DC and sr / 2 component
     x[..., 0, :] *= 0.5

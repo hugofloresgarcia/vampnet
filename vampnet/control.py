@@ -63,8 +63,9 @@ class HarmonicChroma:
             window_length=self.window_length, 
             hop_length=self.hop_length
         )
-        # magnitudex
+        # magnitude
         spec = torch.abs(spec)
+
         # hpss
         spec = hpss(spec, kernel_size=51, hard=True)[0]
 
@@ -72,18 +73,9 @@ class HarmonicChroma:
         chroma = self.chroma(spec)
 
         # get the rms of this spec
-        # power spectrogram
-        x = spec ** 2
-
-        # adjust the DC and sr / 2 component
-        x[..., 0, :] *= 0.5
-        if self.window_length % 2 == 0:
-            x[..., -1, :] *= 0.5
-        
-        # calculate power
-        power = 2 * torch.sum(x, axis=-2, keepdims=False) / self.window_length ** 2
-
-        rms_d = torch.sqrt(power)
+        rms_d = sn.rms_from_spec(
+            spec, window_length=self.window_length
+        )
 
         # convert the rms to db
         rms_d = 10 * torch.log10(rms_d + 1e-7)
