@@ -40,6 +40,7 @@ class HarmonicChroma:
     window_length: int = 4096
     n_chroma: int = 48
     sample_rate: int = 44100
+    top2: bool = False
 
     # HUGO: this representation, as is,
     # encodes timbre information in the chroma
@@ -84,14 +85,39 @@ class HarmonicChroma:
 
         # convert the rms to db
         rms_d = 10 * torch.log10(rms_d + 1e-7)
+
         # make a mask based on the rms < -40
         mask = torch.where(rms_d < -40, torch.zeros_like(rms_d), torch.ones_like(rms_d))
 
         # remove anything below 80 (where the fuck did I get this number from?)
         chroma = torch.where(chroma < 100, torch.zeros_like(chroma), chroma)
 
+        # Get top 2 values and indices along the -2 dimension
+        if self.top2:
+            topk_values, topk_indices = torch.topk(chroma, 2, dim=-2)
+
+            # Create a mask for the top 2 values
+            topk_mask = torch.zeros_like(chroma).scatter_(-2, topk_indices, 1.0)
+
+            # Retain only the top 2 values
+            chroma = chroma * topk_mask
+
         # apply the mask
         chroma = chroma * mask.unsqueeze(-2)
+
+        # Apply softmax along dim=-2
+        if self.top2:
+            chroma = torch.nn.functional.softmax(chroma, dim=-2)
+
+            # mask out any timesteps whose chroma have all equal values (all 0s before softmax)
+            # TODO: i did this with chatgpt, there's gott a be a better way
+            chroma_mean = chroma.mean(dim=-2, keepdim=True)
+            chroma_diff = torch.abs(chroma - chroma_mean)
+            equal_mask = torch.all(chroma_diff < 1e-6, dim=-2, keepdim=True)
+            
+            # Set chroma values to zero for timesteps with all equal values
+            chroma = torch.where(equal_mask, torch.zeros_like(chroma), chroma)
+
 
         return chroma[:, 0, :, :-1] # mono only :(  FIX ME!
 
@@ -100,6 +126,7 @@ CONTROLLERS = {
     "rms": RMS, 
     "rmsq": partial(RMS, quantize=True),
     "hchroma": HarmonicChroma,
+    "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top2=True)
 }
 
 class Sketch2SoundController:
@@ -146,7 +173,7 @@ class Sketch2SoundController:
 
 def test_controller():
     controller = Sketch2SoundController(
-        ctrl_keys=["rms", "hchroma"], 
+        ctrl_keys=["rms", "hchroma-12c-top2"], 
         hop_length=512, 
         sample_rate=44100
     )
@@ -174,7 +201,7 @@ def test_controller():
     # Display the spectrogram on the top
     ax1.imshow(sn.stft(sig, hop_length=512, window_length=2048).abs()[0][0].cpu().numpy(), aspect='auto', origin='lower')
     # Display the chroma on the bottom
-    ax2.imshow(ctrls["hchroma"][0].cpu().numpy(), aspect='auto', origin='lower')
+    ax2.imshow(ctrls["hchroma-12c-top2"][0].cpu().numpy(), aspect='auto', origin='lower')
     # Show the plot
     plt.tight_layout()  # Ensure proper spacing
     plt.show()
