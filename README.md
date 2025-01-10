@@ -21,7 +21,13 @@ pip install -e ./x-transformers
 pip install -e ./soundmaterial
 ```
 
+you'll need download to download the dac codec
+```bash
+python -m vampnet.dac.download
+```
+
 # usage
+
 
 quick start! see `scripts/hello-vampnet.py` for an example of how to programmatically use a pretrained vampnet for inference. 
 

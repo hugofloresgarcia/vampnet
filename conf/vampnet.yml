@@ -1,9 +1,9 @@
-VampNetTrainer.embedding_dim: 1026
-VampNetTrainer.n_layers: 12
-VampNetTrainer.n_heads: 12
+VampNetTrainer.embedding_dim: 774
+VampNetTrainer.n_layers: 8
+VampNetTrainer.n_heads: 8
 VampNetTrainer.mode: vampnet
 VampNetTrainer.outpaint_prob: 0.0
-VampNetTrainer.ctrl_keys: ['rms', ]
+VampNetTrainer.ctrl_keys: ['rms', 'hchroma']
 
 VampNetTrainer.lr: 0.001
 
@@ -22,7 +22,7 @@ VampNetDataModule.query: "
     FROM chunk 
     JOIN audio_file as af ON chunk.audio_file_id = af.id 
     JOIN dataset ON af.dataset_id = dataset.id
-    WHERE dataset.name IN ('mtg-jamendo', 'dagstuhl-choir-set', 'choral-singing-dataset')
+    WHERE dataset.name IN ('mtg-jamendo', 'choral-singing-dataset')
 "
     # WHERE dataset.name IN ('choral-singing-dataset')
 

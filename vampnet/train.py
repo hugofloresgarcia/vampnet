@@ -554,7 +554,7 @@ class AudioSampleLoggingCallback(Callback):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return f"mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+    return f"d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
 
 
 @argbind.bind(without_prefix=True)
