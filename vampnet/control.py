@@ -139,7 +139,7 @@ class Sketch2SoundController:
         return {k: mask for k in ctrls}
         
 
-if __name__ == "__main__":
+def test_controller():
     controller = Sketch2SoundController(
         ctrl_keys=["rms", "hchroma"], 
         hop_length=512, 
@@ -173,3 +173,7 @@ if __name__ == "__main__":
     plt.tight_layout()  # Ensure proper spacing
     plt.show()
 
+
+if __name__ == "__main__":
+    test_controller()
+    
