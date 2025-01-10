@@ -12,7 +12,7 @@ from vampnet.train import VampNetTrainer
 # pick a device and seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # device = "mps" 
-seed(0)
+# seed(0)
 
 # load a pretrained model bundle
 bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-d774-l8-h8-mode-vampnet_rms-hchroma-latest") 
@@ -42,8 +42,9 @@ ctrls = controller.extract(sig)
 #     "rms": eiface.build_ctrl_mask(ctrls["rms"], periodic_prompt=5),
 #     "hchroma": eiface.build_ctrl_mask(ctrls["hchroma"], periodic_prompt=0),
 # }
+# TODO: RMS needs an onset mask!!! prob combined w/ periodic.
 ctrl_masks = {
-    ck: eiface.build_ctrl_mask(ctrls[ck], periodic_prompt=5)
+    ck: eiface.build_ctrl_mask(ctrls[ck], periodic_prompt=2)
     for ck in ctrls
 }
 
