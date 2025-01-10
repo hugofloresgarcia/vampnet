@@ -1,5 +1,6 @@
 import tqdm
 import random
+import time
 
 import torch
 import numpy as np
@@ -85,3 +86,19 @@ def codebook_unflatten(flat_tokens: torch.Tensor, n_c: int = None):
     # tokens = rearrange(flat_tokens, "b (t c) -> b c t", c=n_c)
     # return tokens
     return flat_tokens.view(flat_tokens.shape[0], -1, n_c).permute(0, 2, 1)
+
+class Timer:
+    
+    def __init__(self):
+        self.times = {}
+    
+    def tick(self, name: str):
+        self.times[name] = time.time()
+    
+    def tock(self, name: str):
+        toc = time.time() - self.times[name]
+        print(f"{name} took {toc} seconds")
+        return toc
+    
+    def __str__(self):
+        return str(self.times)

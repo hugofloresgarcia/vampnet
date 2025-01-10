@@ -13,6 +13,7 @@ import vampnet
 import vampnet.signal as sn
 from vampnet.mask import apply_mask
 from vampnet.train import VampNetTrainer
+from vampnet.util import Timer
 from tqdm import tqdm
 
 
@@ -56,29 +57,11 @@ class ParamManager:
         with self._lock:
             return {name: param.value for name, param in self._params.items()}
 
-
-# a timer that allows recording things with timer.tick(name="name")
-class Timer:
-    
-    def __init__(self):
-        self.times = {}
-    
-    def tick(self, name: str):
-        self.times[name] = time.time()
-    
-    def tock(self, name: str):
-        toc = time.time() - self.times[name]
-        print(f"{name} took {toc} seconds")
-        return toc
-    
-    def __str__(self):
-        return str(self.times)
-
 # a class that wraps the vampnet interface
 # and provides a way to interact with it
 # over OSC with digital musical instruments
 class VampNetDigitalInstrumentSystem:
-    SAMPLING_STEPS = 12
+    SAMPLING_STEPS = 16
     
     def __init__(self, 
         interface: vampnet.interface.Interface, 
@@ -107,62 +90,23 @@ class VampNetDigitalInstrumentSystem:
         self._interrupt = False
         self.is_vamping = False
 
-        # a lock for the parameters
-        self._param_lock = Lock()
-    
-        # the 'knobs'
-        # TODO: need a better way to store these
-        # and set these. maybe a Param class is needed
-        self.temperature: float = 1.0
-        self.periodic_tokens: int = 3 # a combination of periodic propmt and droput
-        self.periodic_rms: int = 3 # a combination of periodic propmt and droput
-        self.upper_codebook_mask: int = 4 # upper codebook mask
-        self.seed: int = -1 # TODO: instrument should have saveable seed slots
-
-        self.param_keys = (
-            "temperature",
-            "corrupt_time_amt",
-            "corrupt_type",
-            "corrupt_timbre",
-            "seed",
-        )
+        # register parameters
+        self._pm = ParamManager()
+        self._register_params()
 
         # dispatch a hello message
         print(f"sending hello message...")
         self.client.send_message("/hello",["Hello from VampNet"])
         self.client.send_message("/hello", [6., -2.])
 
-
-
-    def set_parameter(self, address: str, *args: list[any]) -> None:
-        with self._param_lock:
-            print(f"Setting parameter {address} to {args}")
-            if address == "/temperature":
-                self.temperature = args[0]
-            elif address == "/corrupt_time_amt":
-                self.corrupt_time_amt = args[0]
-            elif address == "/corrupt_timbre":
-                self.corrupt_timbre = int(args[0])
-            elif address == "/seed":
-                self.seed = args[0]
-            else:
-                print(f"Unknown address {address}")
-            
-    def calculate_mask(self, z: torch.Tensor):
-        raise NotImplementedError()
-
-        mask = self.interface.build_mask(
-            z, 
-            periodic_prompt=periodic_prompt,
-            upper_codebook_mask=upper_codebook_mask,
-            dropout_amt=dropout_amt, 
-        )
-
-        # save the mask as a txt file (numpy)
-        import numpy as np
-        np.savetxt("mask.txt", mask[0].cpu().numpy(), fmt="%d")
-
-        return mask
+    def _register_params(self):
+        self._pm.register("seed", -1, int)
+        self._pm.register("temperature", 1.0, float, (0.5, 10.0))
+        self._pm.register("controls_periodic_prompt", 1, int, (0, 10))
+        self._pm.register("codes_periodic_prompt", 1, int, (0, 10))
+        self._pm.register("codes_upper_codebook_mask", 0, int, (0, 10))
+        self._pm.register("mask_temperature", 1.0, float, (0.1, 100000.0))
+        self._pm.register("typical_mass", 0.8, float, (0.0, 1.0))
 
 
     def process(self, address: str, *args) -> None:
@@ -218,38 +162,55 @@ class VampNetDigitalInstrumentSystem:
 
     @torch.inference_mode()
     def vamp(self, sig: sn.Signal):
+        seed = self._pm.get("seed")
         self.is_vamping = True
 
-        cfg_guidance = None
         timer = self.timer
 
         timer.tick("resample")
         sig = sn.resample(sig, self.interface.sample_rate)
         timer.tock("resample")
 
+        # controls
+        timer.tick("controls")
+        ctrls = self.interface.controller.extract(sig)
+        ctrl_masks = self.interface.build_ctrl_masks(
+            ctrls, 
+            periodic_prompt=self._pm.get("controls_periodic_prompt")
+        )
+
         # encode
         timer.tick("encode")
         codes = self.interface.encode(sig.wav)
         timer.tock("encode")
 
-        timer.tick("sample")
         # build the mask
-        # MUST APPLY MASK BEFORE INITIALIZING STATE
-        mask = self.calculate_mask(codes)
-        codes = apply_mask(
-            codes, mask, 
-            self.interface.vn.mask_token
+        mask = self.interface.build_codes_mask(
+            codes, 
+            periodic_prompt=self._pm.get("codes_periodic_prompt"),
+            upper_codebook_mask=self._pm.get("codes_upper_codebook_mask")
         )
+        codes = apply_mask(codes, mask, self.interface.vn.mask_token)
 
         # seed
-        if self.seed >= 0:
-            torch.manual_seed(self.seed)
+        if seed >= 0:
+            torch.manual_seed(seed)
         else:
             torch.manual_seed(int(time.time()))
 
+        timer.tick("sample")
         z = self.interface.vn.generate(
             codes=codes, 
+            ctrls=ctrls,
+            ctrl_masks=ctrl_masks,
+            temperature=self._pm.get("temperature"),
+            mask_temperature=self._pm.get("mask_temperature"),
+            typical_filtering=True,
+            typical_mass=self._pm.get("typical_mass"),
+            sampling_steps=self.SAMPLING_STEPS,
+            debug=False
         )
+
         if z is None:
             # we were interrupted
             self.is_vamping = False
@@ -258,7 +219,7 @@ class VampNetDigitalInstrumentSystem:
 
         # decode
         timer.tick("decode")
-        sig.wav = interface.decode(z)
+        sig.wav = self.interface.decode(z)
         timer.tock("decode")
 
         self.is_vamping = False
@@ -269,17 +230,31 @@ class VampNetDigitalInstrumentSystem:
         dispatcher = Dispatcher()
         dispatcher.map("/process", self.process)
 
-        dispatcher.map("/temperature", self.set_parameter)
-        dispatcher.map("/corrupt_time_amt", self.set_parameter)
-        dispatcher.map("/corrupt_type", self.set_parameter)
-        dispatcher.map("/corrupt_timbre", self.set_parameter)
-        dispatcher.map("/seed", self.set_parameter)
+        # connect params from manager to dispatcher
+        for param_name in self._pm.list().keys():
+            dispatcher.map(f"/{param_name}", self._osc_set_param(param_name))
+
+        dispatcher.map("/get_params", self._osc_get_params)
+
         dispatcher.set_default_handler(lambda a, *r: print(a, r))
 
         server = ThreadingOSCUDPServer((self.ip, self.r_port), dispatcher)
         print(f"Serving on {server.server_address}")
         server.serve_forever()
 
+    def _osc_set_param(self, param_name):
+        def handler(_, *args):
+            try:
+                self._pm.set(param_name, args[0])
+                print(f"Set {param_name} to {self._pm.get(param_name)}")
+            except ValueError as e:
+                print(f"Error setting parameter {param_name}: {e}")
+        return handler
+
+    def _osc_get_params(self, address, *args):
+        param_names = list(self._pm.list().keys())
+        print(f"Returning parameter names: {param_names}")
+        self.client.send_message("/params", ",".join(param_names))
 
 @argbind.bind()
 def main(ip = "localhost", s_port = 8002, r_port = 8001, 

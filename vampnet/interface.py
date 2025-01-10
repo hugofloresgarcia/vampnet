@@ -39,11 +39,13 @@ class Interface(nn.Module):
         self.sample_rate = self.codec.sample_rate
         self.hop_length = self.codec.hop_length
         self.device = device
+        print(f"initialized interface with device {device}")
 
     def to(self, device):
         self.device = device
         self.codec.to(device)
         self.vn.to(device)
+        print(f"interface moved to device {device}")
         return self
 
     def preprocess(self, sig: sn.Signal) -> sn.Signal:
@@ -78,6 +80,7 @@ class Interface(nn.Module):
         mask = codebook_mask(mask, upper_codebook_mask, None)
         return mask
 
+    @torch.inference_mode()
     def build_ctrl_masks(self, 
         ctrls: dict[str, Tensor], 
         periodic_prompt: Tensor = 5,
