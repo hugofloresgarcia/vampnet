@@ -11,11 +11,11 @@ from vampnet.train import VampNetTrainer
 
 # pick a device and seed
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# device = "mps"
+# device = "mps" 
 seed(0)
 
 # load a pretrained model bundle
-bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-mode-vampnet_rms-latest") 
+bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-d774-l8-h8-mode-vampnet_rms-hchroma-latest") 
 
 codec = bundle.codec # grab the codec
 vn = bundle.model # and the vampnet
@@ -38,9 +38,14 @@ sig = eiface.preprocess(sig)
 
 # extract controls and build a mask for them
 ctrls = controller.extract(sig)
-ctrl_masks = eiface.build_ctrl_masks(ctrls,
-    periodic_prompt=5
-)
+# ctrl_masks = {
+#     "rms": eiface.build_ctrl_mask(ctrls["rms"], periodic_prompt=5),
+#     "hchroma": eiface.build_ctrl_mask(ctrls["hchroma"], periodic_prompt=0),
+# }
+ctrl_masks = {
+    ck: eiface.build_ctrl_mask(ctrls[ck], periodic_prompt=5)
+    for ck in ctrls
+}
 
 # encode the signal
 codes = eiface.encode(sig.wav)

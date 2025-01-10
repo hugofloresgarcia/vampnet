@@ -118,7 +118,7 @@ class VampNetDigitalInstrumentSystem:
             # get the path to audio
             audio_path = Path(args[0])
             # patch 
-            audio_path = Path("../") / audio_path
+            audio_path = Path("pd/") / audio_path
 
             # make sure it exists, otherwise send an error message
             if not audio_path.exists():
@@ -128,6 +128,7 @@ class VampNetDigitalInstrumentSystem:
             
             # load the audio
             sig = sn.read_from_file(audio_path)
+            print(f"got a file with duration {sig.duration}")
             sig = sig.to(self.interface.device)
 
             # run the vamp
@@ -150,6 +151,9 @@ class VampNetDigitalInstrumentSystem:
             # write the audio
             outpath = audio_path.with_suffix(".vamped.wav")
             sn.write(sig, outpath)
+            # delete the input buf
+            
+            Path(audio_path).unlink()
 
             # send a message that the process is done
             self.client.send_message("/done", f"File {audio_path} has been vamped")
@@ -167,17 +171,25 @@ class VampNetDigitalInstrumentSystem:
 
         timer = self.timer
 
-        timer.tick("resample")
-        sig = sn.resample(sig, self.interface.sample_rate)
-        timer.tock("resample")
+        timer.tick("preprocess")
+        sig = self.interface.preprocess(sig)    
+        timer.tock("preprocess")
 
         # controls
         timer.tick("controls")
         ctrls = self.interface.controller.extract(sig)
-        ctrl_masks = self.interface.build_ctrl_masks(
-            ctrls, 
-            periodic_prompt=self._pm.get("controls_periodic_prompt")
-        )
+        # ctrl_masks = self.interface.build_ctrl_masks(
+        #     ctrls, 
+        #     periodic_prompt=self._pm.get("controls_periodic_prompt")
+        # )
+        ctrl_masks = {}
+        for k,ctrl in ctrls.items():
+            ctrl_masks[k] = self.interface.build_ctrl_mask(
+                ctrl, periodic_prompt=self._pm.get("controls_periodic_prompt")
+            )
+        if "hchroma" in ctrls:
+            print("disabling hchroma")
+            ctrl_masks["hchroma"] = torch.zeros_like(ctrl_masks["hchroma"])
 
         # encode
         timer.tick("encode")
@@ -256,9 +268,9 @@ class VampNetDigitalInstrumentSystem:
         print(f"Returning parameter names: {param_names}")
         self.client.send_message("/params", ",".join(param_names))
 
-@argbind.bind()
+@argbind.bind(without_prefix=True)
 def main(ip = "localhost", s_port = 8002, r_port = 8001, 
-         device="mps", ckpt: str = "hugggof/vampnetv2-mode-vampnet_rms-latest"):
+         device="cpu", ckpt: str = "hugggof/vampnetv2-mode-vampnet_rms-latest"):
 
     bundle = VampNetTrainer.from_pretrained(ckpt)
 

@@ -9,7 +9,7 @@
 #X obj 182 886 hsl 300 20 -4 4 0 1 empty empty writing-and-reading-speed 100 10 0 10 #fcfcfc #fc8000 #000000 18700 0;
 #X obj 701 1399 hip~ 5;
 #X floatatom 250 917 4 0 0 0 - - - 0;
-#X obj 589 228 hsl 395 64 0 133632 0 0 empty \$0-slider empty -2 -8 0 10 #fcfcfc #fc8000 #000000 0 1;
+#X obj 589 228 hsl 395 64 0 196608 0 0 empty \$0-slider empty -2 -8 0 10 #fcfcfc #fc8000 #000000 0 1;
 #X msg 4340 652 const 0;
 #X text 250 1535 direct out;
 #X obj 742 1376 hsl 64 15 0 1 0 1 empty empty feedback 5 8 0 10 #fcfcfc #fc8000 #000000 4365 0;
@@ -33,8 +33,8 @@
 #X obj 219 1533 tgl 25 1 empty empty empty 17 7 0 10 #fcfcfc #fc8000 #000000 0 0.7;
 #X text 985 791 Variable speed sound on sound looping delay \, tested with soundfile (.wav or .aiff). It works particularly nice with drumloops.;
 #N canvas 295 320 450 300 (subpatch) 0;
-#X array \$0-ipokebuf 133632 float 2;
-#X coords 0 1 133632 -1 400 64 1 0 0;
+#X array \$0-ipokebuf 196608 float 2;
+#X coords 0 1 196608 -1 400 64 1 0 0;
 #X restore 587 228 graph;
 #X text 986 845 Be careful with high feedback settings if the soundfile is still playing \, there is no limiter included in this patch.;
 #X text 4394 652 clear buffer;
@@ -103,10 +103,10 @@
 #X obj 2530 515 list prepend send;
 #X obj 2530 539 list trim;
 #X obj 2470 436 oscformat /seed;
-#X obj 591 143 hsl 395 64 0 133632 0 0 empty \$0-slider empty -2 -8 0 10 #fcfcfc #fc8000 #000000 0 1;
+#X obj 591 143 hsl 395 64 0 196608 0 0 empty \$0-slider empty -2 -8 0 10 #fcfcfc #fc8000 #000000 0 1;
 #N canvas 295 320 450 300 (subpatch) 0;
-#X array \$0-wetpokebuf 133632 float 2;
-#X coords 0 1 133632 -1 400 64 1 0 0;
+#X array \$0-wetpokebuf 196608 float 2;
+#X coords 0 1 196608 -1 400 64 1 0 0;
 #X restore 587 143 graph;
 #X obj 699 836 loadbang;
 #X text 122 731 audio processing;
@@ -117,7 +117,7 @@
 #X text 1795 7 osc receive;
 #X floatatom 2198 289 5 0 0 0 - - - 0;
 #X obj 170 1455 expr~ ($v1*(1-$v3*$v3)) + ($v2*($v3*$v3));
-#X obj 454 1409 hsl 128 15 0 1 0 1 empty empty xfade 20 8 0 10 #fcfcfc #fc8000 #000000 12700 0;
+#X obj 454 1409 hsl 128 15 0 1 0 1 empty empty xfade 20 8 0 10 #fcfcfc #fc8000 #000000 8000 0;
 #X obj 178 1219 phasor~;
 #X obj 178 1245 *~ 88200;
 #N canvas 329 481 282 268 draw 0;
@@ -389,8 +389,8 @@
 #X text 527 165 wet buf;
 #X text 1369 273 undo circuit: before reading a new file \, save whatever's in the buffer to a backup buffer, f 25;
 #N canvas 295 320 450 300 (subpatch) 0;
-#X array \$0-undobuf 133632 float 2;
-#X coords 0 1 133632 -1 100 32 1 0 0;
+#X array \$0-undobuf 196608 float 2;
+#X coords 0 1 196608 -1 100 32 1 0 0;
 #X restore 1407 471 graph;
 #X obj 1403 393 array get \$0-wetpokebuf;
 #X obj 1403 427 array set \$0-undobuf;

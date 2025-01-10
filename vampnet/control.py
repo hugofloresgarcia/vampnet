@@ -41,6 +41,10 @@ class HarmonicChroma:
     n_chroma: int = 48
     sample_rate: int = 44100
 
+    # HUGO: this representation, as is,
+    # encodes timbre information in the chroma
+    # which is not what we want!!!
+    # would a median filter help perhaps? 
 
     def __post_init__(self):
         from torchaudio.prototype.transforms import ChromaScale
@@ -57,6 +61,7 @@ class HarmonicChroma:
 
     def extract(self, sig: Signal) -> Tensor:
         from vampnet.dsp.hpss import hpss
+        self.chroma.to(sig.wav.device)
 
         # spectrogram 
         spec = sn.stft(sig, 
@@ -130,7 +135,7 @@ class Sketch2SoundController:
     def random_mask(self, ctrls: dict[str, Tensor], r: float):
         masks = {}
         for k, ctrl in ctrls.items():
-            masks[k] = random_along_time(ctrl, r)
+            masks[k] = 1-random_along_time(ctrl, r)
         return masks
 
     def empty_mask(self, ctrls: dict[str, Tensor]):
@@ -147,8 +152,9 @@ def test_controller():
     )
 
     sig = sn.read_from_file("assets/example.wav")
-    sig = sn.read_from_file("/Users/hugo/Downloads/DCS_SE_FullChoir_ScaleUpDown06_A2_DYN.wav")
-    sig = sn.excerpt('/Users/hugo/Downloads/(guitarra - hugo mix) bubararu - tambor negro.wav', offset=0, duration=10)
+    # sig = sn.read_from_file("/Users/hugo/Downloads/DCS_SE_FullChoir_ScaleUpDown06_A2_DYN.wav")
+    # sig = sn.excerpt('/Users/hugo/Downloads/(guitarra - hugo mix) bubararu - tambor negro.wav', offset=0, duration=10)
+    sig = sn.read_from_file("assets/voice-prompt.wav")
     ctrls = controller.extract(sig)
     print(f"given sig of shape {sig.wav.shape}, extracted controls: {ctrls}")
 
@@ -168,7 +174,7 @@ def test_controller():
     # Display the spectrogram on the top
     ax1.imshow(sn.stft(sig, hop_length=512, window_length=2048).abs()[0][0].cpu().numpy(), aspect='auto', origin='lower')
     # Display the chroma on the bottom
-    ax2.imshow(ctrls["hchroma"][0][0].cpu().numpy(), aspect='auto', origin='lower')
+    ax2.imshow(ctrls["hchroma"][0].cpu().numpy(), aspect='auto', origin='lower')
     # Show the plot
     plt.tight_layout()  # Ensure proper spacing
     plt.show()

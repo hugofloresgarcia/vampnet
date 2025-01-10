@@ -49,6 +49,9 @@ class Interface(nn.Module):
         return self
 
     def preprocess(self, sig: sn.Signal) -> sn.Signal:
+        dev = sig.wav.device
+        sig = sig.to("cpu") # mps can't support loudness norm
+        sig = sn.resample(sig, self.sample_rate)
         sig.wav = sn.cut_to_hop_length(sig.wav, self.hop_length)
         sig = sn.normalize(sig, -16) # TODO: we should refactor this magic number
         sig = sig.to(self.device)
@@ -80,20 +83,10 @@ class Interface(nn.Module):
         mask = codebook_mask(mask, upper_codebook_mask, None)
         return mask
 
+
     @torch.inference_mode()
-    def build_ctrl_masks(self, 
-        ctrls: dict[str, Tensor], 
-        periodic_prompt: Tensor = 5,
-    ):
-        ctrl_mask = self.build_codes_mask(
-            first_dict_value(ctrls), 
-            periodic_prompt=periodic_prompt, 
-            upper_codebook_mask=1
-        )[:, 0, :]
-        ctrl_masks = {
-            k: ctrl_mask for k in ctrls.keys()
-        }
-        return ctrl_masks
+    def build_ctrl_mask(self, ctrl: Tensor, periodic_prompt: Tensor = 5):
+        return 1-self.build_codes_mask(ctrl, periodic_prompt=periodic_prompt, upper_codebook_mask=1)[:, 0, :]
 
 
     @torch.inference_mode()
