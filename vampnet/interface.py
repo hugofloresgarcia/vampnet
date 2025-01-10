@@ -12,7 +12,7 @@ from typing import Optional
 
 from vampnet.modules.transformer import VampNet
 from vampnet.mask import *
-from vampnet.signal import cut_to_hop_length, write, trim_to_s
+from vampnet.dsp.signal import cut_to_hop_length, write, trim_to_s
 from vampnet.dac.model.dac import DAC
 from vampnet.control import Sketch2SoundController
 from vampnet.util import first_dict_value

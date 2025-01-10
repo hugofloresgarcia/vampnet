@@ -4,8 +4,6 @@ import argbind
 
 from vampnet.train import VampNetTrainer
 
-
-@argbind.bind(without_prefix=True)
 def export_model(
     ckpt: str = None, 
     hf_repo: str = "hugggof/vampnetv2",
@@ -29,6 +27,7 @@ def export_model(
 
 
 if __name__ == "__main__":
+    export_model = argbind.bind(export_model, without_prefix=True)
     args = argbind.parse_args()
 
     with argbind.scope(args):

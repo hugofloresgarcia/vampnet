@@ -10,7 +10,7 @@ from pythonosc.dispatcher import Dispatcher
 
 import torch
 import vampnet
-import vampnet.signal as sn
+import vampnet.dsp.signal as sn
 from vampnet.mask import apply_mask
 from vampnet.train import VampNetTrainer
 from vampnet.util import Timer

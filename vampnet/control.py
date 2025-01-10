@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from functools import partial
 
-import vampnet.signal as sn
-from vampnet.signal import Signal
+import vampnet.dsp.signal as sn
+from vampnet.dsp.signal import Signal
 from vampnet.mask import random_along_time
 from torch import Tensor
 import torch
@@ -90,14 +90,7 @@ class HarmonicChroma:
         # make a mask based on the rms < -40
         mask = torch.where(rms_d < -40, torch.zeros_like(rms_d), torch.ones_like(rms_d))
 
-        # convert to db (it's currently power)
-        # chroma = 10 * torch.log10(chroma + 1e-7)
-        # chroma = 
-
-        # standardize to 0-1
-        # chroma = (chroma - chroma.min()) / (chroma.max() - chroma.min())
-
-        # remove anything below 80
+        # remove anything below 80 (where the fuck did I get this number from?)
         chroma = torch.where(chroma < 100, torch.zeros_like(chroma), chroma)
 
         # apply the mask

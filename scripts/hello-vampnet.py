@@ -3,7 +3,7 @@ from vampnet.interface import Interface
 import torch
 
 import vampnet
-import vampnet.signal as sn
+import vampnet.dsp.signal as sn
 from vampnet.util import first_dict_value, seed
 from vampnet.mask import apply_mask
 

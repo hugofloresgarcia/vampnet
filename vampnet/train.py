@@ -29,7 +29,7 @@ from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten, flip_coin
 from vampnet import mask as pmask
 from vampnet.dac.model.dac import DAC
-import vampnet.signal as sn
+import vampnet.dsp.signal as sn
 
 
 # Enable cudnn autotuner to speed up training
