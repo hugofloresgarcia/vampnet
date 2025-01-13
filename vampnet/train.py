@@ -61,6 +61,8 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         embedding_dim: int = 1026,
         # ~~~ training // behavior ~~~
         outpaint_prob: float = 0.0, 
+        prefix_min: float = 0.1, 
+        prefix_max: float = 0.25,
         lr: float = 0.001 
     ):
         super().__init__()
@@ -103,12 +105,13 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.codec.requires_grad_(False)
 
         self.outpaint_prob = outpaint_prob
+        self.prefix_min = prefix_min
+        self.prefix_max = prefix_max
 
         # trainer things
         self.criterion = nn.CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
 
-        # tag for saving
         self.tag = get_model_tag(self)
 
 
@@ -142,22 +145,29 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         
         return ctrls, ctrl_masks
 
-    def generate_z_mask(self, z, vn, n_batch):
+    def generate_z_mask(self, z, vn, n_batch, ctrl_masks=None):
         r = self.rng.draw(n_batch)[:, 0].to(self.device)
 
         mask, ii = self.model.random_mask(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
 
         # outpaint? 
-        if torch.rand(1).item() < self.outpaint_prob:
-            # sample how many tokens to outpaint
-            n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
-            outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
-            mask = pmask.mask_and(mask, outpaint_mask)
+        if self.outpaint_prob > 0:
+            if flip_coin(self.outpaint_prob):
+                mask, ctrl_masks = self.build_tria_mask(mask, ctrl_masks)
 
         z_mask = pmask.apply_mask(z, mask, vn.mask_token)
         
-        return z_mask, mask, ii, r
+        return z_mask, mask, ii, r, ctrl_masks
+
+    def build_tria_mask(self, mask, ctrl_masks):
+        tmask = vampnet.mask.tria_mask(mask, self.prefix_min, self.prefix_max)
+        mask = vampnet.mask.mask_and(mask, tmask)
+
+        for ck, cmask in ctrl_masks.items():
+            ctrl_masks[ck] = vampnet.mask.mask_and(cmask, tmask[:, 0, :])
+
+        return mask, ctrl_masks
 
     def training_step(self, batch, batch_idx):
         self.model.train()
@@ -176,7 +186,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             z = z[:, : vn.n_codebooks, :]
 
 
-        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
+        z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
         
         # TODOO: use embedding instead
         z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
@@ -212,12 +222,11 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         ctrls, ctrl_masks = self.get_controls(sig)
 
-
         vn = self.model
         z = self.codec.encode(sig.wav, sig.sr)["codes"]
         z = z[:, : vn.n_codebooks, :]
 
-        z_mask, mask, ii, r = self.generate_z_mask(z, vn, n_batch)
+        z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
 
         # TODOO: use embedding instead
         # z_mask_latent = vn.embedding.from_codes(z_mask)
@@ -318,7 +327,10 @@ class VampNetDataModule(L.LightningDataModule):
         print(f"loading data from {self.db_path}")
 
         df = pd.read_sql(self.query, conn)
+        df = df.sample(frac=1, random_state=SEED)
         tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=SEED)
+
+        vdf = tdf.sample(frac=1, random_state=SEED)
 
         self.train_data = Dataset(
             tdf, sample_rate=sample_rate, n_samples=n_samples,
@@ -489,10 +501,8 @@ class AudioSampleLoggingCallback(Callback):
 
             mask = pmask.full_mask(z)
             if module.outpaint_prob > 0:
-                # sample how many tokens to outpaint
-                n_outpaint = torch.randint(0, z.shape[-1], (1,)).item()
-                outpaint_mask = pmask.inpaint(z, n_outpaint, 0)
-                mask = pmask.mask_and(mask, outpaint_mask)
+                if flip_coin(module.outpaint_prob):
+                    mask, ctrl_masks = module.build_tria_mask(mask, ctrl_masks)
             
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
@@ -554,7 +564,7 @@ class AudioSampleLoggingCallback(Callback):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return f"d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+    return f"{'tria' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
 
 
 @argbind.bind(without_prefix=True)
@@ -588,6 +598,7 @@ if __name__ == "__main__":
                 if resume_ckpt is not None
                 else VampNetTrainer()
         )
+        model.outpaint_prob = 0.5 # patch
 
         # ~~~~ set up data ~~~~
         dm = VampNetDataModule(sample_rate=model.codec.sample_rate)
@@ -595,6 +606,8 @@ if __name__ == "__main__":
         dm.setup()
         train_dataloader = dm.train_dataloader()
         val_dataloader = dm.val_dataloader()
+
+        # ~~~~~ add datamodule metadata to model ~~~~~
 
         # ~~~~ callbacks ~~~~~
         callbacks = []

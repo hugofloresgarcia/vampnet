@@ -2,8 +2,8 @@ VampNetTrainer.embedding_dim: 774
 VampNetTrainer.n_layers: 8
 VampNetTrainer.n_heads: 8
 VampNetTrainer.mode: vampnet
-VampNetTrainer.outpaint_prob: 0.0
-VampNetTrainer.ctrl_keys: ['rms', 'hchroma']
+VampNetTrainer.outpaint_prob: 0.5
+VampNetTrainer.ctrl_keys: ['rms', 'hchroma-12c-top2']
 
 VampNetTrainer.lr: 0.001
 
@@ -11,9 +11,12 @@ VampNetTrainer.lr: 0.001
 VampNetDataModule.batch_size: 32
 VampNetDataModule.num_workers: 10
 # VampNetDataModule.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
-VampNetDataModule.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
 # VampNetDataModule.n_samples: 132096 # roughly 2.99 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 352768 # roughly 8 seconds, matching a 512 sample hop len at 44.1k
+VampNetDataModule.n_samples: 264192 # roughly 6 seconds, matching a 512 sample hop len at 44.1k
 VampNetDataModule.use_chunk_table: true
+# VampNetDataModule.augment: true
 
 # build_datasets.db_path: /media/pancho/sm.db
 VampNetDataModule.db_path: /home/hugo/soup/scratch/data-fast/sm.db

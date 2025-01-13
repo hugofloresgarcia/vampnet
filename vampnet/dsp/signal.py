@@ -33,6 +33,10 @@ class Signal:
     @property
     def duration(self):
         return self.wav.shape[-1] / self.sr
+
+    @property
+    def batch_size(self):
+        return self.wav.shape[0]
     
     @property
     def num_channels(self):
@@ -137,6 +141,18 @@ def rms_from_spec(spec: Tensor, window_length: int):
     rms_d = torch.sqrt(power)
     return rms_d
 
+def onsets(sig: Signal, hop_length: int):
+    assert sig.batch_size == 1, "batch size must be 1"
+    assert sig.num_channels == 1, "mono signals only"
+    import librosa
+    onset_frame_idxs = librosa.onset.onset_detect(
+        y=sig.wav[0][0].detach().cpu().numpy(), sr=sig.sr, 
+        hop_length=hop_length,
+        backtrack=True,
+    )
+    return onset_frame_idxs
+
+
 # ~ transform ~
 def pitch_shift(sig: Signal, semitones: int) -> Signal:
     tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
@@ -213,6 +229,23 @@ def loudness(
 
     return _loudness.to(sig.wav.device)
 
+# ~ math ~
+def amp2db(x: Tensor) -> Tensor:
+    """Converts amplitude to decibels."""
+    return 20 * torch.log10(x)
+
+def db2amp(x: Tensor) -> Tensor:
+    """Converts decibels to amplitude."""
+    return 10 ** (x / 20)
+
+def pow2db(x: Tensor) -> Tensor:
+    """Converts power to decibels."""
+    return 10 * torch.log10(x)
+
+def db2pow(x: Tensor) -> Tensor:
+    """Converts decibels to power."""
+    return 10 ** (x / 10)
+
 # ~ sig util ~
 @torch.jit.script_if_tracing
 def truncate_samples(sig: Signal, original_length: int):
@@ -229,6 +262,7 @@ def zero_pad(sig: Signal, start: int, end: int):
 
 @torch.jit.script_if_tracing
 def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
+    """Cuts a signal to a multiple of the hop length."""
     length = wav.shape[-1]
     right_cut = length % hop_length
     if right_cut > 0:
@@ -237,8 +271,18 @@ def cut_to_hop_length(wav: Tensor, hop_length: int) -> torch.Tensor:
 
 @torch.jit.script_if_tracing
 def trim_to_s(sig: Signal, duration: float) -> Tensor:
+    """ Trims a signal to a specified duration in seconds."""
     length = int(duration * sig.sr)
     return Signal(sig.wav[..., :length], sig.sr)
+
+def concat(signals: list[Signal]) -> Signal:
+    """Concatenates a list of signals along the time axis."""
+    first_sig = signals[0]
+    assert all([x.sr == first_sig.sr for x in signals]), "All signals must have the same sample rate"
+    assert all([x.num_channels == first_sig.num_channels for x in signals]), "All signals must have the same number of channels"
+    assert all([x.batch_size == first_sig.batch_size for x in signals]), "All signals must have the same batch size"
+    wav = torch.cat([x.wav for x in signals], dim=-1)
+    return Signal(wav, signals[0].sr)
 
 def ensure_tensor(
     x: np.ndarray | torch.Tensor | float | int,

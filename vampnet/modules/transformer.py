@@ -42,6 +42,7 @@ class CFGDropout(nn.Module):
             mask = torch.ones(x.shape[0], 1, 1, device=x.device)
         return x * mask
 
+
 class ControlEncoder(nn.Module):
 
     def __init__(self, 
@@ -374,7 +375,7 @@ class VampNet(L.LightningModule):
         steps = sampling_steps + [1 for _ in range(n_infer_codebooks - len(sampling_steps))]
         steps = steps[:n_infer_codebooks]
 
-        for codebook_level, nsteps in tqdm.tqdm(enumerate(steps), total=len(steps)):
+        for codebook_level, nsteps in enumerate(steps):
 
             # apply the orig mask to z_masked, only in the current codebook level
             # this is crucial due to the stemgen random masking we did during training
@@ -639,7 +640,7 @@ class VampNet(L.LightningModule):
         # how many codebooks are we inferring vs conditioning on?
         n_infer_codebooks = self.n_codebooks - self.n_conditioning_codebooks
 
-        for i in tqdm.tqdm(range(sampling_steps)):
+        for i in range(sampling_steps):
             if self.interrupt: # interrupt if another thread wants to interrupt
                 print(f"vampnet: INTERRUPTED! returning None")
                 self.interrupt = False

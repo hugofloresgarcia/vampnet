@@ -126,7 +126,7 @@ CONTROLLERS = {
     "rms": RMS, 
     "rmsq": partial(RMS, quantize=True),
     "hchroma": HarmonicChroma,
-    "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top2=True)
+    "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top2=True) # TODO: refactor me. If this works, this should just be named hchroma. 
 }
 
 class Sketch2SoundController:

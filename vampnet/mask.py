@@ -224,7 +224,7 @@ def periodic_mask(x: torch.Tensor, period: int,
                   width: int = 1, random_roll: bool = False,):
     mask = full_mask(x)
     if period == 0:
-        return mask
+        return full_mask(x)
 
     if not isinstance(period, torch.Tensor):
         period = scalar_to_batch_tensor(period, x.shape[0])
@@ -283,22 +283,22 @@ def mask_and(
     assert mask1.shape == mask2.shape, "masks must be same shape"
     return torch.min(mask1, mask2)
 
-@torch.jit.script_if_tracing
-def dropout(
-    mask: torch.BoolTensor,
-    p: float,
-):
-    assert 0 <= p <= 1, "p must be between 0 and 1"
-    assert mask.max() <= 1, "mask must be binary"
-    assert mask.min() >= 0, "mask must be binary"
-    mask = (~(mask != 0)).float()
-    # mask = (~mask.bool()).float() # not compatible with torchscript
-    mask = torch.bernoulli(mask * (1 - p))
-    # mask = ~mask.round()
-    # mask = mask.bool()
-    # back to bool
-    mask = ~(mask != 0)
-    return mask.int()
+def drop_ones(mask: torch.Tensor, p: float):
+    oldshp = mask.shape
+    mask = mask.view(-1)
+
+    # find ones idxs
+    ones_idxs = torch.where(mask == 1)
+    # shuffle idxs
+    ones_idxs = torch.randperm(len(ones_idxs))
+    # drop p% of ones
+    ones_idxs = ones_idxs[:int(len(ones_idxs) * p)]
+    # set those idxs to 0
+    mask[ones_idxs] = 0
+
+    mask = mask.view(oldshp)
+    return mask
+
 
 def mask_or(
     mask1: torch.Tensor, 
@@ -326,18 +326,10 @@ def time_stretch_mask(
     return mask
 
 def onset_mask(
-    sig: sn.Signal, 
+    onset_frame_idxs: torch.Tensor, 
     z: torch.Tensor,
-    hop_length: int,
     width: int = 1, 
 ):
-    import librosa
-
-    onset_frame_idxs = librosa.onset.onset_detect(
-        y=sig.wav[0][0].detach().cpu().numpy(), sr=sig.sr, 
-        hop_length=hop_length,
-        backtrack=True,
-    )
     if len(onset_frame_idxs) == 0:
         print("no onsets detected")
     print("onset_frame_idxs", onset_frame_idxs)
@@ -347,7 +339,29 @@ def onset_mask(
     for idx in onset_frame_idxs:
         mask[:, :, idx-width:idx+width] = 0
 
+    return mask.int()
+
+def tria_mask(
+    codes: torch.Tensor, 
+    min_amt: float = 0.1, 
+    max_amt: float = 0.4,
+):
+    """ 
+    unmasks a prefix of the codes tensor, 
+    in the range provided
+    """
+
+    mask = full_mask(codes)
+    nb, nc, nt = codes.shape
+    for i in range(nb):
+        amt = torch.rand(1) * (max_amt - min_amt) + min_amt
+        amt = int(amt * nt)
+        mask[i, :, :amt] = 0
+
     return mask
+
+
+
 
 
 
