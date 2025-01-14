@@ -31,16 +31,19 @@ class Interface(nn.Module):
         device="cuda" if torch.cuda.is_available() else "cpu"
     ):
         super().__init__()
+        codec.eval()
+        vn.eval()
+        self.sample_rate = codec.sample_rate
+        self.hop_length = codec.hop_length
+
         self.codec = codec
         self.vn = vn
         self.controller = controller
 
-        self.codec.eval()
-        self.vn.eval()
+        self.codec.compile()
+        self.vn.compile()
 
         # compile
-        self.sample_rate = self.codec.sample_rate
-        self.hop_length = self.codec.hop_length
         self.device = device
         print(f"initialized interface with device {device}")
 

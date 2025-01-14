@@ -48,6 +48,9 @@ class Signal:
 
     def to(self, device: str):
         return Signal(self.wav.to(device), self.sr)
+    
+    def cpu(self):
+        return Signal(self.wav.cpu(), self.sr)
 
     def view(self,):
         return Signal(self.wav, self.sr)

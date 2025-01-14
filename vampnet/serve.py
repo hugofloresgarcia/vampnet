@@ -78,8 +78,6 @@ class VampNetDigitalInstrumentSystem:
         self.interface = interface
         self.interface.to(device)
 
-        self.interface.vn = torch.compile(self.interface.vn)
-
         print(f"will send to {ip}:{s_port}")
         self.client = SimpleUDPClient(ip, s_port)
 
@@ -105,7 +103,7 @@ class VampNetDigitalInstrumentSystem:
         self._pm.register("controls_periodic_prompt", 1, int, (0, 10))
         self._pm.register("codes_periodic_prompt", 1, int, (0, 10))
         self._pm.register("codes_upper_codebook_mask", 0, int, (0, 10))
-        self._pm.register("mask_temperature", 1.0, float, (0.1, 100000.0))
+        self._pm.register("mask_temperature", 1000.0, float, (0.1, 100000.0))
         self._pm.register("typical_mass", 0.8, float, (0.0, 1.0))
 
 
@@ -172,24 +170,27 @@ class VampNetDigitalInstrumentSystem:
         timer = self.timer
 
         timer.tick("preprocess")
+        sig = sig.cpu()
+        ldns = sn.loudness(sig)
         sig = self.interface.preprocess(sig)    
         timer.tock("preprocess")
 
         # controls
         timer.tick("controls")
         ctrls = self.interface.controller.extract(sig)
+        onset_idxs = sn.onsets(sig, hop_length=self.interface.codec.hop_length)
         # ctrl_masks = self.interface.build_ctrl_masks(
         #     ctrls, 
         #     periodic_prompt=self._pm.get("controls_periodic_prompt")
         # )
         ctrl_masks = {}
         for k,ctrl in ctrls.items():
-            ctrl_masks[k] = self.interface.build_ctrl_mask(
-                ctrl, periodic_prompt=self._pm.get("controls_periodic_prompt")
+            ctrl_masks[k] = self.interface.rms_mask(
+                ctrl, onset_idxs, periodic_prompt=self._pm.get("controls_periodic_prompt")
             )
-        if "hchroma" in ctrls:
+        if "hchroma-12c-top2" in ctrls:
             print("disabling hchroma")
-            ctrl_masks["hchroma"] = torch.zeros_like(ctrl_masks["hchroma"])
+            ctrl_masks["hchroma-12c-top2"] = torch.zeros_like(ctrl_masks["hchroma-12c-top2"])
 
         # encode
         timer.tick("encode")
@@ -231,7 +232,8 @@ class VampNetDigitalInstrumentSystem:
 
         # decode
         timer.tick("decode")
-        sig.wav = self.interface.decode(z)
+        sig.wav = self.interface.decode(z).cpu()
+        sig = sn.normalize(sig, ldns)
         timer.tock("decode")
 
         self.is_vamping = False

@@ -332,8 +332,8 @@ def onset_mask(
 ):
     if len(onset_frame_idxs) == 0:
         print("no onsets detected")
-    print("onset_frame_idxs", onset_frame_idxs)
-    print("mask shape", z.shape)
+    # print("onset_frame_idxs", onset_frame_idxs)
+    # print("mask shape", z.shape)
 
     mask = torch.ones_like(z).int()
     for idx in onset_frame_idxs:

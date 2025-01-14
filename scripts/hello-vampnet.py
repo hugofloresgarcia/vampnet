@@ -32,6 +32,7 @@ eiface.to(device)
 # load an audio file
 sig = sn.read_from_file("assets/example.wav")
 sig = sn.trim_to_s(sig, 5.0)
+ldns = sn.loudness(sig)
 sig = eiface.preprocess(sig)
 
 # load a drum sample
@@ -103,6 +104,7 @@ gcodes = vn.generate(
 # decode
 wav = eiface.decode(codes)
 outsig = sn.Signal(wav, sig.sr)
+outsig = sn.normalize(outsig, ldns)
 print(wav.shape)
 
 # write the reconstructed signal
