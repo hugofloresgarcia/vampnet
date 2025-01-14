@@ -160,7 +160,7 @@ class Interface(nn.Module):
         mask = mask.cpu() # debug
         mask = drop_ones(mask, drop_amt)
         # save mask as txt (ints)
-        np.savetxt("rms_mask.txt", mask[0].cpu().numpy(), fmt='%d')
+        np.savetxt("scratch/rms_mask.txt", mask[0].cpu().numpy(), fmt='%d')
         mask = mask.to(self.device)
         return mask[:, 0, :]
 
