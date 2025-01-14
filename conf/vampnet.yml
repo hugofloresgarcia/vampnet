@@ -3,7 +3,9 @@ VampNetTrainer.n_layers: 8
 VampNetTrainer.n_heads: 8
 VampNetTrainer.mode: vampnet
 VampNetTrainer.outpaint_prob: 0.5
-VampNetTrainer.ctrl_keys: ['rms', 'hchroma-12c-top2']
+VampNetTrainer.prefix_min: 0.0
+VampNetTrainer.prefix_max: 0.3
+VampNetTrainer.ctrl_keys: ['rms', 'hchroma-36c-top3']
 
 VampNetTrainer.lr: 0.001
 

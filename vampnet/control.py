@@ -40,7 +40,7 @@ class HarmonicChroma:
     window_length: int = 4096
     n_chroma: int = 48
     sample_rate: int = 44100
-    top2: bool = False
+    top_n: int = 2
 
     # HUGO: this representation, as is,
     # encodes timbre information in the chroma
@@ -93,8 +93,8 @@ class HarmonicChroma:
         chroma = torch.where(chroma < 100, torch.zeros_like(chroma), chroma)
 
         # Get top 2 values and indices along the -2 dimension
-        if self.top2:
-            topk_values, topk_indices = torch.topk(chroma, 2, dim=-2)
+        if self.top_n:
+            _, topk_indices = torch.topk(chroma, self.top_n, dim=-2)
 
             # Create a mask for the top 2 values
             topk_mask = torch.zeros_like(chroma).scatter_(-2, topk_indices, 1.0)
@@ -106,7 +106,7 @@ class HarmonicChroma:
         chroma = chroma * mask.unsqueeze(-2)
 
         # Apply softmax along dim=-2
-        if self.top2:
+        if self.top_n > 0:
             chroma = torch.nn.functional.softmax(chroma, dim=-2)
 
             # mask out any timesteps whose chroma have all equal values (all 0s before softmax)
@@ -126,7 +126,8 @@ CONTROLLERS = {
     "rms": RMS, 
     "rmsq": partial(RMS, quantize=True),
     "hchroma": HarmonicChroma,
-    "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top2=True) # TODO: refactor me. If this works, this should just be named hchroma. 
+    "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 
+    "hchroma-36c-top3": partial(HarmonicChroma, n_chroma=36,  top_n=3) # TODO: refactor me. If this works, this should just be named hchroma.
 }
 
 class Sketch2SoundController:

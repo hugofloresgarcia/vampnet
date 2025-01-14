@@ -155,17 +155,20 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         if self.outpaint_prob > 0:
             if flip_coin(self.outpaint_prob):
                 mask, ctrl_masks = self.build_tria_mask(mask, ctrl_masks)
-
         z_mask = pmask.apply_mask(z, mask, vn.mask_token)
         
         return z_mask, mask, ii, r, ctrl_masks
 
     def build_tria_mask(self, mask, ctrl_masks):
         tmask = vampnet.mask.tria_mask(mask, self.prefix_min, self.prefix_max)
+
+        # this enables the codes where there's prefix
         mask = vampnet.mask.mask_and(mask, tmask)
 
-        for ck, cmask in ctrl_masks.items():
-            ctrl_masks[ck] = vampnet.mask.mask_and(cmask, tmask[:, 0, :])
+        for ck, ctrlmask in ctrl_masks.items():
+            # this disables the control where there's prefix
+            # which is what we want
+            ctrl_masks[ck] = vampnet.mask.mask_and(ctrlmask, tmask[:, 0, :])
 
         return mask, ctrl_masks
 
@@ -564,7 +567,7 @@ class AudioSampleLoggingCallback(Callback):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return f"{'tria' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+    return f"{'tria-' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
 
 
 @argbind.bind(without_prefix=True)

@@ -35,7 +35,7 @@ sig = sn.trim_to_s(sig, 5.0)
 sig = eiface.preprocess(sig)
 
 # load a drum sample
-sig_spl = sn.read_from_file("assets/voice-prompt.wav", duration=0.5)
+sig_spl = sn.read_from_file("assets/noodle.wav", duration=1.0)
 sig_spl = eiface.preprocess(sig_spl)
 
 # extract onsets, for our onset mask
@@ -43,23 +43,16 @@ onset_idxs = sn.onsets(sig, hop_length=codec.hop_length)
 
 # extract controls and build a mask for them
 ctrls = controller.extract(sig)
-# ctrl_masks = {
-#     "rms": eiface.build_ctrl_mask(ctrls["rms"], periodic_prompt=5),
-#     "hchroma": eiface.build_ctrl_mask(ctrls["hchroma"], periodic_prompt=0),
-# }
-# TODO: RMS needs an onset mask!!! prob combined w/ periodic.
-# ctrl_masks = {
-#     ck: eiface.build_ctrl_mask(ctrls[ck], periodic_prompt=2)
-#     for ck in ctrls
-# }
 ctrl_masks = {}
 ctrl_masks["rms"] = eiface.rms_mask(
     ctrls["rms"], onset_idxs=onset_idxs, 
-    periodic_prompt=1, drop_amt=0.0
+    periodic_prompt=7, drop_amt=0.0
 )
-ctrl_masks["hchroma-12c-top2"] = eiface.build_ctrl_mask(
-    ctrls["hchroma-12c-top2"], periodic_prompt=1
-)
+# ctrl_masks["hchroma-12c-top2"] = eiface.build_ctrl_mask(
+#     ctrls["hchroma-12c-top2"], periodic_prompt=3
+# )
+# ctrl_masks["hchroma-12c-top2"] = ctrl_masks["rms"]
+ctrl_masks["hchroma-12c-top2"] = torch.zeros_like(ctrl_masks["rms"])
 
 # encode the signal
 codes = eiface.encode(sig.wav)
@@ -85,7 +78,8 @@ mcodes = apply_mask(codes, mask, vn.mask_token)
 
 # visualize the bundle
 eiface.visualize(
-    sig=sig, codes=mcodes, mask=mask, 
+    sig=sn.concat([sig_spl,sig]), 
+    codes=mcodes, mask=mask, 
     ctrls=ctrls, ctrl_masks=ctrl_masks
 )
 
@@ -94,6 +88,7 @@ eiface.visualize(
 gcodes = vn.generate(
     codes=mcodes,
     temperature=1.0,
+    cfg_scale=5.0,
     mask_temperature=10.0,
     typical_filtering=False,
     typical_mass=0.15,

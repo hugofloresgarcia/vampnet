@@ -154,9 +154,9 @@ class Interface(nn.Module):
             )
         ).int()
         # make sure the onset idxs themselves are unmasked
-        mask[:, :, onset_idxs] = 1
-
         mask = 1 - mask
+
+        mask[:, :, onset_idxs] = 1
         mask = mask.cpu() # debug
         mask = drop_ones(mask, drop_amt)
         # save mask as txt (ints)
