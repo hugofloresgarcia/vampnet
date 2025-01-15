@@ -290,7 +290,8 @@ def drop_ones(mask: torch.Tensor, p: float):
     # find ones idxs
     ones_idxs = torch.where(mask == 1)[0]
     # shuffle idxs
-    ones_idxs = torch.randperm(len(ones_idxs))
+    ones_idxs_idxs = torch.randperm(len(ones_idxs))
+    ones_idxs = ones_idxs[ones_idxs_idxs]
     # drop p% of ones
     ones_idxs = ones_idxs[:int(len(ones_idxs) * p)]
     # set those idxs to 0

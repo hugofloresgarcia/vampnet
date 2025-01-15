@@ -15,7 +15,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # seed(0)
 
 # load a pretrained model bundle
-bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-d774-l8-h8-mode-vampnet_rms-hchroma-12c-top2-latest") 
+bundle = VampNetTrainer.from_pretrained("hugggof/vampnetv2-tria-d774-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest") 
 
 codec = bundle.codec # grab the codec
 vn = bundle.model # and the vampnet
@@ -30,7 +30,7 @@ eiface = Interface(
 eiface.to(device)
 
 # load an audio file
-sig = sn.read_from_file("assets/example.wav")
+sig = sn.read_from_file("assets/voice-prompt.wav")
 sig = sn.trim_to_s(sig, 5.0)
 ldns = sn.loudness(sig)
 sig = eiface.preprocess(sig)
@@ -47,13 +47,10 @@ ctrls = controller.extract(sig)
 ctrl_masks = {}
 ctrl_masks["rms"] = eiface.rms_mask(
     ctrls["rms"], onset_idxs=onset_idxs, 
-    periodic_prompt=7, drop_amt=0.0
+    periodic_prompt=7, drop_amt=0.3
 )
-# ctrl_masks["hchroma-12c-top2"] = eiface.build_ctrl_mask(
-#     ctrls["hchroma-12c-top2"], periodic_prompt=3
-# )
-# ctrl_masks["hchroma-12c-top2"] = ctrl_masks["rms"]
-ctrl_masks["hchroma-12c-top2"] = torch.zeros_like(ctrl_masks["rms"])
+ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
+ctrl_masks["hchroma-36c-top3"] = ctrl_masks["rms"]
 
 # encode the signal
 codes = eiface.encode(sig.wav)
@@ -91,12 +88,12 @@ gcodes = vn.generate(
     temperature=1.0,
     cfg_scale=5.0,
     mask_temperature=10.0,
-    typical_filtering=False,
+    typical_filtering=True,
     typical_mass=0.15,
     ctrls=ctrls,
     ctrl_masks=ctrl_masks,
-    typical_min_tokens=64,
-    sampling_steps=16 if vn.mode == "vampnet" else [16, 8, 4, 4],
+    typical_min_tokens=128,
+    sampling_steps=24 if vn.mode == "vampnet" else [16, 8, 4, 4],
     causal_weight=0.0,
     debug=False
 )
