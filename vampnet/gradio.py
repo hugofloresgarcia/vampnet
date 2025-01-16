@@ -3,7 +3,7 @@ import gradio as gr
 import torch
 from PIL import Image
 
-from soundmaterial.listen import to_output
+import numpy as np
 
 from vampnet.interface import Interface
 from vampnet.serve import create_param_manager
@@ -37,32 +37,57 @@ eiface = setup_from_checkpoint(CHECKPOINT)
 def get_param(data, key: str):
     return data[input_widgets[key]]
 
+def signal_from_gradio(value: tuple):
+    wav = torch.from_numpy(value[1]).T.unsqueeze(0)
+    if wav.ndim == 2:
+        wav = wav.unsqueeze(0)
+    sig = sn.Signal(wav, value[0])
+    # convert from int16 to float32
+    if sig.wav.dtype == torch.int16:
+        sig.wav = sig.wav.float() / 32768.0
+    return sig
+
+def to_output(sig: sn.Signal):
+    wave = sn.to_mono(sig).wav[0][0].cpu().numpy()
+    return sig.sr, wave * np.iinfo(np.int16).max
+
 def process(data):
-    # breakpoint()
-    insig = sn.Signal(
-        torch.from_numpy(data[input_audio][1]).unsqueeze(0), 
-        sr=data[input_audio][0]
-    )
+    # input params (i'm refactoring this)
+    insig = signal_from_gradio(data[input_audio])
+    sig_spl = signal_from_gradio(data[sample_audio]) if data[sample_audio] is not None else None
+    
+    seed = get_param(data, "seed")
+    controls_periodic_prompt = get_param(data, "controls_periodic_prompt")
+    codes_periodic_prompt = get_param(data, "codes_periodic_prompt")
+    upper_codebook_mask = get_param(data, "codes_upper_codebook_mask")
+    temperature = get_param(data, "temperature")
+    mask_temperature = get_param(data, "mask_temperature")
+    typical_mass = get_param(data, "typical_mass")
+
+    if seed < 0:
+        import time
+        seed = time.time_ns() % (2**32-1)
+    print(f"using seed {seed}")
+    sn.seed(seed)
+
+    # preprocess the input signal
+    insig = sn.to_mono(insig)
     inldns = sn.loudness(insig)
     insig = eiface.preprocess(insig)
 
     # load the sample (if any)
-    if data[sample_audio] is not None:
-        splsig = sn.Signal(
-            data[sample_audio][1], 
-            sr=data[sample_audio][0]
-        )
+    if sig_spl is not None:
         sig_spl = eiface.preprocess(sig_spl)
 
     # extract onsets, for our onset mask
     onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
 
     # extract controls and build a mask for them
-    ctrls = eiface.controller.extract(sig)
+    ctrls = eiface.controller.extract(insig)
     ctrl_masks = {}
     ctrl_masks["rms"] = eiface.rms_mask(
         ctrls["rms"], onset_idxs=onset_idxs, 
-        periodic_prompt=get_param(data, "controls_periodic_prompt"), 
+        periodic_prompt=controls_periodic_prompt, 
         drop_amt=0.3
     )
     ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
@@ -70,18 +95,16 @@ def process(data):
 
     # encode the signal
     codes = eiface.encode(insig.wav)
-    print(f"encoded to codes of shape {codes.shape}")
 
     # make a mask for the codes
     mask = eiface.build_codes_mask(codes, 
-        periodic_prompt=get_param(data, "codes_periodic_prompt"), 
-        upper_codebook_mask=get_param(data, "codes_upper_codebook_mask")
+        periodic_prompt=codes_periodic_prompt, 
+        upper_codebook_mask=upper_codebook_mask
     )
 
-    if data[sample_audio] is not None:
+    if sig_spl is not None:
         # encode the sample
         codes_spl = eiface.encode(sig_spl.wav)
-        print(f"encoded to codes of shape {codes_spl.shape}")
 
         # add sample to bundle
         codes, mask, ctrls, ctrl_masks = eiface.add_sample(
@@ -103,13 +126,13 @@ def process(data):
 
     # generate!
     with torch.autocast(device,  dtype=torch.bfloat16):
-        gcodes = vn.generate(
+        gcodes = eiface.vn.generate(
             codes=mcodes,
-            temperature=get_param(data, "temperature"),
+            temperature=temperature,
             cfg_scale=5.0,
-            mask_temperature=get_param(data, "mask_temperature"),
+            mask_temperature=mask_temperature,
             typical_filtering=True,
-            typical_mass=get_param(data, "typical_mass"),
+            typical_mass=typical_mass,
             ctrls=ctrls,
             ctrl_masks=ctrl_masks,
             typical_min_tokens=128,
@@ -121,15 +144,15 @@ def process(data):
     # write the generated signal
     generated_wav = eiface.decode(gcodes)
 
-    return to_output(sn.Signal(generated_wav, insig.sr)), outviz
+    return to_output(sn.Signal(generated_wav, insig.sr)), outviz, seed
 
 
 with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column():
             # add an input audio widget
-            input_audio = gr.Audio(label="Input audio", name="input_audio")
-            sample_audio = gr.Audio(label="Sample audio", name="sample_audio")
+            input_audio = gr.Audio(label="input_audio")
+            sample_audio = gr.Audio(label="sample_audio")
 
         with gr.Column():
             input_widgets = {}
@@ -141,7 +164,6 @@ with gr.Blocks() as demo:
                         maximum=param.range[1],
                         step=param.step,
                         label=param.name,
-
                         value=param.value,
                     )
                 else:
@@ -152,18 +174,18 @@ with gr.Blocks() as demo:
                     )
 
         with gr.Column():
-            process_button = gr.Button(label="vamp", name="process")
-
-            # add an output image widget
-            output_img = gr.Image(label="output viz", type="pil")
+            process_button = gr.Button(value="vamp",)
 
             # add an output audio widget
             output_audio = gr.Audio(label="output audio",)
 
+            # add an output image widget
+            output_img = gr.Image(label="output viz", type="pil")
+
             process_button.click(
                 process, 
                 inputs={input_audio, sample_audio} | set(input_widgets.values()), 
-                outputs=[output_audio, output_img]
+                outputs=[output_audio, output_img, input_widgets["seed"]]
             )
 
 

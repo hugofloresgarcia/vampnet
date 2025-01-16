@@ -30,6 +30,10 @@ class Signal:
     wav: Tensor
     sr: int
 
+    def __post_init__(self):
+        assert self.wav.ndim == 3, "Signal must have shape (batch, channels, samples)"
+        assert self.wav.shape[-1] > self.wav.shape[-2], "Signal must have more samples than channels! this is just a check. not sure if we'll run into any cases where this is not true."
+        
     @property
     def duration(self):
         return self.wav.shape[-1] / self.sr
@@ -648,6 +652,13 @@ def torch_info(audio_path: str):
     except:  # pragma: no cover
         info = torchaudio.backend.soundfile_backend.info(str(audio_path))
     return info
+
+# seed
+def seed(seed: int):
+    import random
+    random.seed(seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
 if __name__ == "__main__":
     sig = read_from_file(

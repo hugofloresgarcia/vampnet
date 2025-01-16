@@ -68,11 +68,11 @@ def create_param_manager():
     pm = ParamManager()
     pm.register("seed", -1, int, step=1)
     pm.register("temperature", 1.0, float, (0.5, 10.0), step=0.01)
-    pm.register("controls_periodic_prompt", 1, int, (0, 10), step=1)
-    pm.register("codes_periodic_prompt", 1, int, (0, 10), step=1)
-    pm.register("codes_upper_codebook_mask", 0, int, (0, 10), step=1)
+    pm.register("controls_periodic_prompt", 5, int, (0, 100), step=1)
+    pm.register("codes_periodic_prompt", 32, int, (0, 100), step=1)
+    pm.register("codes_upper_codebook_mask", 1, int, (0, 10), step=1)
     pm.register("mask_temperature", 1000.0, float, (0.1, 100000.0), step=0.1)
-    pm.register("typical_mass", 0.8, float, (0.0, 1.0), step=0.01)
+    pm.register("typical_mass", 0.15, float, (0.0, 1.0), step=0.01)
     return pm
 
 class VampNetOSCManager:
