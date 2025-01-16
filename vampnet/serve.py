@@ -18,6 +18,8 @@ from vampnet.train import VampNetTrainer
 from vampnet.util import Timer
 from tqdm import tqdm
 
+timer = vampnet.util.Timer()
+
 
 @dataclass
 class Param:
@@ -71,6 +73,7 @@ def create_param_manager():
     pm.register("seed", -1, int, step=1)
     pm.register("temperature", 1.0, float, (0.5, 10.0), step=0.01)
     pm.register("controls_periodic_prompt", 5, int, (0, 100), step=1)
+    pm.register("controls_drop_amt", 0.15, float, (0.0, 1.0), step=0.01)
     pm.register("codes_periodic_prompt", 32, int, (0, 100), step=1)
     pm.register("codes_upper_codebook_mask", 1, int, (0, 10), step=1)
     pm.register("mask_temperature", 1000.0, float, (0.1, 100000.0), step=0.1)
@@ -183,7 +186,7 @@ class VampNetDigitalInstrumentSystem:
             print(f"Processing {address} with args {args}")
             # get the path to audio
             audio_path = Path(args[0])
-            # patch 
+            # TODO: FIXME: patch 
             audio_path = Path("pd/") / audio_path
 
             # make sure it exists, otherwise send an error message
@@ -311,7 +314,6 @@ class GradioVampNetSystem:
         url: str,
         ip: str,
         s_port: int, r_port: int,
-        device: str
     ):
         self.osc_manager = VampNetOSCManager(
             ip=ip, s_port=s_port, r_port=r_port, 
@@ -320,28 +322,43 @@ class GradioVampNetSystem:
         self.pm = self.osc_manager.pm
         
         # TODO: cross check API versions with the osc manager!!!
-        self.client = Client(src=url, output_dir=".gradio")
+        self.client = Client(src=url, download_files=".gradio")
 
     
     def process(self, address: str, *args):
-
         if address != "/process":
             raise ValueError(f"Unknown address {address}")
 
+        print(f"Processing {address} with args {args}")
+        # get the path to audio
+        audio_path = Path(args[0])
+        # TODO: FIXME: patch 
+        audio_path = Path("pd/") / audio_path
+
+        # make sure it exists, otherwise send an error message
+        if not audio_path.exists():
+            print(f"File {audio_path} does not exist")
+            self.osc_manager.error(f"File {audio_path} does not exist")
+            return
+
+        timer.tick("predict")
         outpath = self.client.predict(
             # TODO: the parameters should actually be part of a dataclass now that i think about it. 
-            data=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
-            param_1=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
+            data=handle_file(audio_path),
+            param_1=None,
+            # param_1=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
             param_2=self.pm.get("seed"),
             param_3=self.pm.get("temperature"),
             param_4=self.pm.get("controls_periodic_prompt"),
-            param_5=self.pm.get("codes_periodic_prompt"),
-            param_6=self.pm.get("codes_upper_codebook_mask"),
-            param_7=self.pm.get("mask_temperature"),
-            param_8=self.pm.get("typical_mass"),
+            param_6=self.pm.get("controls_drop_amt"),
+            param_7=self.pm.get("codes_periodic_prompt"),
+            param_8=self.pm.get("codes_upper_codebook_mask"),
+            param_9=self.pm.get("mask_temperature"),
+            param_10=self.pm.get("typical_mass"),
             api_name="/api-vamp"
         )
 
+        timer.tock("predict")
         self.osc_manager.done(outpath)
 
 
@@ -365,8 +382,19 @@ def main(ip = "localhost", s_port = 8002, r_port = 8001,
     system.osc_manager.start_server()
 
 
+@argbind.bind(without_prefix=True)
+def gradio_main(url: str="http://localhost:7860/"):
+
+    system = GradioVampNetSystem(
+        url="http://localhost:7860/",
+        ip="localhost", s_port=8002, r_port=8001,
+    )
+
+    system.osc_manager.start_server()
+
+
 if __name__ == "__main__":
     args = argbind.parse_args()
 
     with argbind.scope(args):
-        main()
+        gradio_main()
