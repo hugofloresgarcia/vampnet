@@ -65,6 +65,8 @@ def process(data, return_img: bool = True):
     mask_temperature = get_param(data, "mask_temperature")
     typical_mass = get_param(data, "typical_mass")
 
+    timer = Timer()
+
     if seed < 0:
         import time
         seed = time.time_ns() % (2**32-1)
@@ -72,6 +74,7 @@ def process(data, return_img: bool = True):
     sn.seed(seed)
 
     # preprocess the input signal
+    timer.tick("preprocess")
     insig = sn.to_mono(insig)
     inldns = sn.loudness(insig)
     insig = eiface.preprocess(insig)
@@ -79,7 +82,9 @@ def process(data, return_img: bool = True):
     # load the sample (if any)
     if sig_spl is not None:
         sig_spl = eiface.preprocess(sig_spl)
+    timer.tock("preprocess")
 
+    timer.tick("controls")
     # extract onsets, for our onset mask
     onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
 
@@ -93,9 +98,12 @@ def process(data, return_img: bool = True):
     )
     ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
     # ctrl_masks["hchroma-36c-top3"] = ctrl_masks["rms"]
+    timer.tock("controls")
 
+    timer.tick("encode")
     # encode the signal
     codes = eiface.encode(insig.wav)
+    timer.tock("encode")
 
     # make a mask for the codes
     mask = eiface.build_codes_mask(codes, 
@@ -103,6 +111,7 @@ def process(data, return_img: bool = True):
         upper_codebook_mask=upper_codebook_mask
     )
 
+    timer.tick("prefix")
     if sig_spl is not None:
         # encode the sample
         codes_spl = eiface.encode(sig_spl.wav)
@@ -112,13 +121,13 @@ def process(data, return_img: bool = True):
             spl_codes=codes_spl, codes=codes, 
             cmask=mask, ctrls=ctrls, ctrl_masks=ctrl_masks
         )
+    timer.tock("prefix")
 
     # apply the mask
     mcodes = apply_mask(codes, mask, eiface.vn.mask_token)
 
-
-
     # generate!
+    timer.tick("generate")
     with torch.autocast(device,  dtype=torch.bfloat16):
         gcodes = eiface.vn.generate(
             codes=mcodes,
@@ -134,18 +143,23 @@ def process(data, return_img: bool = True):
             causal_weight=0.0,
             debug=False
         )
+    timer.tock("generate")
 
+    timer.tick("decode")
     # write the generated signal
     generated_wav = eiface.decode(gcodes)
+    timer.tock("decode")
 
     if return_img:
         # visualize the bundle
+        timer.tick("viz")
         outvizpath = eiface.visualize(
             sig=insig, 
             codes=mcodes, mask=mask, 
             ctrls=ctrls, ctrl_masks=ctrl_masks
         )
         outviz = Image.open(outvizpath)
+        timer.tock("viz")
         return to_output(sn.Signal(generated_wav, insig.sr)), outviz, seed
     else:
         return to_output(sn.Signal(generated_wav, insig.sr))
