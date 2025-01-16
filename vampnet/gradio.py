@@ -14,7 +14,7 @@ import vampnet.dsp.signal as sn
 from vampnet.util import Timer
 
 
-CHECKPOINT = "hugggof/vampnetv2-tria-d774-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
+CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-stemgen_rms-hchroma-36c-top3-latest"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 pm = create_param_manager()
@@ -144,6 +144,10 @@ def process(data, return_img: bool = True):
             debug=False
         )
     timer.tock("generate")
+
+    # remove codes
+    if sig_spl is not None:
+        gcodes = eiface.remove_sample(codes_spl, gcodes)
 
     timer.tick("decode")
     # write the generated signal
