@@ -350,11 +350,11 @@ class GradioVampNetSystem:
             param_2=self.pm.get("seed"),
             param_3=self.pm.get("temperature"),
             param_4=self.pm.get("controls_periodic_prompt"),
-            param_6=self.pm.get("controls_drop_amt"),
-            param_7=self.pm.get("codes_periodic_prompt"),
-            param_8=self.pm.get("codes_upper_codebook_mask"),
-            param_9=self.pm.get("mask_temperature"),
-            param_10=self.pm.get("typical_mass"),
+            param_5=self.pm.get("controls_drop_amt"),
+            param_6=self.pm.get("codes_periodic_prompt"),
+            param_7=self.pm.get("codes_upper_codebook_mask"),
+            param_8=self.pm.get("mask_temperature"),
+            param_9=self.pm.get("typical_mass"),
             api_name="/api-vamp"
         )
 
