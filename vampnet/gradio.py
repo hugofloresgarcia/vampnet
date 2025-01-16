@@ -1,6 +1,7 @@
 from pathlib import Path
 import gradio as gr
 import torch
+from functools import partial
 from PIL import Image
 
 import numpy as np
@@ -51,7 +52,7 @@ def to_output(sig: sn.Signal):
     wave = sn.to_mono(sig).wav[0][0].cpu().numpy()
     return sig.sr, wave * np.iinfo(np.int16).max
 
-def process(data):
+def process(data, return_img: bool = True):
     # input params (i'm refactoring this)
     insig = signal_from_gradio(data[input_audio])
     sig_spl = signal_from_gradio(data[sample_audio]) if data[sample_audio] is not None else None
@@ -115,13 +116,6 @@ def process(data):
     # apply the mask
     mcodes = apply_mask(codes, mask, eiface.vn.mask_token)
 
-    # visualize the bundle
-    outvizpath = eiface.visualize(
-        sig=insig, 
-        codes=mcodes, mask=mask, 
-        ctrls=ctrls, ctrl_masks=ctrl_masks
-    )
-    outviz = Image.open(outvizpath)
 
 
     # generate!
@@ -144,8 +138,24 @@ def process(data):
     # write the generated signal
     generated_wav = eiface.decode(gcodes)
 
-    return to_output(sn.Signal(generated_wav, insig.sr)), outviz, seed
+    if return_img:
+        # visualize the bundle
+        outvizpath = eiface.visualize(
+            sig=insig, 
+            codes=mcodes, mask=mask, 
+            ctrls=ctrls, ctrl_masks=ctrl_masks
+        )
+        outviz = Image.open(outvizpath)
+        return to_output(sn.Signal(generated_wav, insig.sr)), outviz, seed
+    else:
+        return to_output(sn.Signal(generated_wav, insig.sr))
 
+
+def process_api(data):
+    return process(data, return_img=False)
+
+def process_normal(data):
+    return process(data, return_img=True)
 
 with gr.Blocks() as demo:
     with gr.Row():
@@ -175,6 +185,7 @@ with gr.Blocks() as demo:
 
         with gr.Column():
             process_button = gr.Button(value="vamp",)
+            api_process_button = gr.Button(value="api-vamp",)
 
             # add an output audio widget
             output_audio = gr.Audio(label="output audio",)
@@ -183,9 +194,15 @@ with gr.Blocks() as demo:
             output_img = gr.Image(label="output viz", type="pil")
 
             process_button.click(
-                process, 
+                process_normal, 
                 inputs={input_audio, sample_audio} | set(input_widgets.values()), 
-                outputs=[output_audio, output_img, input_widgets["seed"]]
+                outputs=[output_audio, output_img, input_widgets["seed"]], 
+            )
+
+            api_process_button.click(
+                process_api, 
+                inputs={input_audio, sample_audio} | set(input_widgets.values()), 
+                outputs=[output_audio], api_name="api-vamp"
             )
 
 

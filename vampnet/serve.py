@@ -8,6 +8,8 @@ from pythonosc.osc_server import ThreadingOSCUDPServer
 from pythonosc.udp_client import SimpleUDPClient
 from pythonosc.dispatcher import Dispatcher
 
+from gradio_client import Client, handle_file
+
 import torch
 import vampnet
 import vampnet.dsp.signal as sn
@@ -302,6 +304,7 @@ class VampNetDigitalInstrumentSystem:
         self.is_vamping = False
         return sig
     
+
 class GradioVampNetSystem:
 
     def __init__(self, 
@@ -314,18 +317,30 @@ class GradioVampNetSystem:
             ip=ip, s_port=s_port, r_port=r_port, 
             process_fn=self.process
         )
-
-        from gradio_client import Client
+        self.pm = self.osc_manager.pm
+        
+        # TODO: cross check API versions with the osc manager!!!
         self.client = Client(src=url, output_dir=".gradio")
 
-        # TODO: cross check API versions with the osc manager!!!
-
     
-    def process(self, audio_path: str):
+    def process(self, address: str, *args):
 
-        # TODO: process w/ gradio
+        if address != "/process":
+            raise ValueError(f"Unknown address {address}")
 
-        outpath = NotImplemented
+        outpath = self.client.predict(
+            # TODO: the parameters should actually be part of a dataclass now that i think about it. 
+            data=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
+            param_1=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
+            param_2=self.pm.get("seed"),
+            param_3=self.pm.get("temperature"),
+            param_4=self.pm.get("controls_periodic_prompt"),
+            param_5=self.pm.get("codes_periodic_prompt"),
+            param_6=self.pm.get("codes_upper_codebook_mask"),
+            param_7=self.pm.get("mask_temperature"),
+            param_8=self.pm.get("typical_mass"),
+            api_name="/api-vamp"
+        )
 
         self.osc_manager.done(outpath)
 
@@ -348,6 +363,7 @@ def main(ip = "localhost", s_port = 8002, r_port = 8001,
     )
 
     system.osc_manager.start_server()
+
 
 if __name__ == "__main__":
     args = argbind.parse_args()
