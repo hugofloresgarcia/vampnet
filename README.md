@@ -38,8 +38,19 @@ a future version of vampnet will standardize masks to be consistent. we'll proba
 
 # usage
 
+## try the gradio app
+
+```bash 
+python -m vampnet.gradio
+```
+
+## or use it programatically.
 
 quick start! see `scripts/hello-vampnet.py` for an example of how to programmatically use a pretrained vampnet for inference. 
+
+## or use it in puredata
+
+see the [gloop](#gloop-generative-looper) section for instructions on how to use vampnet in puredata.
 
 # training
 ## setting up a database for training
@@ -119,7 +130,9 @@ build_datasets.query: "
 ```
 NOTE: the SQL query **MUST** return the following columns: `path`, `offset`, `duration`, `total_duration`. see the example query above for reference.
 
-# gloop (generative looper)
+
+
+# gloop (generative looper) 
 
 to run gloop, the generative looper interface that runs vampnet at its core, you need to do two steps. 
 
