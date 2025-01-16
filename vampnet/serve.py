@@ -23,10 +23,13 @@ class Param:
     value: any
     param_type: type
     range: tuple = None  # Optional range for validation
+    step: float = 0.1
 
     def set_value(self, new_value):
         if self.range and not (self.range[0] <= new_value <= self.range[1]):
             raise ValueError(f"Value {new_value} for {self.name} is out of range {self.range}")
+        # quantize to step
+        new_value = round(new_value / self.step) * self.step
         self.value = self.param_type(new_value)
 
 
@@ -35,11 +38,11 @@ class ParamManager:
         self._params = {}
         self._lock = Lock()
 
-    def register(self, name, initial_value, param_type, range=None):
+    def register(self, name, initial_value, param_type, range=None, **kwargs):
         with self._lock:
             if name in self._params:
                 raise ValueError(f"Parameter {name} already registered")
-            self._params[name] = Param(name, initial_value, param_type, range)
+            self._params[name] = Param(name, initial_value, param_type, range, **kwargs)
 
     def set(self, name, value):
         with self._lock:
@@ -53,9 +56,91 @@ class ParamManager:
                 raise ValueError(f"Parameter {name} not registered")
             return self._params[name].value
 
+    def asdict(self):
+        with self._lock:
+            return dict(self._params)
+
     def list(self):
         with self._lock:
             return {name: param.value for name, param in self._params.items()}
+
+def create_param_manager():
+    pm = ParamManager()
+    pm.register("seed", -1, int, step=1)
+    pm.register("temperature", 1.0, float, (0.5, 10.0), step=0.01)
+    pm.register("controls_periodic_prompt", 1, int, (0, 10), step=1)
+    pm.register("codes_periodic_prompt", 1, int, (0, 10), step=1)
+    pm.register("codes_upper_codebook_mask", 0, int, (0, 10), step=1)
+    pm.register("mask_temperature", 1000.0, float, (0.1, 100000.0), step=0.1)
+    pm.register("typical_mass", 0.8, float, (0.0, 1.0), step=0.01)
+    return pm
+
+class VampNetOSCManager:
+
+    def __init__(
+        self, 
+        ip: str, 
+        s_port: str, 
+        r_port: str,
+        process_fn: callable
+    ):
+        self.ip = ip
+        self.s_port = s_port
+        self.r_port = r_port
+
+        # register parameters
+        self.pm = create_param_manager()
+
+        # register the process_fn
+        self.process_fn = process_fn
+
+        print(f"will send to {ip}:{s_port}")
+        self.client = SimpleUDPClient(ip, s_port)
+
+        # dispatch a hello message
+        print(f"sending hello message...")
+        self.client.send_message("/hello",["Hello from VampNet"])
+        self.client.send_message("/hello", [6., -2.])
+
+
+    def start_server(self,):
+        dispatcher = Dispatcher()
+        dispatcher.map("/process", self.process_fn)
+
+        # connect params from manager to dispatcher
+        for param_name in self.pm.list().keys():
+            dispatcher.map(f"/{param_name}", self._osc_set_param(param_name))
+
+        dispatcher.map("/get_params", self._osc_get_params)
+
+        dispatcher.set_default_handler(lambda a, *r: print(a, r))
+
+        server = ThreadingOSCUDPServer((self.ip, self.r_port), dispatcher)
+        print(f"Serving on {server.server_address}")
+        server.serve_forever()
+
+    def _osc_set_param(self, param_name):
+        def handler(_, *args):
+            try:
+                self.pm.set(param_name, args[0])
+                print(f"Set {param_name} to {self.pm.get(param_name)}")
+            except ValueError as e:
+                print(f"Error setting parameter {param_name}: {e}")
+        return handler
+
+    def _osc_get_params(self, address, *args):
+        param_names = list(self.pm.list().keys())
+        print(f"Returning parameter names: {param_names}")
+        self.client.send_message("/params", ",".join(param_names))
+
+    def done(self, outpath: str):
+        # send a message that the process is done
+        self.client.send_message("/done", f"File {outpath} has been vamped")
+        self.client.send_message("/process-result", outpath)
+
+    def error(self, msg: str):
+        self.client.send_message("/error", msg)
+        
 
 # a class that wraps the vampnet interface
 # and provides a way to interact with it
@@ -69,17 +154,15 @@ class VampNetDigitalInstrumentSystem:
         s_port: int, r_port: int,
         device: str
     ):
-        self.ip = ip
-        self.s_port = s_port
-        self.r_port = r_port
+        self.osc_manager = VampNetOSCManager(
+            ip=ip, s_port=s_port, r_port=r_port, 
+            process_fn=self.process
+        )
         self.device = device
 
         # set up interface
         self.interface = interface
         self.interface.to(device)
-
-        print(f"will send to {ip}:{s_port}")
-        self.client = SimpleUDPClient(ip, s_port)
 
         # set up timer
         self.timer = Timer()
@@ -88,24 +171,7 @@ class VampNetDigitalInstrumentSystem:
         self._interrupt = False
         self.is_vamping = False
 
-        # register parameters
-        self._pm = ParamManager()
-        self._register_params()
-
-        # dispatch a hello message
-        print(f"sending hello message...")
-        self.client.send_message("/hello",["Hello from VampNet"])
-        self.client.send_message("/hello", [6., -2.])
-
-    def _register_params(self):
-        self._pm.register("seed", -1, int)
-        self._pm.register("temperature", 1.0, float, (0.5, 10.0))
-        self._pm.register("controls_periodic_prompt", 1, int, (0, 10))
-        self._pm.register("codes_periodic_prompt", 1, int, (0, 10))
-        self._pm.register("codes_upper_codebook_mask", 0, int, (0, 10))
-        self._pm.register("mask_temperature", 1000.0, float, (0.1, 100000.0))
-        self._pm.register("typical_mass", 0.8, float, (0.0, 1.0))
-
+        self.pm = self.osc_manager.pm
 
     def process(self, address: str, *args) -> None:
         timer = self.timer
@@ -121,7 +187,7 @@ class VampNetDigitalInstrumentSystem:
             # make sure it exists, otherwise send an error message
             if not audio_path.exists():
                 print(f"File {audio_path} does not exist")
-                self.client.send_message("/error", f"File {audio_path} does not exist")
+                self.osc_manager.error(f"File {audio_path} does not exist")
                 return
             
             # load the audio
@@ -153,18 +219,15 @@ class VampNetDigitalInstrumentSystem:
             
             Path(audio_path).unlink()
 
-            # send a message that the process is done
-            self.client.send_message("/done", f"File {audio_path} has been vamped")
-            self.client.send_message("/process-result", str(outpath.resolve()))
-
+            self.osc_manager.done(str(outpath.resolve()))
         else:
             print(f"PROC: Unknown address {address}")
         timer.tock("process")
-            
 
+    # this belongs to the gradio version. 
     @torch.inference_mode()
     def vamp(self, sig: sn.Signal):
-        seed = self._pm.get("seed")
+        seed = self.pm.get("seed")
         self.is_vamping = True
 
         timer = self.timer
@@ -181,12 +244,12 @@ class VampNetDigitalInstrumentSystem:
         onset_idxs = sn.onsets(sig, hop_length=self.interface.codec.hop_length)
         # ctrl_masks = self.interface.build_ctrl_masks(
         #     ctrls, 
-        #     periodic_prompt=self._pm.get("controls_periodic_prompt")
+        #     periodic_prompt=self.pm.get("controls_periodic_prompt")
         # )
         ctrl_masks = {}
         for k,ctrl in ctrls.items():
             ctrl_masks[k] = self.interface.rms_mask(
-                ctrl, onset_idxs, periodic_prompt=self._pm.get("controls_periodic_prompt")
+                ctrl, onset_idxs, periodic_prompt=self.pm.get("controls_periodic_prompt")
             )
         if "hchroma-12c-top2" in ctrls:
             print("disabling hchroma")
@@ -200,8 +263,8 @@ class VampNetDigitalInstrumentSystem:
         # build the mask
         mask = self.interface.build_codes_mask(
             codes, 
-            periodic_prompt=self._pm.get("codes_periodic_prompt"),
-            upper_codebook_mask=self._pm.get("codes_upper_codebook_mask")
+            periodic_prompt=self.pm.get("codes_periodic_prompt"),
+            upper_codebook_mask=self.pm.get("codes_upper_codebook_mask")
         )
         codes = apply_mask(codes, mask, self.interface.vn.mask_token)
 
@@ -216,10 +279,10 @@ class VampNetDigitalInstrumentSystem:
             codes=codes, 
             ctrls=ctrls,
             ctrl_masks=ctrl_masks,
-            temperature=self._pm.get("temperature"),
-            mask_temperature=self._pm.get("mask_temperature"),
+            temperature=self.pm.get("temperature"),
+            mask_temperature=self.pm.get("mask_temperature"),
             typical_filtering=True,
-            typical_mass=self._pm.get("typical_mass"),
+            typical_mass=self.pm.get("typical_mass"),
             sampling_steps=self.SAMPLING_STEPS,
             debug=False
         )
@@ -239,36 +302,33 @@ class VampNetDigitalInstrumentSystem:
         self.is_vamping = False
         return sig
     
+class GradioVampNetSystem:
 
-    def start_server(self,):
-        dispatcher = Dispatcher()
-        dispatcher.map("/process", self.process)
+    def __init__(self, 
+        url: str,
+        ip: str,
+        s_port: int, r_port: int,
+        device: str
+    ):
+        self.osc_manager = VampNetOSCManager(
+            ip=ip, s_port=s_port, r_port=r_port, 
+            process_fn=self.process
+        )
 
-        # connect params from manager to dispatcher
-        for param_name in self._pm.list().keys():
-            dispatcher.map(f"/{param_name}", self._osc_set_param(param_name))
+        from gradio_client import Client
+        self.client = Client(src=url, output_dir=".gradio")
 
-        dispatcher.map("/get_params", self._osc_get_params)
+        # TODO: cross check API versions with the osc manager!!!
 
-        dispatcher.set_default_handler(lambda a, *r: print(a, r))
+    
+    def process(self, audio_path: str):
 
-        server = ThreadingOSCUDPServer((self.ip, self.r_port), dispatcher)
-        print(f"Serving on {server.server_address}")
-        server.serve_forever()
+        # TODO: process w/ gradio
 
-    def _osc_set_param(self, param_name):
-        def handler(_, *args):
-            try:
-                self._pm.set(param_name, args[0])
-                print(f"Set {param_name} to {self._pm.get(param_name)}")
-            except ValueError as e:
-                print(f"Error setting parameter {param_name}: {e}")
-        return handler
+        outpath = NotImplemented
 
-    def _osc_get_params(self, address, *args):
-        param_names = list(self._pm.list().keys())
-        print(f"Returning parameter names: {param_names}")
-        self.client.send_message("/params", ",".join(param_names))
+        self.osc_manager.done(outpath)
+
 
 @argbind.bind(without_prefix=True)
 def main(ip = "localhost", s_port = 8002, r_port = 8001, 
@@ -287,7 +347,7 @@ def main(ip = "localhost", s_port = 8002, r_port = 8001,
         r_port=r_port, device=device
     )
 
-    system.start_server()
+    system.osc_manager.start_server()
 
 if __name__ == "__main__":
     args = argbind.parse_args()
