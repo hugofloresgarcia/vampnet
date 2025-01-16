@@ -14,7 +14,7 @@ import vampnet.dsp.signal as sn
 from vampnet.util import Timer
 
 
-CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-stemgen_rms-hchroma-36c-top3-latest"
+CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 pm = create_param_manager()
@@ -96,8 +96,8 @@ def process(data, return_img: bool = True):
         periodic_prompt=controls_periodic_prompt, 
         drop_amt=0.3
     )
-    ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
-    # ctrl_masks["hchroma-36c-top3"] = ctrl_masks["rms"]
+    # ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
+    ctrl_masks["hchroma-36c-top3"] = ctrl_masks["rms"]
     timer.tock("controls")
 
     timer.tick("encode")
