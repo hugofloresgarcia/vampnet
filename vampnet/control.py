@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 from functools import partial
+from typing import Optional
+
+from torch import nn
 
 import vampnet.dsp.signal as sn
 from vampnet.dsp.signal import Signal
@@ -7,12 +10,54 @@ from vampnet.mask import random_along_time
 from torch import Tensor
 import torch
 
-@dataclass
-class RMS:
-    hop_length: int
-    window_length: int = 2048
-    quantize: bool = False
-    sample_rate: int = 44100 # UNUSED
+
+class MedianFilterAugment(nn.Module):
+
+    def __init__(self, 
+        kernel_size: int, 
+        train_min: int = 1, 
+        train_max: int = 20,
+    ):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.train_min = train_min
+        self.train_max = train_max
+
+    def forward(self, x: Tensor) -> Tensor:
+        if self.training:
+            sizes = torch.randint(
+                self.train_min, 
+                self.train_max, 
+                size=(x.shape[0],)
+            )
+        else:
+            sizes = self.kernel_size
+        print(f"median filter sizes: {sizes}")
+        return sn.median_filter_1d(x, sizes)
+
+class RMS(nn.Module):
+
+    def __init__(self, 
+        hop_length, 
+        window_length=2048, 
+        quantize=False, 
+        sample_rate=44100, 
+        median_filter_size: Optional[int] = None,
+        train_median_filter_min=1, 
+        train_median_filter_max=20,
+    ):
+        super().__init__()
+
+        self.hop_length = hop_length
+        self.window_length = window_length
+        self.quantize = quantize
+        self.sample_rate = sample_rate
+
+        self.mf = MedianFilterAugment(
+            kernel_size=median_filter_size, 
+            train_min=train_median_filter_min, 
+            train_max=train_median_filter_max
+        ) if median_filter_size is not None else None
     
     @property
     def dim(self):
@@ -23,6 +68,7 @@ class RMS:
             window_length=self.window_length, 
             hop_length=self.hop_length, 
         )[:, :, :-1] # TODO: cutting the last frame to match DAC tokens but why :'(
+        nb, _, _ = rmsd.shape
 
         if self.quantize:
             # standardize to 0-1
@@ -30,25 +76,34 @@ class RMS:
 
             # quantize to 128 steps
             rmsd = torch.round(rmsd * 128)
-            return rmsd / 128
-        else: 
-            return rmsd
+            rmsd =  rmsd / 128
 
-@dataclass
-class HarmonicChroma:
-    hop_length: int
-    window_length: int = 4096
-    n_chroma: int = 48
-    sample_rate: int = 44100
-    top_n: int = 2
+        if self.mf is not None:
+            rmsd = self.mf(rmsd)
+        
+        return rmsd
 
-    # HUGO: this representation, as is,
-    # encodes timbre information in the chroma
-    # which is not what we want!!!
-    # would a median filter help perhaps? 
 
-    def __post_init__(self):
+
+class HarmonicChroma(nn.Module):
+
+    def __init__(self, 
+        hop_length: int, window_length: int = 4096,
+        n_chroma: int = 48, sample_rate: int = 44100,
+        top_n: int = 0
+    ):
+        super().__init__()
         from torchaudio.prototype.transforms import ChromaScale
+        self.hop_length = hop_length
+        self.window_length = window_length
+        self.n_chroma = n_chroma
+        self.sample_rate = sample_rate
+        self.top_n = top_n
+
+        # HUGO: this representation, as is,
+        # encodes timbre information in the chroma
+        # which is not what we want!!!
+        # would a median filter help perhaps? 
         self.chroma = ChromaScale(
             sample_rate=self.sample_rate,
             n_freqs=self.window_length // 2 + 1,
@@ -127,12 +182,13 @@ class HarmonicChroma:
 CONTROLLERS = {
     "rms": RMS, 
     "rmsq128": partial(RMS, quantize=True),
+    "rms-median": partial(RMS, median_filter_size=5),
     "hchroma": HarmonicChroma,
     "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 
     "hchroma-36c-top3": partial(HarmonicChroma, n_chroma=36,  top_n=3) # TODO: refactor me. If this works, this should just be named hchroma.
 }
-
-class Sketch2SoundController:
+ 
+class Sketch2SoundController(nn.Module):
 
     def __init__(
         self,
@@ -140,6 +196,8 @@ class Sketch2SoundController:
         hop_length: str, 
         sample_rate: int,
     ):
+        super().__init__()
+
         assert all([k in CONTROLLERS for k in ctrl_keys]), f"got an unsupported control key in {ctrl_keys}!\n  supported: {CONTROLLERS.keys()}"
 
         self.hop_length = hop_length
@@ -177,12 +235,12 @@ class Sketch2SoundController:
 
 def test_controller():
     controller = Sketch2SoundController(
-        ctrl_keys=["rms", "hchroma-12c-top2"], 
+        ctrl_keys=["rms-median", "rms"], 
         hop_length=512, 
         sample_rate=44100
     )
-
-    sig = sn.read_from_file("assets/example.wav")
+    controller.train()
+    # sig = sn.read_from_file("assets/example.wav")
     # sig = sn.read_from_file("/Users/hugo/Downloads/DCS_SE_FullChoir_ScaleUpDown06_A2_DYN.wav")
     # sig = sn.excerpt('/Users/hugo/Downloads/(guitarra - hugo mix) bubararu - tambor negro.wav', offset=0, duration=10)
     sig = sn.read_from_file("assets/voice-prompt.wav")
@@ -197,18 +255,19 @@ def test_controller():
     import matplotlib.pyplot as plt
 
     # Define relative heights for the subplots
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, 
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3, 1, 
         sharex=True, 
     )
 
     # Display the spectrogram on the top
-    ax1.imshow(sn.stft(sig, hop_length=512, window_length=2048).abs()[0][0].cpu().numpy(), aspect='auto', origin='lower')
-    # Display the chroma on the bottom
-    ax2.imshow(ctrls["hchroma-12c-top2"][0].cpu().numpy(), aspect='auto', origin='lower')
-    # Show the plot
+    ax1.imshow(sn.stft(sig, hop_length=512, window_length=2048).abs()[0][0].cpu().log().numpy(), aspect='auto', origin='lower')
+    # display rms on the bottom
+    ax2.plot(ctrls["rms-median"][0][0])
+    ax3.plot(ctrls["rms"][0][0])
+
     plt.tight_layout()  # Ensure proper spacing
-    plt.show()
+    plt.savefig("img.png")
 
 
 if __name__ == "__main__":

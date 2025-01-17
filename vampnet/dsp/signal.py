@@ -161,6 +161,33 @@ def onsets(sig: Signal, hop_length: int):
 
 
 # ~ transform ~
+def median_filter_1d(x: Tensor, sizes: Tensor) -> Tensor:
+    if isinstance(sizes, Tensor):
+        sizes = sizes.tolist()
+        assert len(sizes) == x.shape[0], "sizes must be the same length as the batch size"
+    elif isinstance(sizes, list):
+        pass
+    else:
+        assert isinstance(sizes, int), "sizes must be an int, tensor or list"
+
+    if isinstance(sizes, int):
+        if sizes % 2 == 0:
+            sizes = sizes + 1
+        x = F.pad(x, (sizes // 2, sizes // 2), mode='reflect')
+        x = x.unfold(-1, sizes, 1).median(dim=-1)[0]
+    else:
+        for i, size in enumerate(sizes):
+            _x = x[i]
+            if size % 2 == 0:
+                size = size + 1
+            _x = F.pad(_x, (size // 2, size // 2), mode='reflect')
+            _x = _x.unfold(-1, size, 1).median(dim=-1)[0]
+
+            x[i] = _x
+        
+    return x
+
+
 def pitch_shift(sig: Signal, semitones: int) -> Signal:
     tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
     return Signal(tfm(sig.wav), sig.sr)
