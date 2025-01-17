@@ -74,15 +74,13 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec = torch.compile(self.codec)
 
-        # the controller
-        if len(ctrl_keys) > 0:
-            self.controller = Sketch2SoundController(
-                ctrl_keys=ctrl_keys, 
-                hop_length=self.codec.hop_length,
-                sample_rate=self.codec.sample_rate
-            )
-        else:
-            self.controller = None
+        # the controller:
+        ctrl_keys = ctrl_keys if ctrl_keys is not None else []
+        self.controller = Sketch2SoundController(
+            ctrl_keys=ctrl_keys, 
+            hop_length=self.codec.hop_length,
+            sample_rate=self.codec.sample_rate
+        )
 
         # the vampnet
         self.model = VampNet(

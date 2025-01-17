@@ -194,4 +194,4 @@ models/*
 *.ckpt
 mask.txt
 
-.gradio
+.gradio/
