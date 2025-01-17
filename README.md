@@ -25,7 +25,7 @@ pip install -e ./soundmaterial
 
 you'll need download to download the dac codec
 ```bash
-python -m vampnet.dac.download
+python -m vampnet.dac download
 ```
 
 
