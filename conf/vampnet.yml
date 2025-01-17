@@ -52,7 +52,8 @@ VampNetDataModule.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sampl
 # use the chunk table for more even sampling of the insides your audio files!
 VampNetDataModule.use_chunk_table: true
 
-# VampNetDataModule.augment: true # pitch shift + filters, not sure if this works atm. 
+# pitch shift + filters, not sure if this works atm. 
+# VampNetDataModule.augment: true 
 
 
 # the datbase config 
