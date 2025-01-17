@@ -81,6 +81,7 @@ def process(data, return_img: bool = True):
 
     # load the sample (if any)
     if sig_spl is not None:
+        sig_spl = sn.to_mono(sig_spl)
         sig_spl = eiface.preprocess(sig_spl)
     timer.tock("preprocess")
 

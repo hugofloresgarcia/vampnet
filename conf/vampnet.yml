@@ -18,7 +18,7 @@ VampNetTrainer.n_heads: 8
 # achieves a lower token accuracy, but am unsure if it sounds any worse than stemgen. 
 # sometimes, it sounds a little crazier (but better?)
 # ~~~
-VampNetTrainer.mode: stemgen 
+VampNetTrainer.mode: vampnet 
 
 # probability of giving the model an unmasked prefix, to learn outpainting. 
 VampNetTrainer.outpaint_prob: 0.0 
