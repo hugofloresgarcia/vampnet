@@ -63,7 +63,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         outpaint_prob: float = 0.0, 
         prefix_min: float = 0.1, 
         prefix_max: float = 0.25,
-        lr: float = 0.001 
+        lr: float = 0.001, 
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -79,7 +79,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.controller = Sketch2SoundController(
             ctrl_keys=ctrl_keys, 
             hop_length=self.codec.hop_length,
-            sample_rate=self.codec.sample_rate
+            sample_rate=self.codec.sample_rate, 
         )
 
         # the vampnet
@@ -189,7 +189,6 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
         
-        # TODOO: use embedding instead
         z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
 
         target = codebook_flatten(
@@ -229,8 +228,6 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
 
-        # TODOO: use embedding instead
-        # z_mask_latent = vn.embedding.from_codes(z_mask)
         z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
 
         target = codebook_flatten(
@@ -627,7 +624,6 @@ if __name__ == "__main__":
         n_gpus = len(cuda_visible_devices.split(","))
         print(f"using {n_gpus} gpus")
 
-        # todo setup datasets and dataloaders
         trainer = L.Trainer(
             devices=n_gpus,
             default_root_dir=f"runs/{get_model_tag(model)}",

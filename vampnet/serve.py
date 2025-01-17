@@ -362,7 +362,6 @@ class GradioVampNetSystem:
         self.osc_manager.done(outpath)
 
 
-@argbind.bind(without_prefix=True)
 def main(ip = "localhost", s_port = 8002, r_port = 8001, 
          device="cpu", ckpt: str = "hugggof/vampnetv2-mode-vampnet_rms-latest"):
 
@@ -382,7 +381,6 @@ def main(ip = "localhost", s_port = 8002, r_port = 8001,
     system.osc_manager.start_server()
 
 
-@argbind.bind(without_prefix=True)
 def gradio_main(url: str="http://localhost:7860/"):
 
     system = GradioVampNetSystem(
@@ -395,6 +393,8 @@ def gradio_main(url: str="http://localhost:7860/"):
 
 if __name__ == "__main__":
     args = argbind.parse_args()
+
+    gradio_main = argbid.bind(gradio_main, without_prefix=True)
 
     with argbind.scope(args):
         gradio_main()

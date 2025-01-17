@@ -28,9 +28,9 @@ class RMS:
             # standardize to 0-1
             rmsd = (rmsd - rmsd.min()) / (rmsd.max() - rmsd.min())
 
-            # quantize to 32 steps
-            rmsd = torch.round(rmsd * 32)
-            return rmsd / 32
+            # quantize to 128 steps
+            rmsd = torch.round(rmsd * 128)
+            return rmsd / 128
         else: 
             return rmsd
 
@@ -122,9 +122,11 @@ class HarmonicChroma:
         return chroma[:, 0, :, :-1] # mono only :(  FIX ME!
 
 
+# TODO: try harmonic mel? 
+
 CONTROLLERS = {
     "rms": RMS, 
-    "rmsq": partial(RMS, quantize=True),
+    "rmsq128": partial(RMS, quantize=True),
     "hchroma": HarmonicChroma,
     "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 
     "hchroma-36c-top3": partial(HarmonicChroma, n_chroma=36,  top_n=3) # TODO: refactor me. If this works, this should just be named hchroma.
@@ -156,9 +158,10 @@ class Sketch2SoundController:
         }
 
     def extract(self, sig: Signal) -> dict[str, Tensor]:
-        return {
+        ctrls = {
             k: controller.extract(sig) for k, controller in self.controllers.items()
         }
+        return ctrls
 
     def random_mask(self, ctrls: dict[str, Tensor], r: float):
         masks = {}

@@ -4,6 +4,7 @@ import torch
 from functools import partial
 from PIL import Image
 
+import argbind
 import numpy as np
 
 from vampnet.interface import Interface
@@ -14,13 +15,12 @@ import vampnet.dsp.signal as sn
 from vampnet.util import Timer
 
 
-CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
+DEFAULT_CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 pm = create_param_manager()
 
-
-def setup_from_checkpoint(ckpt: str):
+def setup_from_checkpoint(ckpt: str = DEFAULT_CHECKPOINT):
     # load a pretrained model bundle
     bundle = VampNetTrainer.from_pretrained(ckpt) 
 
@@ -33,7 +33,10 @@ def setup_from_checkpoint(ckpt: str):
     eiface.to(device)
     return eiface
 
-eiface = setup_from_checkpoint(CHECKPOINT)
+setup_from_checkpoint = argbind.bind(setup_from_checkpoint, without_prefix=True)
+args = argbind.parse_args()
+with argbind.scope(args):
+    eiface = setup_from_checkpoint()
 
 def get_param(data, key: str):
     return data[input_widgets[key]]
@@ -45,7 +48,10 @@ def signal_from_gradio(value: tuple):
     sig = sn.Signal(wav, value[0])
     # convert from int16 to float32
     if sig.wav.dtype == torch.int16:
-        sig.wav = sig.wav.float() / 32768.0
+        sig.wav = sig.wav.float() / np.iinfo(np.int16).max
+    elif sig.wav.dtype == torch.int32:
+        sig.wav = sig.wav.float() / np.iinfo(np.int32).max
+    assert sig.wav.dtype == torch.float32, f"expected float32, got {sig.wav.dtype} with min {sig.wav.min()} and max {sig.wav.max()}"
     return sig
 
 def to_output(sig: sn.Signal):
@@ -66,10 +72,11 @@ def process(data, return_img: bool = True):
     typical_mass = get_param(data, "typical_mass")
 
     timer = Timer()
-
-    if seed < 0:
+        
+    if data[input_widgets["randomize_seed"]] or seed < 0:
         import time
         seed = time.time_ns() % (2**32-1)
+
     print(f"using seed {seed}")
     sn.seed(seed)
 
@@ -190,6 +197,9 @@ with gr.Blocks() as demo:
         with gr.Column():
             input_widgets = {}
             for name, param in pm.asdict().items():
+                if name == "seed":
+                    input_widgets["randomize_seed"] = gr.Checkbox(label="randomize seed", value=True)
+
                 if param.range is not None:
                     # if we have param range, make it a slider
                     input_widgets[name] = gr.Slider(

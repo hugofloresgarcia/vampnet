@@ -1,0 +1,13 @@
+[ ] median filters for controls
+[ ] standardization for controls
+[ ] remove audiotools requirement
+[ ] test cfg
+
+[ ] REGRESSION TEST FRAMEWORK
+- 10 audio files, 10 different prompt types or interactions we'd like to support
+- drum beats, melodics, singing, complex harmonies, complex rhythms, drones // sustained chords
+
+experiments:
+[ ] need quantization // standardization?
+[ ] right cfg value? 
+[ ] stemgen vs vampnet? 
