@@ -2,6 +2,8 @@
 
 This repository contains recipes for training generative music models on top of the Descript Audio Codec.
 
+**TODO:** remove audiotools requirement (almost there!)
+
 # setup
 
 **Requires Python 3.11**. 
