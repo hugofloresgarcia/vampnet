@@ -1,4 +1,4 @@
-# ~ basically a copy of audiotools, but torchscript friendly ~
+# ~ basically a copy of audiotools, but torchscript friendly (or so it was) ~
 import math
 from pathlib import Path
 import warnings
@@ -15,6 +15,7 @@ import torchaudio.transforms as T
 import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
+import julius
 
 import soundfile as sf
 from flatten_dict import flatten
@@ -192,18 +193,27 @@ def pitch_shift(sig: Signal, semitones: int) -> Signal:
     tfm = T.PitchShift(sample_rate=sig.sr, n_steps=semitones)
     return Signal(tfm(sig.wav), sig.sr)
 
-# TODO: remove audiotools. 
 def low_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
-    import audiotools as at
-    sig = sig.view()
-    sig.wav = at.AudioSignal(sig.wav, sig.sr).low_pass(cutoff, zeros).samples
-    return sig
+    cutoff = ensure_tensor(cutoff, 2, sig.wav.batch_size).to(sig.wav.device)
+    cutoff = cutoff / sig.sr
+    filtered = torch.empty_like(sig.wav)
+
+    for i, c in enumerate(cutoff):
+        lp_filter = julius.LowPassFilter(c.cpu(), zeros=zeros).to(sig.wav.device)
+        filtered[i] = lp_filter(sig.wav[i])
+    
+    return Signal(filtered, sig.sr)
 
 def high_pass(sig: Signal, cutoff: float, zeros: int = 51) -> Signal:
-    import audiotools as at
-    sig = sig.view()
-    sig.wav = at.AudioSignal(sig.wav, sig.sr).high_pass(cutoff, zeros).samples
-    return sig
+    cutoff = ensure_tensor(cutoff, 2, sig.wav.batch_size).to(sig.wav.device)
+    cutoff = cutoff / sig.sr
+    filtered = torch.empty_like(sig.wav)
+
+    for i, c in enumerate(cutoff):
+        hp_filter = julius.HighPassFilter(c.cpu(), zeros=zeros).to(sig.wav.device)
+        filtered[i] = hp_filter(sig.wav[i])
+    
+    return Signal(filtered, sig.sr)
 
 def to_mono(sig: Signal) -> Signal:
     """Converts a stereo signal to mono by averaging the channels."""
