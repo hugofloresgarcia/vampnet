@@ -195,3 +195,7 @@ models/*
 mask.txt
 
 .gradio/
+
+
+sm.db
+sm.db-journal
