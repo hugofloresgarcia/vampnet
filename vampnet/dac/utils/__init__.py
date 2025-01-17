@@ -105,6 +105,7 @@ def download(
             )
         local_path.write_bytes(response.content)
 
+    print(f"done! weights saved at {local_path}")
     return local_path
 
 
