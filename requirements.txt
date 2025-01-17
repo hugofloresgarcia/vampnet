@@ -7,3 +7,5 @@ einops
 lightning
 huggingface_hub
 descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git
+python_osc
+safetensors #huggingface? 

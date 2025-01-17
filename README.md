@@ -90,6 +90,9 @@ You can edit `conf/vampnet.yml` to change the dataset paths, SQL queries or any 
 
 ## export a pretrained model
 
+before you can use a model for inference, you'll need to update it to huggingface. 
+sorry! I know I need to refactor this, but I do a lot of cross-machine work and this is the easiest way to do it. TODO: add an option to export a model locally
+
 first, login to the huggingface model hub
 ```bash
 huggingface-cli login

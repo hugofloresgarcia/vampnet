@@ -167,7 +167,7 @@ ckpt/
 tests/assets/
 archived/
 
-scratch/
+scratch/** 
 
 runs-archive
 samples-*/**

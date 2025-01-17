@@ -85,19 +85,23 @@ def process(data, return_img: bool = True):
     timer.tock("preprocess")
 
     timer.tick("controls")
-    # extract onsets, for our onset mask
-    onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
-
     # extract controls and build a mask for them
     ctrls = eiface.controller.extract(insig)
     ctrl_masks = {}
-    ctrl_masks["rms"] = eiface.rms_mask(
-        ctrls["rms"], onset_idxs=onset_idxs, 
-        periodic_prompt=controls_periodic_prompt, 
-        drop_amt=0.3
-    )
-    # ctrl_masks["hchroma-36c-top3"] = torch.zeros_like(ctrl_masks["rms"])
-    ctrl_masks["hchroma-36c-top3"] = ctrl_masks["rms"]
+    if len(ctrls) > 0:
+        # extract onsets, for our onset mask
+        onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
+        ctrl_masks["rms"] = eiface.rms_mask(
+            ctrls["rms"], onset_idxs=onset_idxs, 
+            periodic_prompt=controls_periodic_prompt, 
+            drop_amt=0.3
+        )
+        # use the rms mask for the other controls
+        for k in ctrls.keys():
+            if k != "rms":
+                ctrl_masks[k] = ctrl_masks["rms"]
+                # alternatively, zero it out
+                # ctrl_masks[k] = torch.zeros_like(ctrl_masks["rms"])
     timer.tock("controls")
 
     timer.tick("encode")
