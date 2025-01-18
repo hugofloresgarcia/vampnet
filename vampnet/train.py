@@ -328,7 +328,7 @@ class VampNetDataModule(L.LightningDataModule):
         df = df.sample(frac=1, random_state=SEED)
         tdf, vdf = sm.dataset.train_test_split(df, test_size=0.1, seed=SEED)
 
-        vdf = tdf.sample(frac=1, random_state=SEED)
+        vdf = vdf.sample(frac=1, random_state=SEED)
 
         self.train_data = Dataset(
             tdf, sample_rate=sample_rate, n_samples=n_samples,

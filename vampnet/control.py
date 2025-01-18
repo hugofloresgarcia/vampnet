@@ -40,7 +40,7 @@ class RMS(nn.Module):
     def __init__(self, 
         hop_length, 
         window_length=2048, 
-        quantize=False, 
+        n_quantize=None, 
         sample_rate=44100, 
         median_filter_size: Optional[int] = None,
         train_median_filter_min=1, 
@@ -50,7 +50,7 @@ class RMS(nn.Module):
 
         self.hop_length = hop_length
         self.window_length = window_length
-        self.quantize = quantize
+        self.n_quantize = n_quantize
         self.sample_rate = sample_rate
 
         self.mf = MedianFilterAugment(
@@ -70,13 +70,13 @@ class RMS(nn.Module):
         )[:, :, :-1] # TODO: cutting the last frame to match DAC tokens but why :'(
         nb, _, _ = rmsd.shape
 
-        if self.quantize:
+        if self.n_quantize is not None:
             # standardize to 0-1
             rmsd = (rmsd - rmsd.min()) / (rmsd.max() - rmsd.min())
 
             # quantize to 128 steps
-            rmsd = torch.round(rmsd * 128)
-            rmsd =  rmsd / 128
+            rmsd = torch.round(rmsd * self.n_quantize)
+            rmsd =  rmsd / self.n_quantize
 
         if self.mf is not None:
             rmsd = self.mf(rmsd)
@@ -181,7 +181,7 @@ class HarmonicChroma(nn.Module):
 
 CONTROLLERS = {
     "rms": RMS, 
-    "rmsq128": partial(RMS, quantize=True),
+    "rmsq128": partial(RMS, n_quantize=128),
     "rms-median": partial(RMS, median_filter_size=5),
     "hchroma": HarmonicChroma,
     "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 
@@ -235,7 +235,7 @@ class Sketch2SoundController(nn.Module):
 
 def test_controller():
     controller = Sketch2SoundController(
-        ctrl_keys=["rms-median", "rms"], 
+        ctrl_keys=["rms-median", "rms", "rmsq128"], 
         hop_length=512, 
         sample_rate=44100
     )
@@ -255,8 +255,8 @@ def test_controller():
     import matplotlib.pyplot as plt
 
     # Define relative heights for the subplots
-    fig, (ax1, ax2, ax3) = plt.subplots(
-        3, 1, 
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+        4, 1, 
         sharex=True, 
     )
 
@@ -265,6 +265,7 @@ def test_controller():
     # display rms on the bottom
     ax2.plot(ctrls["rms-median"][0][0])
     ax3.plot(ctrls["rms"][0][0])
+    ax4.plot(ctrls["rmsq128"][0][0])
 
     plt.tight_layout()  # Ensure proper spacing
     plt.savefig("img.png")
