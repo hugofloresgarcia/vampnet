@@ -65,6 +65,7 @@ def process(data, return_img: bool = True):
     
     seed = get_param(data, "seed")
     controls_periodic_prompt = get_param(data, "controls_periodic_prompt")
+    controls_drop_amt = get_param(data, "controls_drop_amt")
     codes_periodic_prompt = get_param(data, "codes_periodic_prompt")
     upper_codebook_mask = get_param(data, "codes_upper_codebook_mask")
     temperature = get_param(data, "temperature")
@@ -103,7 +104,7 @@ def process(data, return_img: bool = True):
         ctrl_masks[rms_key] = eiface.rms_mask(
             ctrls[rms_key], onset_idxs=onset_idxs, 
             periodic_prompt=controls_periodic_prompt, 
-            drop_amt=0.3
+            drop_amt=controls_drop_amt
         )
         # use the rms mask for the other controls
         for k in ctrls.keys():
@@ -240,5 +241,5 @@ with gr.Blocks() as demo:
             )
 
 
-demo.launch()                
+demo.launch(share=True)                
 

@@ -44,17 +44,21 @@ if sig_spl is not None:
 onset_idxs = sn.onsets(sig, hop_length=codec.hop_length)
 
 # extract controls and build a mask for them
-ctrls = controller.extract(sig)
+ctrls = eiface.controller.extract(sig)
 ctrl_masks = {}
-ctrl_masks["rms"] = eiface.rms_mask(
-    ctrls["rms"], onset_idxs=onset_idxs, 
-    periodic_prompt=7, drop_amt=0.3
-)
-# use the same mask for the other controls
-for ctrl in ctrls:
-    if ctrl == "rms":
-        continue
-    ctrl_masks[ctrl] = ctrl_masks["rms"]
+if len(ctrls) > 0:
+    rms_key = [k for k in ctrls.keys() if "rms" in k][0]
+    ctrl_masks[rms_key] = eiface.rms_mask(
+        ctrls[rms_key], onset_idxs=onset_idxs, 
+        periodic_prompt=5, 
+        drop_amt=0.0
+    )
+    # use the rms mask for the other controls
+    for k in ctrls.keys():
+        if k != rms_key:
+            ctrl_masks[k] = ctrl_masks[rms_key]
+            # alternatively, zero it out
+            # ctrl_masks[k] = torch.zeros_like(ctrl_masks["rms"])
 
 # encode the signal
 codes = eiface.encode(sig.wav)
