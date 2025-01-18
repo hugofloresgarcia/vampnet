@@ -345,16 +345,16 @@ class GradioVampNetSystem:
         outpath = self.client.predict(
             # TODO: the parameters should actually be part of a dataclass now that i think about it. 
             data=handle_file(audio_path),
-            param_1=None,
-            # param_1=handle_file('https://github.com/gradio-app/gradio/raw/main/test/test_files/audio_sample.wav'),
-            param_2=self.pm.get("seed"),
-            param_3=self.pm.get("temperature"),
-            param_4=self.pm.get("controls_periodic_prompt"),
-            param_5=self.pm.get("controls_drop_amt"),
-            param_6=self.pm.get("codes_periodic_prompt"),
-            param_7=self.pm.get("codes_upper_codebook_mask"),
-            param_8=self.pm.get("mask_temperature"),
-            param_9=self.pm.get("typical_mass"),
+            param_1=None, # sample audio path
+            param_2=False, # randomize seed
+            param_3=self.pm.get("seed"),
+            param_4=self.pm.get("temperature"),
+            param_5=self.pm.get("controls_periodic_prompt"),
+            param_6=self.pm.get("controls_drop_amt"),
+            param_7=self.pm.get("codes_periodic_prompt"),
+            param_8=self.pm.get("codes_upper_codebook_mask"),
+            param_9=self.pm.get("mask_temperature"),
+            param_10=self.pm.get("typical_mass"),
             api_name="/api-vamp"
         )
 
