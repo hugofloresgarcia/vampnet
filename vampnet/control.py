@@ -32,7 +32,7 @@ class MedianFilterAugment(nn.Module):
             )
         else:
             sizes = self.kernel_size
-        print(f"median filter sizes: {sizes}")
+        # print(f"median filter sizes: {sizes}")
         return sn.median_filter_1d(x, sizes)
 
 class RMS(nn.Module):

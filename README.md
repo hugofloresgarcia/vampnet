@@ -103,6 +103,11 @@ once you have a trained model you like, you can export a pretrained model to the
 python scripts/export.py --ckpt runs/.../checkpoints/best.ckpt --hf_repo hugggof/vampnetv2 --version_tag latest
 ```
 
+to view all exported models
+```bash
+python scripts/export.py --stage list
+```
+
 ## debugging training
 
 To debug training, it's easier to debug with 1 gpu and 0 workers

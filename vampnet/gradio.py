@@ -97,17 +97,18 @@ def process(data, return_img: bool = True):
     ctrls = eiface.controller.extract(insig)
     ctrl_masks = {}
     if len(ctrls) > 0:
+        rms_key = [k for k in ctrls.keys() if "rms" in k][0]
         # extract onsets, for our onset mask
         onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
-        ctrl_masks["rms"] = eiface.rms_mask(
-            ctrls["rms"], onset_idxs=onset_idxs, 
+        ctrl_masks[rms_key] = eiface.rms_mask(
+            ctrls[rms_key], onset_idxs=onset_idxs, 
             periodic_prompt=controls_periodic_prompt, 
             drop_amt=0.3
         )
         # use the rms mask for the other controls
         for k in ctrls.keys():
-            if k != "rms":
-                ctrl_masks[k] = ctrl_masks["rms"]
+            if k != rms_key:
+                ctrl_masks[k] = ctrl_masks[rms_key]
                 # alternatively, zero it out
                 # ctrl_masks[k] = torch.zeros_like(ctrl_masks["rms"])
     timer.tock("controls")
