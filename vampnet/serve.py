@@ -394,7 +394,7 @@ def gradio_main(url: str="http://localhost:7860/"):
 if __name__ == "__main__":
     args = argbind.parse_args()
 
-    gradio_main = argbid.bind(gradio_main, without_prefix=True)
+    gradio_main = argbind.bind(gradio_main, without_prefix=True)
 
     with argbind.scope(args):
         gradio_main()
