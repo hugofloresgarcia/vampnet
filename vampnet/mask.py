@@ -246,10 +246,6 @@ def periodic_mask(x: torch.Tensor, period: int,
                 assert torch.all(j_fill == 0)
                 # fill
                 mask[i, :, j_start:j_end] = j_fill
-    if random_roll:
-        # add a random offset to the mask
-        offset = torch.randint(0, period[0], (1,))
-        mask = torch.roll(mask, int(offset.item()), dims=-1)
 
     return mask
 

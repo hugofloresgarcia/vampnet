@@ -16,11 +16,11 @@ from vampnet.util import Timer
 
 
 DEFAULT_CHECKPOINT = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 pm = create_param_manager()
 
-def setup_from_checkpoint(ckpt: str = DEFAULT_CHECKPOINT):
+def setup_from_checkpoint(ckpt: str = DEFAULT_CHECKPOINT, 
+                          device: str = "cuda" if torch.cuda.is_available() else "cpu"):
     # load a pretrained model bundle
     bundle = VampNetTrainer.from_pretrained(ckpt) 
 
@@ -142,7 +142,10 @@ def process(data, return_img: bool = True):
 
     # generate!
     timer.tick("generate")
-    with torch.autocast(device,  dtype=torch.bfloat16):
+    print(f"generating with temperature {temperature} and mask temperature {mask_temperature}")
+    print(f"typical mass {typical_mass}")
+    # breakpoint()
+    with torch.autocast(eiface.device,  dtype=torch.bfloat16):
         gcodes = eiface.vn.generate(
             codes=mcodes,
             temperature=temperature,
@@ -241,5 +244,4 @@ with gr.Blocks() as demo:
             )
 
 
-demo.launch(share=True)                
-
+demo.launch(share=True, debug=True)                

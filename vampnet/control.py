@@ -182,6 +182,7 @@ class HarmonicChroma(nn.Module):
 CONTROLLERS = {
     "rms": RMS, 
     "rmsq128": partial(RMS, n_quantize=128),
+    "rmsq16": partial(RMS, n_quantize=16),
     "rms-median": partial(RMS, median_filter_size=5),
     "hchroma": HarmonicChroma,
     "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 

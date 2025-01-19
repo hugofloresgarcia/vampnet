@@ -124,18 +124,18 @@ class Interface(nn.Module):
     @torch.inference_mode()
     def build_codes_mask(self, 
             codes: Tensor,
-            periodic_prompt: Tensor = 13, 
-            upper_codebook_mask: Tensor = 3, 
+            periodic_prompt: int = 13, 
+            upper_codebook_mask: int = 3, 
             dropout_amt: Tensor = 0.0,
         ):
         mask = linear_random(codes, 1.0)
-        pmask = periodic_mask(codes, periodic_prompt, 1, random_roll=True)
+        pmask = periodic_mask(codes, periodic_prompt, 1, random_roll=False)
         mask = mask_and(mask, pmask)
 
         assert dropout_amt == 0.0, "dropout is not supported"
         # mask = dropout(mask, dropout_amt)
 
-        mask = codebook_mask(mask, upper_codebook_mask, None)
+        mask = codebook_mask(mask, int(upper_codebook_mask), None)
         return mask
 
     @torch.inference_mode()
@@ -150,10 +150,10 @@ class Interface(nn.Module):
         drop_amt: float = 0.1
     ):
         mask =  mask_and(
-            periodic_mask(rmsd, periodic_prompt, 1, random_roll=True),
+            periodic_mask(rmsd, periodic_prompt, 1, random_roll=False),
             mask_or( # this re-masks the onsets, according to a periodic schedule
                 onset_mask(onset_idxs, rmsd, width=width),
-                periodic_mask(rmsd, periodic_prompt, 1, random_roll=True),
+                periodic_mask(rmsd, periodic_prompt, 1, random_roll=False),
             )
         ).int()
         # make sure the onset idxs themselves are unmasked

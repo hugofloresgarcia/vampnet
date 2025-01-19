@@ -530,7 +530,7 @@ class AudioSampleLoggingCallback(Callback):
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : module.model.n_codebooks, :]
 
-            mask = pmask.periodic_mask(z, period, 1, random_roll=True)
+            mask = pmask.periodic_mask(z, period, 1, random_roll=False)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
             z_hat = module.model.generate(
