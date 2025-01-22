@@ -130,11 +130,11 @@ class VampNetOSCManager:
         def handler(_, *args):
             try:
                 self.pm.set(param_name, args[0])
-                if self.param_change_callback:
-                    self.param_change_callback()
-                print(f"Set {param_name} to {self.pm.get(param_name)}")
             except ValueError as e:
                 print(f"Error setting parameter {param_name}: {e}")
+            if self.param_change_callback:
+                self.param_change_callback()
+            print(f"Set {param_name} to {self.pm.get(param_name)}")
         return handler
 
     def _osc_get_params(self, address, *args):
@@ -321,7 +321,8 @@ class GradioVampNetSystem:
     ):
         self.osc_manager = VampNetOSCManager(
             ip=ip, s_port=s_port, r_port=r_port, 
-            process_fn=self.process
+            process_fn=self.process, 
+            param_change_callback=self.param_changed
         )
         self.pm = self.osc_manager.pm
         
@@ -332,7 +333,7 @@ class GradioVampNetSystem:
 
         audio_path = Path("pd/") / "buf.wav"
         print(f"WARNING: HARDCODED TO {audio_path}\n"*10)
-        self.client.predict(
+        result = self.client.predict(
             data=handle_file(audio_path),
             param_1=None, # sample audio path
             param_2=False, # randomize seed
@@ -344,8 +345,12 @@ class GradioVampNetSystem:
             param_8=self.pm.get("codes_upper_codebook_mask"),
             param_9=self.pm.get("mask_temperature"),
             param_10=self.pm.get("typical_mass"),
-            api_name="preview_inputs"
+            api_name="/preview-inputs"
         )
+        from PIL import Image
+        outpath = Path("pd/") / "input.gif"
+        Image.open(result).save(outpath)
+        self.osc_manager.client.send_message("/img", str(outpath.relative_to("pd/")))
 
     
     def process(self, address: str, *args):
