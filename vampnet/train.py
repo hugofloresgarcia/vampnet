@@ -51,6 +51,7 @@ DEFAULT_QUERY = """
 class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
     def __init__(self,
+        prefix_tag: str = "",
         # ~~~ codec ~~~
         codec_ckpt: str = CODEC_CKPT,
         # ~~~ model ~~~
@@ -67,6 +68,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
     ):
         super().__init__()
         self.save_hyperparameters()
+        self.prefix_tag = prefix_tag    
 
         codec_ckpt = Path(codec_ckpt).expanduser().resolve()
         
@@ -109,8 +111,6 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         # trainer things
         self.criterion = nn.CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
-
-        self.tag = get_model_tag(self)
 
 
     def configure_optimizers(self):
@@ -562,7 +562,7 @@ class AudioSampleLoggingCallback(Callback):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return f"{'tria-' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+    return model.prefix_tag + f"{'tria-' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
 
 
 @argbind.bind(without_prefix=True)
@@ -571,6 +571,11 @@ def get_checkpoint_path(resume_ckpt: str = None):
     print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
     print("~~~~")
     return resume_ckpt
+
+
+@argbind.bind(without_prefix=True)
+def is_fine_tuning(fine_tune: bool = False):
+    return fine_tune
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~ ~~~~ the recipe ~~~~ ~~~~
@@ -590,13 +595,20 @@ if __name__ == "__main__":
         if resume_ckpt is not None:
             assert resume_ckpt.endswith(".ckpt"), f"checkpoint path must end with .ckpt, got {resume_ckpt}"
 
+        # if we're fine-tuning, we don't want to load the checkpoint
+        # for the trainer, just the weights
+        are_we_fine_tuning = is_fine_tuning()
+
         # ~~~~ set up model ~~~~~
         model = (
             VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt)
                 if resume_ckpt is not None
                 else VampNetTrainer()
         )
-        model.outpaint_prob = 0.5 # patch
+        # make sure the the tag comes from the config
+        if "VampNetTrainer.prefix_tag" in args:
+            model.prefix_tag = args["VampNetTrainer.prefix_tag"]
+
 
         # ~~~~ set up data ~~~~
         dm = VampNetDataModule(sample_rate=model.codec.sample_rate)
@@ -645,5 +657,5 @@ if __name__ == "__main__":
             model=model, 
             train_dataloaders=dm.train_dataloader(), 
             val_dataloaders=dm.val_dataloader(), 
-            ckpt_path=resume_ckpt
+            ckpt_path=resume_ckpt if not are_we_fine_tuning else None
         )

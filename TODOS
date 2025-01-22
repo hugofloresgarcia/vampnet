@@ -1,13 +1,39 @@
-[ ] median filters for controls
-[ ] standardization for controls
+[x] median filters for controls
+[x] standardization for controls
 [ ] remove audiotools requirement
+    [x] from vampnet
+    [ ] from DAC? or remove DAC?
 [ ] test cfg
+
+DATASETS
+[ ] a dataset for melodic // harmonic sounds? 
+    - [ ] maybe do hpss on the audio as preprocessing or something crazy
+        - [ ] or demucs
+        - [ ] or just use a melodic
+[ ] orchestral dataset? 
+[ ] jazz? 
+[ ] minimalist // electroacoustic? 
+
+for an electroacoustic performance
+[ ] evaluate actual interactivity with an instrument
+
+puredata
+[ ] midi sync (for beat-based music)
+[ ] save loops in a bank (for both)
+[ ] stereo panning
+[ ] multiple channels at once (goes w/ stereo panning)
 
 [ ] REGRESSION TEST FRAMEWORK
 - 10 audio files, 10 different prompt types or interactions we'd like to support
 - drum beats, melodics, singing, complex harmonies, complex rhythms, drones // sustained chords
 
 experiments:
-[ ] need quantization // standardization?
+[x] need quantization // standardization?
+    - YES. compare rms, rmsq128, rmsq16
 [ ] right cfg value? 
 [ ] stemgen vs vampnet? 
+[ ] an eval script with metrics like FAD!
+
+
+HARDWARE:
+[ ] case needs to be a bit taller to acommodate the USB-C panel mount 

@@ -1,0 +1,69 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~ model // training config ~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VampNetTrainer.prefix_tag: "prosound-tiny"
+
+VampNetTrainer.embedding_dim: 1026
+VampNetTrainer.n_layers: 8
+VampNetTrainer.n_heads: 8
+
+# ~~~
+# modes: "stemgen" or "vampnet"
+# configures the training // decoding mode of the model. 
+
+# - "stemgen" is similar to the StemGen paper by tiktok (and thus Soundstorm), 
+# which decodes one codebook level at a time, bottom to top.
+# achieves a much higher token accuracy, but am unsure if the generated tokens sound any better
+
+# -- "vampnet" is from the original vampnet paper, which decodes all tokens in parallel. 
+# achieves a lower token accuracy, but am unsure if it sounds any worse than stemgen. 
+# sometimes, it sounds a little crazier (but better?)
+# ~~~
+VampNetTrainer.mode: vampnet 
+
+# probability of giving the model an unmasked prefix, to learn outpainting. 
+VampNetTrainer.outpaint_prob: 0.5
+VampNetTrainer.prefix_min: 0.0 # min prefix size
+VampNetTrainer.prefix_max: 0.3 # max prefix size
+
+# control signals to use as conditioning. 
+VampNetTrainer.ctrl_keys: ['rmsq16',]
+
+# learning rate. 
+VampNetTrainer.lr: 0.001
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~ data setup ~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VampNetDataModule.batch_size: 32
+VampNetDataModule.num_workers: 14
+
+# configure the number of samples to draw from the dataset. 
+# NOTE: this must be a multiple of the hop length of the DAC model. 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# a couple of options for u, for the OG 44.1kHz DAC model. 
+# ~~
+# VampNetDataModule.n_samples: 79872 # roughly 1.814 seconds, matching a 512 sample hop len at 44.1k
+VampNetDataModule.n_samples: 220160 # roughly 4.99 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 132096 # roughly 2.99 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 352768 # roughly 8 seconds, matching a 512 sample hop len at 44.1k
+# VampNetDataModule.n_samples: 264192 # roughly 6 seconds, matching a 512 sample hop len at 44.1k
+
+# use the chunk table for more even sampling of the insides your audio files!
+VampNetDataModule.use_chunk_table: true
+
+# pitch shift + filters, not sure if this works atm. 
+# VampNetDataModule.augment: true 
+
+
+# the datbase config 
+# ~~~~~~~~~~~~~~~~~~
+VampNetDataModule.db_path: ./sm.db
+VampNetDataModule.query: "
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+    WHERE dataset.name IN ('clack', 'big-room-complete', 'bbc-subset', 'choral-singing-dataset')
+"

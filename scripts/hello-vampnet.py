@@ -10,11 +10,12 @@ from vampnet.mask import apply_mask
 from vampnet.train import VampNetTrainer
 
 # pick a device and seed
-ckpt = "hugggof/vampnetv2-tria-d774-l8-h8-mode-vampnet_rms-hchroma-36c-top3-latest"
+ckpt = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-median-latest"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 sig_spl = sn.read_from_file("assets/noodle.wav", duration=1.0)
-sig = sn.read_from_file("assets/voice-prompt.wav", duration=5.0)
+sig = sn.read_from_file("assets/a-beautiful-loop.wav", duration=5.0)
+sig = sn.to_mono(sig)
 # seed(0)
 
 # load a pretrained model bundle
@@ -23,6 +24,7 @@ bundle = VampNetTrainer.from_pretrained(ckpt)
 codec = bundle.codec # grab the codec
 vn = bundle.model # and the vampnet
 controller = bundle.controller # and the controller
+# controller.controllers["rms-median"].median_filter_size=20
 
 # create an interface with our pretrained shizzle
 eiface = Interface(
@@ -50,7 +52,7 @@ if len(ctrls) > 0:
     rms_key = [k for k in ctrls.keys() if "rms" in k][0]
     ctrl_masks[rms_key] = eiface.rms_mask(
         ctrls[rms_key], onset_idxs=onset_idxs, 
-        periodic_prompt=5, 
+        periodic_prompt=0, 
         drop_amt=0.0
     )
     # use the rms mask for the other controls
