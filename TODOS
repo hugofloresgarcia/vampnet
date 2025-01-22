@@ -5,6 +5,9 @@ CODE
     [x] from vampnet
     [ ] from DAC? or remove DAC? or minify DAC?
 [ ] timbretrap conditioning? 
+    [ ] from DAC? or remove DAC?
+[ ] test cfg
+[ ] stereo DAC? 
 
 DATASETS
 [ ] a dataset for melodic // harmonic sounds? 
@@ -63,3 +66,9 @@ for an electroacoustic performance
 [ ] hire people? 
  - VS OTHER DATASETS: IT'S ALIGNED IN TIME
     - others: taptamdrum
+
+    
+UI:
+[ ] a token filling animation as the thing happens!!!!
+[ ] a cue gloop button instead of an async request button!!!! 
+[ ]

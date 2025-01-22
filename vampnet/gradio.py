@@ -63,6 +63,7 @@ def process(data, return_img: bool = True):
     insig = signal_from_gradio(data[input_audio])
     sig_spl = signal_from_gradio(data[sample_audio]) if data[sample_audio] is not None else None
     
+    randomize_seed = data[input_widgets["randomize_seed"]]
     seed = get_param(data, "seed")
     controls_periodic_prompt = get_param(data, "controls_periodic_prompt")
     controls_drop_amt = get_param(data, "controls_drop_amt")
@@ -73,108 +74,26 @@ def process(data, return_img: bool = True):
     typical_mass = get_param(data, "typical_mass")
 
     timer = Timer()
-        
-    if data[input_widgets["randomize_seed"]] or seed < 0:
-        import time
-        seed = time.time_ns() % (2**32-1)
 
-    print(f"using seed {seed}")
-    sn.seed(seed)
-
-    # preprocess the input signal
-    timer.tick("preprocess")
-    insig = sn.to_mono(insig)
-    inldns = sn.loudness(insig)
-    insig = eiface.preprocess(insig)
-
-    # load the sample (if any)
-    if sig_spl is not None:
-        # if sig_spl is all zeros
-        if torch.all(sig_spl.wav == 0):
-            sig_spl = None
-            print(f"WARING: sig_sample is all zeros, ignoring")
-        else:
-            sig_spl = sn.to_mono(sig_spl)
-            sig_spl = eiface.preprocess(sig_spl)
-    timer.tock("preprocess")
-
-    timer.tick("controls")
-    # extract controls and build a mask for them
-    ctrls = eiface.controller.extract(insig)
-    ctrl_masks = {}
-    if len(ctrls) > 0:
-        rms_key = [k for k in ctrls.keys() if "rms" in k][0]
-        # extract onsets, for our onset mask
-        onset_idxs = sn.onsets(insig, hop_length=eiface.codec.hop_length)
-        ctrl_masks[rms_key] = eiface.rms_mask(
-            ctrls[rms_key], onset_idxs=onset_idxs, 
-            periodic_prompt=controls_periodic_prompt, 
-            drop_amt=controls_drop_amt
-        )
-        # use the rms mask for the other controls
-        for k in ctrls.keys():
-            if k != rms_key:
-                ctrl_masks[k] = ctrl_masks[rms_key]
-                # alternatively, zero it out
-                # ctrl_masks[k] = torch.zeros_like(ctrl_masks["rms"])
-    timer.tock("controls")
-
-    timer.tick("encode")
-    # encode the signal
-    codes = eiface.encode(insig.wav)
-    timer.tock("encode")
-
-    # make a mask for the codes
-    mask = eiface.build_codes_mask(codes, 
-        periodic_prompt=codes_periodic_prompt, 
-        upper_codebook_mask=upper_codebook_mask
+    out = eiface.vamp(
+        insig=insig,
+        sig_spl=sig_spl,
+        seed=seed,
+        randomize_seed=randomize_seed,
+        controls_periodic_prompt=controls_periodic_prompt,
+        controls_drop_amt=controls_drop_amt,
+        codes_periodic_prompt=codes_periodic_prompt,
+        upper_codebook_mask=upper_codebook_mask,
+        temperature=temperature,
+        mask_temperature=mask_temperature,
+        typical_mass=typical_mass,
     )
 
-    timer.tick("prefix")
-    if sig_spl is not None:
-        # encode the sample
-        codes_spl = eiface.encode(sig_spl.wav)
-
-        # add sample to bundle
-        codes, mask, ctrls, ctrl_masks = eiface.add_sample(
-            spl_codes=codes_spl, codes=codes, 
-            cmask=mask, ctrls=ctrls, ctrl_masks=ctrl_masks
-        )
-    timer.tock("prefix")
-
-    # apply the mask
-    mcodes = apply_mask(codes, mask, eiface.vn.mask_token)
-
-    # generate!
-    timer.tick("generate")
-    print(f"generating with temperature {temperature} and mask temperature {mask_temperature}")
-    print(f"typical mass {typical_mass}")
-    # breakpoint()
-    with torch.autocast(eiface.device,  dtype=torch.bfloat16):
-        gcodes = eiface.vn.generate(
-            codes=mcodes,
-            temperature=temperature,
-            cfg_scale=5.0,
-            mask_temperature=mask_temperature,
-            typical_filtering=True,
-            typical_mass=typical_mass,
-            ctrls=ctrls,
-            ctrl_masks=ctrl_masks,
-            typical_min_tokens=128,
-            sampling_steps=24 if eiface.vn.mode == "vampnet" else [16, 8, 4, 4],
-            causal_weight=0.0,
-            debug=False
-        )
-    timer.tock("generate")
-
-    # remove codes
-    if sig_spl is not None:
-        gcodes = eiface.remove_sample(codes_spl, gcodes)
-
-    timer.tick("decode")
-    # write the generated signal
-    generated_wav = eiface.decode(gcodes)
-    timer.tock("decode")
+    outsig = out["sig"]
+    mcodes = out["mcodes"]
+    mask = out["mask"]
+    ctrls = out["ctrls"]
+    ctrl_masks = out["ctrl_masks"]
 
     if return_img:
         # visualize the bundle
@@ -186,16 +105,25 @@ def process(data, return_img: bool = True):
         )
         outviz = Image.open(outvizpath)
         timer.tock("viz")
-        return to_output(sn.Signal(generated_wav, insig.sr)), outviz, seed
+        return to_output(outsig), outviz, seed
     else:
-        return to_output(sn.Signal(generated_wav, insig.sr))
-
+        return to_output(outsig)
 
 def process_api(data):
     return process(data, return_img=False)
 
 def process_normal(data):
     return process(data, return_img=True)
+
+
+def process_preview(data):
+    return eiface.preview_input(
+        signal_from_gradio(data[input_audio]),
+        controls_periodic_prompt=get_param(data, "controls_periodic_prompt"),
+        controls_drop_amt=get_param(data, "controls_drop_amt"),
+        codes_periodic_prompt=get_param(data, "codes_periodic_prompt"),
+        upper_codebook_mask=get_param(data, "codes_upper_codebook_mask"),
+    )
 
 with gr.Blocks() as demo:
     with gr.Row():
@@ -229,6 +157,7 @@ with gr.Blocks() as demo:
         with gr.Column():
             process_button = gr.Button(value="vamp",)
             api_process_button = gr.Button(value="api-vamp",)
+            preview_button = gr.Button(value="preview-inputs",)
 
             # add an output audio widget
             output_audio = gr.Audio(label="output audio",)
@@ -247,6 +176,13 @@ with gr.Blocks() as demo:
                 inputs={input_audio, sample_audio} | set(input_widgets.values()), 
                 outputs=[output_audio], api_name="api-vamp"
             )
+
+            preview_button.click(
+                process_preview, 
+                inputs={input_audio, sample_audio} | set(input_widgets.values()), 
+                outputs=[output_img], api_name="preview-inputs"
+            )
+            
 
 
 demo.launch(share=True, debug=True)                
