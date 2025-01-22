@@ -39,6 +39,9 @@ def flip_coin(prob):
 def first_dict_value(d):
     return next(iter(d.values()))
 
+def first_dict_key(d):
+    return next(iter(d.keys()))
+
 @torch.jit.script
 def scalar_to_batch_tensor(x: int | float, batch_size: int):
     # torchscript weirdness
@@ -102,3 +105,11 @@ class Timer:
     
     def __str__(self):
         return str(self.times)
+
+def buffer_plot_and_get(fig, **kwargs):
+    import io
+    import PIL
+    buf = io.BytesIO()
+    fig.savefig(buf, **kwargs)
+    buf.seek(0)
+    return PIL.Image.open(buf)
