@@ -1,9 +1,10 @@
+CODE
 [x] median filters for controls
 [x] standardization for controls
 [ ] remove audiotools requirement
     [x] from vampnet
-    [ ] from DAC? or remove DAC?
-[ ] test cfg
+    [ ] from DAC? or remove DAC? or minify DAC?
+[ ] timbretrap conditioning? 
 
 DATASETS
 [ ] a dataset for melodic // harmonic sounds? 
@@ -14,26 +15,44 @@ DATASETS
 [ ] jazz? 
 [ ] minimalist // electroacoustic? 
 
-for an electroacoustic performance
-[ ] evaluate actual interactivity with an instrument
 
-puredata
+PUREDATA
 [ ] midi sync (for beat-based music)
 [ ] save loops in a bank (for both)
 [ ] stereo panning
 [ ] multiple channels at once (goes w/ stereo panning)
 
-[ ] REGRESSION TEST FRAMEWORK
-- 10 audio files, 10 different prompt types or interactions we'd like to support
-- drum beats, melodics, singing, complex harmonies, complex rhythms, drones // sustained chords
 
-experiments:
+EXPERIMENTS
 [x] need quantization // standardization?
-    - YES. compare rms, rmsq128, rmsq16
-[ ] right cfg value? 
+    - YES. todo: compare rms, rmsq128, rmsq16 w/ test framework
 [ ] stemgen vs vampnet? 
-[ ] an eval script with metrics like FAD!
+[ ] what's the right cfg value? 
+[ ] train a dac without quantizer drop for better codebook-drop prompting? 
 
 
 HARDWARE:
 [ ] case needs to be a bit taller to acommodate the USB-C panel mount 
+
+TEST FRAMEWORK:
+- small listening test set
+    [ ] collect 5 example audio files of different possible input sounds
+        - solo instrument (violin // sax // etc)
+        - singing
+        - drum beat // percussion
+        - chord instrument (piano // guitar)
+        - ambient // synth
+    [ ] write a script that sweeps over hyperparameters or different model checkpoints
+        for each category: 
+            - run the model:
+                - use an audio file from 1 category (singing) as input, 
+                - use an audio file from another category (drum beat) as target
+            - save the generated audio file along with the input and target in a folder
+- objective metrics
+    [ ] support doing this with large numbers of audio file (10k) and compute metrics like FAD
+        on the generated outputs
+
+
+~~~~~~~
+for an electroacoustic performance
+[ ] evaluate actual interactivity with an instrument
