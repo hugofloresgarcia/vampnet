@@ -112,6 +112,9 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.criterion = nn.CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
 
+    @property
+    def tag(self):
+        return get_model_tag(self)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.hparams.lr)

@@ -28,6 +28,11 @@ def export_model(
 ):
     bundle = VampNetTrainer.load_from_checkpoint(ckpt) 
 
+    print("~"*80)
+    print(f"loaded checkpoint {ckpt}!")
+    print(f"model tag is {bundle.tag}")
+    print("~"*80)
+
     # export the model
     export_repoid = f"{hf_repo}-{bundle.tag}-{version_tag}"
     bundle.push_to_hub(export_repoid)
