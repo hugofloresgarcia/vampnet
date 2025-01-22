@@ -89,8 +89,13 @@ def process(data, return_img: bool = True):
 
     # load the sample (if any)
     if sig_spl is not None:
-        sig_spl = sn.to_mono(sig_spl)
-        sig_spl = eiface.preprocess(sig_spl)
+        # if sig_spl is all zeros
+        if torch.all(sig_spl.wav == 0):
+            sig_spl = None
+            print(f"WARING: sig_sample is all zeros, ignoring")
+        else:
+            sig_spl = sn.to_mono(sig_spl)
+            sig_spl = eiface.preprocess(sig_spl)
     timer.tock("preprocess")
 
     timer.tick("controls")

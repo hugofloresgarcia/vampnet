@@ -331,9 +331,9 @@ class GradioVampNetSystem:
 
         print(f"Processing {address} with args {args}")
         # get the path to audio
-        audio_path = Path(args[0])
-        # TODO: FIXME: patch 
-        audio_path = Path("pd/") / audio_path
+        # TODO: FIXME: patch, maybe we wanna make this
+        audio_path = Path("pd/") / args[0]
+        timbre_path = Path("pd/") / args[1]
 
         # make sure it exists, otherwise send an error message
         if not audio_path.exists():
@@ -345,7 +345,7 @@ class GradioVampNetSystem:
         outpath = self.client.predict(
             # TODO: the parameters should actually be part of a dataclass now that i think about it. 
             data=handle_file(audio_path),
-            param_1=None, # sample audio path
+            param_1=handle_file(timbre_path), # sample audio path
             param_2=False, # randomize seed
             param_3=self.pm.get("seed"),
             param_4=self.pm.get("temperature"),
