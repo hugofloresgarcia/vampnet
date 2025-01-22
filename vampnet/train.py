@@ -566,11 +566,17 @@ def get_model_tag(model):
 
 
 @argbind.bind(without_prefix=True)
-def get_checkpoint_path(resume_ckpt: str = None):
+def get_checkpoint_path(resume_ckpt: str = None, hf_ckpt: str = None):
     print("~~~~")
-    print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
+    # print(f"resuming from {resume_ckpt}" if resume_ckpt else "~~starting from scratch!!")
+    if resume_ckpt is not None:
+        print(f"resuming from {resume_ckpt}")
+    elif hf_ckpt is not None:
+        print(f"loading from huggingface checkpoint {hf_ckpt}")
+    else:
+        print("~~starting from scratch!!")
     print("~~~~")
-    return resume_ckpt
+    return resume_ckpt, hf_ckpt
 
 
 @argbind.bind(without_prefix=True)
@@ -591,7 +597,7 @@ if __name__ == "__main__":
 
     with argbind.scope(args):
         # ~~~~ resume from checkpoint? ~~~~
-        resume_ckpt = get_checkpoint_path()
+        resume_ckpt, hf_ckpt = get_checkpoint_path()
         if resume_ckpt is not None:
             assert resume_ckpt.endswith(".ckpt"), f"checkpoint path must end with .ckpt, got {resume_ckpt}"
 
@@ -605,6 +611,12 @@ if __name__ == "__main__":
                 if resume_ckpt is not None
                 else VampNetTrainer()
         )
+        if resume_ckpt is not None:
+            model = VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt)
+        elif hf_ckpt is not None:
+            model = VampNetTrainer.from_pretrained(hf_ckpt)
+        else:
+            model = VampNetTrainer()
         # make sure the the tag comes from the config
         if "VampNetTrainer.prefix_tag" in args:
             model.prefix_tag = args["VampNetTrainer.prefix_tag"]
@@ -643,7 +655,7 @@ if __name__ == "__main__":
             limit_val_batches=20,
             gradient_clip_val=1.0,
             # val_check_interval=100,
-            val_check_interval=1000,
+            val_check_interval=min(1000, len(dm.train_data) // dm.batch_size),
             callbacks=callbacks,
             precision="bf16-mixed", 
             strategy="ddp_find_unused_parameters_true", 

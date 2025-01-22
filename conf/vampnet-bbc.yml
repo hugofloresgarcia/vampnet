@@ -1,0 +1,19 @@
+$include:
+    - conf/vampnet.yml
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~ model // training config ~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+VampNetTrainer.prefix_tag: "bbcsub"
+
+
+# the datbase config 
+# ~~~~~~~~~~~~~~~~~~
+VampNetDataModule.db_path: ./sm.db
+VampNetDataModule.query: "
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+    WHERE dataset.name IN ('bbc-subset')
+"
