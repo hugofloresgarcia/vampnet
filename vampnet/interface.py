@@ -386,6 +386,7 @@ class Interface(nn.Module):
 
         # Export the plot
         outimg = vampnet.util.buffer_plot_and_get(fig, dpi=dpi, bbox_inches="tight", pad_inches=0)
+        plt.close()
         return outimg
 
 
