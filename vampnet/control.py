@@ -44,7 +44,7 @@ class RMS(nn.Module):
         sample_rate=44100, 
         median_filter_size: Optional[int] = None,
         train_median_filter_min=1, 
-        train_median_filter_max=20,
+        train_median_filter_max=15,
     ):
         super().__init__()
 
@@ -184,6 +184,7 @@ CONTROLLERS = {
     "rmsq128": partial(RMS, n_quantize=128),
     "rmsq16": partial(RMS, n_quantize=16),
     "rms-median": partial(RMS, median_filter_size=5),
+    "rmsq16-median": partial(RMS, n_quantize=16, median_filter_size=3),
     "hchroma": HarmonicChroma,
     "hchroma-12c-top2": partial(HarmonicChroma, n_chroma=12,  top_n=2), # TODO: refactor me. If this works, this should just be named hchroma. 
     "hchroma-36c-top3": partial(HarmonicChroma, n_chroma=36,  top_n=3) # TODO: refactor me. If this works, this should just be named hchroma.

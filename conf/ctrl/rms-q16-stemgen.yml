@@ -1,0 +1,4 @@
+$include:
+    - conf/vampnet.yml
+VampNetTrainer.mode: "stemgen"
+VampNetTrainer.ctrl_keys: ["rmsq16"]
