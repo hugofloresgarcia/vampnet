@@ -62,7 +62,15 @@ def process(data, return_img: bool = True):
     # input params (i'm refactoring this)
     insig = signal_from_gradio(data[input_audio])
     sig_spl = signal_from_gradio(data[sample_audio]) if data[sample_audio] is not None else None
-    
+
+    # if insig is all zeros, return a silent signal
+    if insig.wav.sum() == 0:
+        print("input signal is all zeros, returning silent signal")
+        if return_img:
+            return to_output(insig), Image.new("RGB", (1, 1))
+        else:
+            return to_output(insig)
+
     randomize_seed = data[input_widgets["randomize_seed"]]
     seed = get_param(data, "seed")
     controls_periodic_prompt = get_param(data, "controls_periodic_prompt")

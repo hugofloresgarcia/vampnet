@@ -63,7 +63,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         # ~~~ training // behavior ~~~
         outpaint_prob: float = 0.0, 
         prefix_min: float = 0.1, 
-        prefix_max: float = 0.25,
+        prefix_max: float = 0.3,
         lr: float = 0.001, 
     ):
         super().__init__()
@@ -609,20 +609,18 @@ if __name__ == "__main__":
         are_we_fine_tuning = is_fine_tuning()
 
         # ~~~~ set up model ~~~~~
-        model = (
-            VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt)
-                if resume_ckpt is not None
-                else VampNetTrainer()
-        )
         if resume_ckpt is not None:
-            model = VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt)
+            model = VampNetTrainer.load_from_checkpoint(checkpoint_path=resume_ckpt, prefix_min=0.05)
+            # make sure the the tag comes from the config
+            if "VampNetTrainer.prefix_tag" in args:
+                model.prefix_tag = args["VampNetTrainer.prefix_tag"]
         elif hf_ckpt is not None:
+            # make sure the the tag comes from the config
+            if "VampNetTrainer.prefix_tag" in args:
+                model.prefix_tag = args["VampNetTrainer.prefix_tag"]
             model = VampNetTrainer.from_pretrained(hf_ckpt)
         else:
             model = VampNetTrainer()
-        # make sure the the tag comes from the config
-        if "VampNetTrainer.prefix_tag" in args:
-            model.prefix_tag = args["VampNetTrainer.prefix_tag"]
 
 
         # ~~~~ set up data ~~~~

@@ -230,7 +230,7 @@ class Interface(nn.Module):
             # if sig_spl is all zeros
             if torch.all(sig_spl.wav == 0):
                 sig_spl = None
-                print(f"WARING: sig_sample is all zeros, ignoring")
+                print(f"WARNING: sig_sample is all zeros, ignoring")
             else:
                 sig_spl = sn.to_mono(sig_spl)
                 sig_spl = self.preprocess(sig_spl)
@@ -272,9 +272,6 @@ class Interface(nn.Module):
 
         # generate!
         timer.tick("generate")
-        print(f"generating with temperature {temperature} and mask temperature {mask_temperature}")
-        print(f"typical mass {typical_mass}")
-        # breakpoint()
         with torch.autocast(self.device,  dtype=torch.bfloat16):
             gcodes = self.vn.generate(
                 codes=mcodes,

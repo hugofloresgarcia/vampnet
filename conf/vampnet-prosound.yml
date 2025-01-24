@@ -5,6 +5,7 @@ $include:
 # ~~~~~~~~ model // training config ~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 VampNetTrainer.prefix_tag: "prosound-tiny"
+VampNetTrainer.mode: "stemgen"
 
 
 # the datbase config 
