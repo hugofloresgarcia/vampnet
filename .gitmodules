@@ -7,4 +7,4 @@
 	branch = main
 [submodule "scripts/rf/rectified-flow-pytorch"]
 	path = scripts/rf/rectified-flow-pytorch
-	url = https://github.com/lucidrains/rectified-flow-pytorch/
+	url = https://github.com/hugofloresgarcia/rectified-flow-pytorch/
