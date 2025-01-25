@@ -160,6 +160,28 @@ def onsets(sig: Signal, hop_length: int):
     )
     return onset_frame_idxs
 
+# ~ for rectfied flow stuff ~
+def spec_encode(sig: Signal, window_length=255):
+    sig = to_mono(sig)
+    sig = normalize(sig, -24.0)
+    spec = stft(sig, hop_length=window_length // 2, window_length=window_length)
+
+    # pick a random chunk
+    chunk_idx = np.random.randint(spec.shape[0])
+    spec = spec[chunk_idx:chunk_idx+1, ...]
+    mag, phase = torch.abs(spec), torch.angle(spec)
+    spec = torch.cat([mag, phase], dim=1)
+    return spec[0]
+
+def spec_decode(spec, window_length=255): # (shape channels, freq, time)
+    mag, phase = spec.chunk(2, dim=0)
+    spec = mag * torch.exp((torch.cos(phase) + 1j * torch.sin(phase)))
+    wav = torch.istft(
+        spec, hop_length=window_length // 2, n_fft=window_length, 
+        window=torch.hann_window(window_length).to(spec.device)
+    ).unsqueeze(0)
+    return Signal(wav, sr=22050)
+
 
 # ~ transform ~
 def median_filter_1d(x: Tensor, sizes: Tensor) -> Tensor:
