@@ -109,10 +109,10 @@ img_dataset = ImageDataset()
 
 trainer = Trainer(rectified_flow, dataset=img_dataset)
 
-trainer.load("checkpoints/v3/checkpoint.16000.pt")
+trainer.load("checkpoints/v3/checkpoint.70000.pt")
 
 data_shape =  list(img_dataset[0].shape) 
-data_shape[-1] = 4096
+data_shape[-1] = 2048
 
 sampled = trainer.model.sample(data_shape=data_shape)
 

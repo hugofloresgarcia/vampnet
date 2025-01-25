@@ -5,34 +5,49 @@ from torch import nn
 import numpy as np
 
 from rectified_flow_pytorch import RectifiedFlow, ImageDataset, Unet, Trainer
+import torchvision.transforms as T
+from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
 
 import soundmaterial as sm
 from soundmaterial.dataset import Dataset
 import vampnet.dsp.signal as sn
 import pandas as pd
 from einops import rearrange
-import torchvision.transforms as T
 
 
-def decode(spec): # (shape channels, freq, time)
+def spec_encode(sig: sn.Signal, window_length=255):
+    sig = sn.to_mono(sig)
+    sig = sn.normalize(sig, -24.0)
+    spec = sn.stft(sig, hop_length=window_length // 2, window_length=window_length)
+
+    # pick a random chunk
+    chunk_idx = np.random.randint(spec.shape[0])
+    spec = spec[chunk_idx:chunk_idx+1, ...]
+    mag, phase = torch.abs(spec), torch.angle(spec)
+    spec = torch.cat([mag, phase], dim=1)
+    return spec[0]
+
+def spec_decode(spec, window_length=255): # (shape channels, freq, time)
     mag, phase = spec.chunk(2, dim=0)
-    # mag = torch.exp(mag)
-    # mag = torch.clip(mag, max=1e2)
-    # x = torch.cos(phase)
-    # y = torch.sin(phase)
-    # recalculating phase here does not produce anything new
-    # only costs time
-    # phase = torch.atan2(y, x)
-    # spec = mag * torch.exp(phase * 1j)
-    # better directly produce the complex value 
-    # spec = mag * (x + 1j * y)
-    phase = phase * np.pi
-    spec = torch.expm1(mag) * (torch.cos(phase) + 1j * torch.sin(phase))
+    spec = mag * (torch.cos(phase) + 1j * torch.sin(phase))
     wav = torch.istft(
-        spec, hop_length=self.window_length // 2, n_fft=self.window_length, 
-        window=torch.hann_window(self.window_length).to(spec.device)
+        spec, hop_length=window_length // 2, n_fft=window_length, 
+        window=torch.hann_window(window_length).to(spec.device)
     ).unsqueeze(0)
     return sn.Signal(wav, sr=22050)
+
+
+QUERY = """
+    SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
+    FROM chunk 
+    JOIN audio_file as af ON chunk.audio_file_id = af.id 
+    JOIN dataset ON af.dataset_id = dataset.id
+    WHERE dataset.name IN ('clack')
+"""
+
+
 
 class ImageDataset:
 
@@ -49,14 +64,14 @@ class ImageDataset:
         conn = sm.connect(db_path)
 
         # find all the wav files
-        query = "SELECT * FROM audio_file JOIN dataset ON audio_file.dataset_id = dataset.id WHERE dataset.name = 'bbc-subset'"
+        query = QUERY
 
         # Create a subset of the database
         self.df = pd.read_sql_query(query, conn)
         self.df = self.df.sample(n=len(self.df))
 
         self.dataset = Dataset(
-            df=self.df, sample_rate=22050, n_samples=self.image_size * (self.window_length // 2), num_channels=1
+            df=self.df, sample_rate=22050, n_samples=self.image_size  * 2 * (self.window_length // 2), num_channels=1
         )
 
         self.transform = T.Compose([
@@ -72,91 +87,35 @@ class ImageDataset:
     def __getitem__(self, index):
         window_length = self.window_length
         sig = self.dataset[index]["sig"]
-        sig = sn.to_mono(sig)
-        sig = sn.normalize(sig, -24.0)
-        spec = sn.stft(sig, hop_length=window_length // 2, window_length=window_length)
-        # if the spec is too small, repeat it
-        # while spec.shape[-1] < self.image_size:
-        #     spec = torch.cat([spec, spec], dim=-1)
-        # spec = torch.unfold_copy(
-        #     spec, dimension=-1, size=self.image_size, step=window_length
-        # )
-        # spec = rearrange(spec, "b c f chnk t -> (b chnk) c f t")
-
-        # pick a random chunk
-        chunk_idx = np.random.randint(spec.shape[0])
-        spec = spec[chunk_idx:chunk_idx+1, ...]
-        mag, phase = torch.abs(spec), torch.angle(spec)
-        # normalize the magnitude
-        mag = torch.log1p(mag)
-        mag = (mag - mag.min()) / (mag.max() - mag.min() + 1e-6)
-
-        phase = phase / np.pi
-
-        # mag = torch.log1p(mag)
-        spec = torch.cat([mag, phase], dim=1)
-
-        # spec = self.transform(spec)
-        return spec[0]
-
-    def decode(self, spec): # (shape channels, freq, time)
-        mag, phase = spec.chunk(2, dim=0)
-        # mag = torch.exp(mag)
-        # mag = torch.clip(mag, max=1e2)
-        # x = torch.cos(phase)
-        # y = torch.sin(phase)
-        # recalculating phase here does not produce anything new
-        # only costs time
-        # phase = torch.atan2(y, x)
-        # spec = mag * torch.exp(phase * 1j)
-        # better directly produce the complex value 
-        # spec = mag * (x + 1j * y)
-        phase = phase * np.pi
-        spec = torch.expm1(mag) * (torch.cos(phase) + 1j * torch.sin(phase))
-        wav = torch.istft(
-            spec, hop_length=self.window_length // 2, n_fft=self.window_length, 
-            window=torch.hann_window(self.window_length).to(spec.device)
-        ).unsqueeze(0)
-        return sn.Signal(wav, sr=22050)
+        return spec_encode(sig, window_length)
 
 
 
 model = Unet(dim = 64, channels=2)
-
 rectified_flow = RectifiedFlow(model)
 
 img_dataset = ImageDataset()
 
-# save as an image (its a tensor)
-import torchvision.transforms as T
-from PIL import Image
-import matplotlib.pyplot as plt
-import numpy as np
-# s0 = s0.permute(1, 2, 0).detach().cpu().numpy()
-# s0 = np.clip(s0, 0, 1)
-# s0 = (s0 * 255).astype(np.uint8)
-# img = Image.fromarray(s0)
-# img.save('test.png')
-plt.imshow(img_dataset[2][0], origin='lower', aspect='auto')
+plt.imshow(img_dataset[3][0], origin='lower', aspect='auto')
 plt.savefig('test.png')
-plt.imshow(img_dataset[11][0], origin='lower', aspect='auto')
+plt.imshow(img_dataset[55][0], origin='lower', aspect='auto')
 plt.savefig('test2.png')
 
-sig = img_dataset.decode(img_dataset[2])
+sig = spec_decode(img_dataset[3], img_dataset.window_length)
 sn.write(sig, 'test.wav')
-sig = img_dataset.decode(img_dataset[11])
+sig = spec_decode(img_dataset[55], img_dataset.window_length)
 sn.write(sig, 'test2.wav')
 
 trainer = Trainer(
     rectified_flow,
-    batch_size=32,
+    batch_size=16,
     save_results_every=100,
     dataset = img_dataset,
     num_train_steps = 70_000,
-    checkpoint_every=5000,
-    accelerate_kwargs=dict(log_with="tensorboard", project_dir="./checkpoints/v7"),
-    checkpoints_folder="./checkpoints/v7",
-    results_folder = './results/v7'   # samples will be saved periodically to this folder
+    checkpoint_every=2000,
+    accelerate_kwargs=dict(log_with="tensorboard", project_dir="./checkpoints/v8-clack"),
+    checkpoints_folder="./checkpoints/v8-clack",
+    results_folder = './results/v8-clack'   # samples will be saved periodically to this folder
 )
 
 trainer()
