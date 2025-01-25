@@ -5,6 +5,3 @@
 	path = soundmaterial
 	url = https://github.com/hugofloresgarcia/soundmaterial
 	branch = main
-[submodule "scripts/rf/rectified-flow-pytorch"]
-	path = scripts/rf/rectified-flow-pytorch
-	url = https://github.com/hugofloresgarcia/rectified-flow-pytorch/
