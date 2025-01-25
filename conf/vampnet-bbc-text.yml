@@ -5,6 +5,15 @@ $include:
 # ~~~~~~~~ model // training config ~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 VampNetTrainer.prefix_tag: "bbcsub"
+VampNetTrainer.text_cond: "clap"
+VampNetTrainer.mode: "stemgen"
+
+VampNetTrainer.embedding_dim: 792
+VampNetTrainer.n_layers: 12
+VampNetTrainer.n_heads: 12
+
+batch_size: 16
+accumulate_grad_batches: 2
 
 
 # the datbase config 

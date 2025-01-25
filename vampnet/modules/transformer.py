@@ -185,7 +185,8 @@ class VampNet(L.LightningModule):
         dropout: float = 0.0, 
         mode: str = "vampnet", 
         ctrl_dims: Optional[dict[str, int]] = None, 
-        cfg_dropout_prob: float = 0.2
+        cfg_dropout_prob: float = 0.2, 
+        cond_dim: int = 0,
     ):
         super().__init__()
         self.n_heads = n_heads
@@ -195,6 +196,7 @@ class VampNet(L.LightningModule):
         self.embedding_dim = embedding_dim
         self.vocab_size = vocab_size
         self.flash_attn = flash_attn
+        self.cond_dim = cond_dim
 
         self.mode = mode
         assert self.mode in ["vampnet", "stemgen"], "mode must be vampnet or stemgen"
@@ -228,14 +230,19 @@ class VampNet(L.LightningModule):
                 heads=self.n_heads,
                 attn_flash=self.flash_attn,
                 ff_glu=True, 
-                use_rmsnorm=True, 
+                use_rmsnorm=not (self.cond_dim > 0),
                 # attn_num_mem_kv = 16,
                 rotary_pos_emb=True, # v100 
                 # rotary_xpos=True, # new in v101
+                use_adaptive_layernorm=self.cond_dim > 0,
+                dim_condition=self.cond_dim if self.cond_dim > 0 else None,
             ),
             use_abs_pos_emb=False, 
             emb_dropout=dropout,
         )
+
+        if self.cond_dim > 0:
+            self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
 
         # Add final conv layer
         self.n_predict_codebooks = n_codebooks - n_conditioning_codebooks
@@ -279,6 +286,7 @@ class VampNet(L.LightningModule):
     def forward(self, x, 
             ctrls: dict[str, Tensor],
             ctrl_masks: dict[str, Tensor], 
+            cond: Optional[Tensor] = None,
             return_activations: bool = False
         ):
         # # input should be shape (batch, codebook, seq)
@@ -299,10 +307,15 @@ class VampNet(L.LightningModule):
         x = rearrange(x, "b n d -> b d n")
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :, :1].squeeze(2)
 
+        if self.cond_dim > 0:
+            assert cond.ndim == 3, "conditioning should be 2d (batch, 1, dim)"
+            cond = self.cfg_dropout(cond)
+
         assert return_activations == False, "return_activations not supported sry :( would happily implement if you need it"
         out = self.lm(
             x, return_mems=False, 
             mask=x_mask, 
+            condition=cond
         )
 
         out = rearrange(out, "b n d -> b d n")
@@ -327,6 +340,7 @@ class VampNet(L.LightningModule):
         codes: torch.Tensor,
         ctrls: dict[str, Tensor] = None,
         ctrl_masks: dict[str, Tensor] = None,
+        cond: Optional[Tensor] = None,
         cfg_scale: float = 3.0,
         sampling_steps: List[int] = [16, 8, 8, 2, 2, 2, 2, 1, 1],
         temperature: float = 1.0,
@@ -355,6 +369,8 @@ class VampNet(L.LightningModule):
         if ctrls is not None:
             ctrls = {k: tocfg(v) for k, v in ctrls.items()}
             ctrl_masks = {k: tocfgblank(v) for k, v in ctrl_masks.items()}
+        if cond is not None:
+            cond = tocfg(cond)
 
         # get the mask from the z
         z = codes
@@ -420,7 +436,8 @@ class VampNet(L.LightningModule):
                 logits = self.forward(
                     z_masked, 
                     ctrls=ctrls, 
-                    ctrl_masks=ctrl_masks
+                    ctrl_masks=ctrl_masks, 
+                    cond=cond
                 )  # b, prob, seq
                 logits = fromcfg(logits)
                 logits = rearrange(logits, "b p t -> b t p")
@@ -589,6 +606,7 @@ class VampNet(L.LightningModule):
         codes: Optional[torch.Tensor] = None,
         ctrls: dict[str, Tensor] = None,
         ctrl_masks: dict[str, Tensor] = None,
+        cond: Optional[Tensor] = None,
         cfg_scale: float = 3.0,
         sampling_steps: int = 12,
         temperature: float = 1.0,
@@ -622,6 +640,8 @@ class VampNet(L.LightningModule):
         if ctrls is not None:
             ctrls = {k: tocfg(v) for k, v in ctrls.items()}
             ctrl_masks = {k: tocfgblank(v) for k, v in ctrl_masks.items()}
+        if cond is not None:
+            cond = tocfg(cond)
         
         # apologies for the confusing interchangeability of z and codes
         z = codes
@@ -656,7 +676,8 @@ class VampNet(L.LightningModule):
             logits = self.forward(
                 z_masked, 
                 ctrls=ctrls, 
-                ctrl_masks=ctrl_masks
+                ctrl_masks=ctrl_masks, 
+                cond=cond
             )  # b, prob, seq
             logits = fromcfg(logits)
 
