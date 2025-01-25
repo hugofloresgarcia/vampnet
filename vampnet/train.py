@@ -29,6 +29,7 @@ from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten, flip_coin
 from vampnet import mask as pmask
 from vampnet.dac.model.dac import DAC
+from vampnet.text import CLAPTextConditioner
 import vampnet.dsp.signal as sn
 
 
@@ -59,7 +60,8 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         ctrl_keys: tuple[str] = ("rms", ),
         n_heads: int = 12, 
         n_layers: int = 12, 
-        embedding_dim: int = 1026,
+        embedding_dim: int = 1026, 
+        text_cond: Optional[str] = None, # one of "clap" or None
         # ~~~ training // behavior ~~~
         outpaint_prob: float = 0.0, 
         prefix_min: float = 0.1, 
@@ -84,6 +86,15 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             sample_rate=self.codec.sample_rate, 
         )
 
+        self.text_cond = text_cond
+        if text_cond is not None:
+            assert text_cond == "clap", f"unknown text condition method {text_cond}"
+            self.text_conditioner = CLAPTextConditioner()
+            self.text_conditioner.eval()
+            self.text_conditioner.requires_grad_(False)
+        else:
+            self.text_conditioner = None
+
         # the vampnet
         self.model = VampNet(
             n_heads=n_heads,
@@ -93,6 +104,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             mode=mode,
             ctrl_dims=self.controller.ctrl_dims, 
             vocab_size=self.codec.quantizer.quantizers[0].codebook_size,
+            cond_dim=self.text_conditioner.dim if text_cond is not None else 0,
         )
 
         # to speed up the first steps of training, 
@@ -111,6 +123,27 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         # trainer things
         self.criterion = nn.CrossEntropyLoss()
         self.rng = torch.quasirandom.SobolEngine(1, scramble=True, seed=1)
+
+    # this is a hacky workaround because we only need the interface to 
+    # use it's helper methods, but we don't want to save it to the checkpoint
+    # or have it be part of the model's state dict
+    @property
+    def eiface(self):
+        from vampnet.interface import Interface
+        return Interface(
+            codec=self.codec,
+            vn=self.model,
+            controller=self.controller,
+            text_conditioner=self.text_conditioner, 
+            compile=False, 
+            infer=False
+        )
+
+    def get_cond(self, text):
+        return self.eiface.get_cond(text)
+    
+    def decode(self, z):
+        return self.eiface.decode(z)
 
     @property
     def tag(self):
@@ -176,11 +209,12 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
     def training_step(self, batch, batch_idx):
         self.model.train()
         batch = sn.prepare_batch(batch, self.device)
-        sig = batch["sig"]
+        sig = batch["sig"]        
         sig.wav = sn.cut_to_hop_length(sig.wav, self.codec.hop_length)
         n_batch = sig.wav.shape[0]
 
         ctrls, ctrl_masks = self.get_controls(sig)
+        cond = self.get_cond(batch["text"])
 
         output = {}
         vn = self.model
@@ -192,7 +226,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
         
-        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks, cond=cond)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -224,6 +258,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         n_batch = sig.wav.shape[0]
 
         ctrls, ctrl_masks = self.get_controls(sig)
+        cond = self.get_cond(batch["text"])
 
         vn = self.model
         z = self.codec.encode(sig.wav, sig.sr)["codes"]
@@ -231,7 +266,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         z_mask, mask, ii, r, ctrl_masks = self.generate_z_mask(z, vn, n_batch, ctrl_masks)
 
-        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
+        z_hat = self.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks, cond=cond)
 
         target = codebook_flatten(
             z[:, vn.n_conditioning_codebooks :, :],
@@ -293,6 +328,22 @@ def build_transform():
         return sig
     return transform
 
+def build_text_transform():
+    def transform(text):
+        # separate by commas, drop some words
+        # text = text.split(",")
+        # text = [t for t in text if random.random() > 0.2]
+        # text = ",".join(text)
+
+        # separate by commas or spaces, drop some words
+        text = text.replace(",", " ")
+        text = text.split(" ")
+        text = [t for t in text if random.random() > 0.2]
+        text = " ".join(text)
+
+        return text
+
+    return transform
 
 class VampNetDataModule(L.LightningDataModule):
 
@@ -304,7 +355,8 @@ class VampNetDataModule(L.LightningDataModule):
         use_chunk_table: bool = True,
         batch_size: int = 16,
         num_workers: int = 12, 
-        augment: bool = False
+        augment: bool = False, 
+        text_key: str = None,
     ):
         super().__init__()
         self.sample_rate = sample_rate
@@ -314,11 +366,13 @@ class VampNetDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.n_samples = n_samples
         self.use_chunk_table = use_chunk_table
+        self.text_key = text_key
 
         self.train_data, self.val_data = None, None
 
-        self.train_tfm = build_transform() if augment else None
-        self.val_tfm = build_transform() if augment else None
+        self.train_tfm = build_transform() 
+        self.val_tfm = build_transform() 
+        self.text_tfm = build_text_transform() 
 
     def setup(self, stage: Optional[str] = None):
         sample_rate = self.sample_rate
@@ -336,12 +390,12 @@ class VampNetDataModule(L.LightningDataModule):
         self.train_data = Dataset(
             tdf, sample_rate=sample_rate, n_samples=n_samples,
             transform=self.train_tfm, use_chunk_table=self.use_chunk_table, 
-            seed=SEED
+            seed=SEED, text_key=self.text_key, text_transform=self.text_tfm
         )
         self.val_data = Dataset(
             vdf, sample_rate=sample_rate, n_samples=n_samples,
             transform=self.val_tfm, use_chunk_table=self.use_chunk_table,
-            max_examples=2000, 
+            max_examples=2000,  text_key=self.text_key, text_transform=self.text_tfm,
             seed=SEED
         )
 
@@ -440,10 +494,14 @@ class AudioSampleLoggingCallback(Callback):
     def _save_onesteps(self, module):
         rs = torch.linspace(0, 1, self.num_samples+1)[1:]
         for i in range(self.num_samples):
-            sig = self.dataset[i]["sig"].to(module.device)
+            item = self.dataset[i]
+            sig = item["sig"].to(module.device)
+            text = item["text"]
+
             sig.wav = sn.cut_to_hop_length(sig.wav, module.codec.hop_length)
 
             ctrls, ctrl_masks = module.get_controls(sig)
+            cond = module.get_cond(text)
 
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : module.model.n_codebooks, :]
@@ -455,19 +513,18 @@ class AudioSampleLoggingCallback(Callback):
             mask = pmask.codebook_unmask(mask, module.model.n_conditioning_codebooks)
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
+            z_hat = module.model(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks, cond=cond)
             # argmax sample
             z_hat = z_hat.argmax(dim=-2)
             z_hat = codebook_unflatten(z_hat, module.model.n_codebooks)
             # replace masked with original
             z_hat = torch.where(~mask.bool(), z, z_hat)
 
-            outwav = module.codec.decode(
-                module.codec.quantizer.from_codes(z_hat)[0]
-            )
-            recons = module.codec.decode(
-                module.codec.quantizer.from_codes(z)[0]
-            )
+            outwav = module.decode(z_hat)
+            recons = module.decode(z)
+
+            trainer.logger.experiment.add_text(f"text/{i}", text, global_step=trainer.global_step)
+
             trainer.logger.experiment.add_audio(
                 f"orig/{i}",
                 sig.wav[0][0],
@@ -492,10 +549,14 @@ class AudioSampleLoggingCallback(Callback):
     @torch.inference_mode()
     def _save_generations(self, module):
         for i in range(self.num_samples):
-            sig = self.dataset[i]["sig"].to(module.device)
+            item = self.dataset[i]
+            sig = item["sig"].to(module.device)
+            text = item["text"]
+
             sig.wav = sn.cut_to_hop_length(sig.wav, module.codec.hop_length)
 
             ctrls, ctrl_masks = module.get_controls(sig)
+            cond = module.get_cond(text)
 
             z = module.codec.encode(sig.wav, sig.sr)["codes"]
             z = z[:, : module.model.n_codebooks, :]
@@ -507,11 +568,15 @@ class AudioSampleLoggingCallback(Callback):
             
             z_mask = pmask.apply_mask(z, mask, module.model.mask_token)
 
-            z_hat = module.model.generate(z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks)
-
-            outwav = module.codec.decode(
-                module.codec.quantizer.from_codes(z_hat)[0]
+            z_hat = module.model.generate(
+                z_mask, 
+                ctrls=ctrls, 
+                ctrl_masks=ctrl_masks, 
+                cond=cond
             )
+
+            outwav = module.decode(z_hat)
+            trainer.logger.experiment.add_text(f"text/{i}", text, global_step=trainer.global_step)
             trainer.logger.experiment.add_audio(
                 f"generated/{i}",
                 outwav[0][0],
@@ -523,10 +588,13 @@ class AudioSampleLoggingCallback(Callback):
     def _save_periodic_prompt(self, module):
         periods = [3, 5, 7, 11, 13, 21]
         for i in range(self.num_samples):
-            sig = self.dataset[i]["sig"].to(module.device)
+            item = self.dataset[i]
+            sig = item["sig"].to(module.device)
+            text = item["text"]
             sig.wav = sn.cut_to_hop_length(sig.wav, module.codec.hop_length)
 
             ctrls, ctrl_masks = module.get_controls(sig)
+            cond = module.get_cond(text)
 
             period = periods[i % len(periods)]
 
@@ -539,12 +607,12 @@ class AudioSampleLoggingCallback(Callback):
             z_hat = module.model.generate(
                 z_mask, 
                 ctrls=ctrls, 
-                ctrl_masks=ctrl_masks
+                ctrl_masks=ctrl_masks, 
+                cond=cond
             )
 
-            outwav = module.codec.decode(
-                module.codec.quantizer.from_codes(z_hat)[0]
-            )
+            outwav = module.decode(z_hat)
+            trainer.logger.experiment.add_text(f"text/{i}", text, global_step=trainer.global_step)
             trainer.logger.experiment.add_audio(
                 f"periodic/{i}-p={period}",
                 outwav[0][0],
@@ -565,7 +633,7 @@ class AudioSampleLoggingCallback(Callback):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def get_model_tag(model):
-    return model.prefix_tag + f"{'tria-' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}"
+    return model.prefix_tag + f"{'tria-' if model.outpaint_prob > 0.1 else ''}d{model.model.embedding_dim}-l{model.model.n_layers}-h{model.model.n_heads}-mode-{model.hparams.mode}_{'-'.join(model.hparams.ctrl_keys)}{f'-{model.text_cond}' if model.text_cond is not None else ''}"
 
 
 @argbind.bind(without_prefix=True)
@@ -586,17 +654,24 @@ def get_checkpoint_path(resume_ckpt: str = None, hf_ckpt: str = None):
 def is_fine_tuning(fine_tune: bool = False):
     return fine_tune
 
+@argbind.bind(without_prefix=True)
+def configure_trainer(
+        accumulate_grad_batches: int = 1
+    ):
+    return accumulate_grad_batches
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~ ~~~~ the recipe ~~~~ ~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 if __name__ == "__main__":
-    args = argbind.parse_args()
-    args["args.debug"] = int(os.getenv("LOCAL_RANK", 0)) == 0
 
     VampNetTrainer = argbind.bind(VampNetTrainer)
-    VampNetDataModule = argbind.bind(VampNetDataModule)
+    VampNetDataModule = argbind.bind(VampNetDataModule, without_prefix=True)
+
+    args = argbind.parse_args()
+    args["args.debug"] = int(os.getenv("LOCAL_RANK", 0)) == 0
 
     with argbind.scope(args):
         # ~~~~ resume from checkpoint? ~~~~
@@ -624,7 +699,10 @@ if __name__ == "__main__":
 
 
         # ~~~~ set up data ~~~~
-        dm = VampNetDataModule(sample_rate=model.codec.sample_rate)
+        dm = VampNetDataModule(
+            sample_rate=model.codec.sample_rate, 
+            text_key="path" if model.text_cond is not None else None
+        )
         dm.prepare_data()
         dm.setup()
         train_dataloader = dm.train_dataloader()
@@ -649,6 +727,8 @@ if __name__ == "__main__":
         n_gpus = len(cuda_visible_devices.split(","))
         print(f"using {n_gpus} gpus")
 
+        accumulate_grad_batches = configure_trainer()
+        print(f"accumulating gradients over {accumulate_grad_batches} batches")
         trainer = L.Trainer(
             devices=n_gpus,
             default_root_dir=f"runs/{get_model_tag(model)}",
@@ -656,11 +736,12 @@ if __name__ == "__main__":
             limit_val_batches=20,
             gradient_clip_val=1.0,
             # val_check_interval=100,
-            val_check_interval=min(1000, len(dm.train_data) // dm.batch_size),
+            val_check_interval=min(1000, len(dm.train_data) // (dm.batch_size*n_gpus)),
             callbacks=callbacks,
             precision="bf16-mixed", 
             strategy="ddp_find_unused_parameters_true", 
-            detect_anomaly=True
+            detect_anomaly=True, 
+            accumulate_grad_batches=3,
         )
 
         dm.train_data.seed = SEED + trainer.local_rank

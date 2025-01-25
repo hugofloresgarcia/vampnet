@@ -21,6 +21,7 @@ from vampnet.mask import *
 from vampnet.dsp.signal import cut_to_hop_length, write, trim_to_s
 from vampnet.dac.model.dac import DAC
 from vampnet.control import Sketch2SoundController
+from vampnet.text import CLAPTextConditioner
 from vampnet.util import first_dict_value, first_dict_key
 
 
@@ -31,24 +32,38 @@ class Interface(nn.Module):
         codec: DAC, 
         vn: VampNet,
         controller: Optional[Sketch2SoundController] = None,
-        device="cuda" if torch.cuda.is_available() else "cpu"
+        text_conditioner: Optional[CLAPTextConditioner] = None,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        compile=True, 
+        infer=True
     ):
         super().__init__()
-        codec.eval()
-        vn.eval()
+        if infer:
+            codec.eval()
+            vn.eval()
+
         self.sample_rate = codec.sample_rate
         self.hop_length = codec.hop_length
 
         self.codec = codec
         self.vn = vn
         self.controller = controller
+        self.text_conditioner = text_conditioner
 
-        self.codec.compile()
-        self.vn.compile()
+        if compile:
+            self.codec.compile()
+            self.vn.compile()
 
         # compile
         self.device = device
-        print(f"initialized interface with device {device}")
+        # print(f"initialized interface with device {device}")
+
+    def get_cond(self, text: list[str] | str):
+        if self.text_conditioner is not None:
+            cond = self.text_conditioner(text)
+        else:
+            cond = None
+        return cond
 
     def to(self, device):
         self.device = device
