@@ -199,3 +199,8 @@ mask.txt
 
 sm.db
 sm.db-journal
+
+results/
+checkpoints/
+test.wav
+sample.wav
