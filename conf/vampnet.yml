@@ -26,7 +26,7 @@ VampNetTrainer.prefix_min: 0.05 # min prefix size
 VampNetTrainer.prefix_max: 0.3 # max prefix size
 
 # control signals to use as conditioning. 
-VampNetTrainer.ctrl_keys: ['rmsq16',]
+VampNetTrainer.ctrl_keys: ['rmsq16-median',]
 
 # learning rate. 
 VampNetTrainer.lr: 0.001
