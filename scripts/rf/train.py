@@ -17,34 +17,14 @@ import pandas as pd
 from einops import rearrange
 
 
-def spec_encode(sig: sn.Signal, window_length=255):
-    sig = sn.to_mono(sig)
-    sig = sn.normalize(sig, -24.0)
-    spec = sn.stft(sig, hop_length=window_length // 2, window_length=window_length)
+DATASET = "alligator"
 
-    # pick a random chunk
-    chunk_idx = np.random.randint(spec.shape[0])
-    spec = spec[chunk_idx:chunk_idx+1, ...]
-    mag, phase = torch.abs(spec), torch.angle(spec)
-    spec = torch.cat([mag, phase], dim=1)
-    return spec[0]
-
-def spec_decode(spec, window_length=255): # (shape channels, freq, time)
-    mag, phase = spec.chunk(2, dim=0)
-    spec = mag * (torch.cos(phase) + 1j * torch.sin(phase))
-    wav = torch.istft(
-        spec, hop_length=window_length // 2, n_fft=window_length, 
-        window=torch.hann_window(window_length).to(spec.device)
-    ).unsqueeze(0)
-    return sn.Signal(wav, sr=22050)
-
-
-QUERY = """
+QUERY = f"""
     SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
     FROM chunk 
     JOIN audio_file as af ON chunk.audio_file_id = af.id 
     JOIN dataset ON af.dataset_id = dataset.id
-    WHERE dataset.name IN ('clack')
+    WHERE dataset.name IN ('{DATASET}')
 """
 
 
@@ -71,7 +51,8 @@ class ImageDataset:
         self.df = self.df.sample(n=len(self.df))
 
         self.dataset = Dataset(
-            df=self.df, sample_rate=22050, n_samples=self.image_size  * 2 * (self.window_length // 2), num_channels=1
+            df=self.df, sample_rate=22050, n_samples=self.image_size  * 2 * (self.window_length // 2), num_channels=1,
+            use_chunk_table=True
         )
 
         self.transform = T.Compose([
@@ -82,12 +63,13 @@ class ImageDataset:
         ])
 
     def __len__(self):
-        return len(self.df)
+        return len(self.dataset)
 
     def __getitem__(self, index):
         window_length = self.window_length
         sig = self.dataset[index]["sig"]
-        return spec_encode(sig, window_length)
+        spec =  sn.spec_encode(sig, window_length)
+        return spec
 
 
 
@@ -101,21 +83,32 @@ plt.savefig('test.png')
 plt.imshow(img_dataset[55][0], origin='lower', aspect='auto')
 plt.savefig('test2.png')
 
-sig = spec_decode(img_dataset[3], img_dataset.window_length)
+sig = sn.spec_decode(img_dataset[3], img_dataset.window_length)
 sn.write(sig, 'test.wav')
-sig = spec_decode(img_dataset[55], img_dataset.window_length)
+sig = sn.spec_decode(img_dataset[55], img_dataset.window_length)
 sn.write(sig, 'test2.wav')
 
+# save the 100 first audio files
+from pathlib import Path
+Path("audio_files").mkdir(exist_ok=True)
+for i in range(100):
+    spec = img_dataset[i]
+    sig = sn.spec_decode(spec, img_dataset.window_length)
+    sn.write(sig, f"audio_files/{i}.wav")
+
+version = f"{DATASET}_v9"
+save_dir = Path(f"checkpoints/{version}")
 trainer = Trainer(
     rectified_flow,
     batch_size=16,
-    save_results_every=100,
+    save_results_every=1000,
     dataset = img_dataset,
     num_train_steps = 70_000,
     checkpoint_every=2000,
-    accelerate_kwargs=dict(log_with="tensorboard", project_dir="./checkpoints/v8-clack"),
-    checkpoints_folder="./checkpoints/v8-clack",
-    results_folder = './results/v8-clack'   # samples will be saved periodically to this folder
+    accelerate_kwargs=dict(log_with="tensorboard", project_dir=str(save_dir)),
+    checkpoints_folder=str(save_dir),
+    results_folder =str(save_dir/"results")   # samples will be saved periodically to this folder
 )
 
-trainer()
+if __name__ == "__main__":
+    trainer()

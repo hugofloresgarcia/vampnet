@@ -79,16 +79,16 @@ def codebook_flatten(tokens: torch.Tensor):
     """ 
     flatten a sequence of tokens from (batch, codebook, time) to (batch, codebook * time)
     """
-    # return rearrange(tokens, "b c t -> b (t c)")/
-    return tokens.permute(0, 2, 1).flatten(1, 2)
+    return rearrange(tokens, "b c t -> b (t c)")
+    # return tokens.permute(0, 2, 1).flatten(1, 2)
 
 def codebook_unflatten(flat_tokens: torch.Tensor, n_c: int = None):
     """
     unflatten a sequence of tokens from (batch, codebook * time) to (batch, codebook, time)
     """
-    # tokens = rearrange(flat_tokens, "b (t c) -> b c t", c=n_c)
-    # return tokens
-    return flat_tokens.view(flat_tokens.shape[0], -1, n_c).permute(0, 2, 1)
+    tokens = rearrange(flat_tokens, "b (t c) -> b c t", c=n_c)
+    return tokens
+    # return flat_tokens.view(flat_tokens.shape[0], -1, n_c).permute(0, 2, 1)
 
 class Timer:
     

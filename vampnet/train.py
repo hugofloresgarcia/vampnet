@@ -40,7 +40,7 @@ torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
 
 IGNORE_INDEX = -100
 CODEC_CKPT = "~/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
-SEED = 1
+SEED = 1234109123
 
 DEFAULT_QUERY = """
     SELECT af.path, chunk.offset, chunk.duration, af.duration as total_duration, dataset.name 
@@ -77,6 +77,10 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         # the codec
         self.codec = DAC.load(codec_ckpt, map_location="cpu")
         self.codec = torch.compile(self.codec)
+
+        print(f"loaded codec from {codec_ckpt}")
+        print(f"codec hop length: {self.codec.hop_length}")
+        print(f"number of codebooks: {self.codec.quantizer.n_codebooks}")
 
         # the controller:
         ctrl_keys = ctrl_keys if ctrl_keys is not None else []
@@ -151,7 +155,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.hparams.lr)
-        scheduler = vampnet.scheduler.NoamScheduler(optimizer)
+        scheduler = vampnet.scheduler.NoamScheduler(optimizer, warmup=2000)
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
     def on_before_optimizer_step(self, optimizer):
@@ -247,6 +251,57 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
 
         self.log("loss/train", output["loss"], on_step=True, prog_bar=True, sync_dist=True)
 
+
+        # # generate some samples, save to folder
+        # with torch.inference_mode():
+        #     # save the input sig, generated audio, 
+        #     # and the mask
+        #     z_hat = z_hat.argmax(dim=-2)
+        #     z_hat = codebook_unflatten(z_hat, vn.n_codebooks)
+        #     z_hat = torch.where(~mask.bool(), z, z_hat)
+        #     outsig = sn.Signal(self.decode(z_hat).float(), sr=sig.sr)
+        #     zmaskedsig = sn.Signal(
+        #         self.decode(torch.where(z_mask == vn.mask_token, 0, z_mask)).float(), sr=sig.sr
+        #     )
+        #     outz = sn.Signal(self.decode(z).float(), sr=sig.sr)
+        #     sig.wav = sig.wav.to("cpu")
+        #     outsig.to("cpu")
+        #     mask = mask.to("cpu")
+
+        #     outpath = Path("training_samples/")
+        #     outpath.mkdir(exist_ok=True)
+        #     z = z.detach().cpu()
+        #     mask = mask.detach().cpu()
+        #     self.eiface.visualize(
+        #         sig=sig, 
+        #         codes=z, 
+        #         mask=mask, 
+        #         ctrls=ctrls,
+        #         ctrl_masks=ctrl_masks,
+        #         out_dir=outpath/f"step_{self.global_step}-{batch_idx}"
+        #     )
+        #     # save the r matrix as a text file
+        #     with open(outpath/f"step_{self.global_step}-{batch_idx}/r.txt", "w") as f:
+        #         f.write(str(r.detach().cpu().numpy()))
+        #     # save an imshow of each mask in the batch
+        #     # for i in range(mask.shape[0]):
+        #     #     import matplotlib.pyplot as plt 
+        #     #     plt.imshow(mask[i].detach().cpu().numpy())
+        #     #     plt.savefig(outpath/f"step_{self.global_step}-{batch_idx}/mask_{i}.png")
+
+        #     # generate from the model, why the hell not
+        #     # generated_codes = self.model.generate(
+        #     #     z_mask, ctrls=ctrls, ctrl_masks=ctrl_masks, cond=cond
+        #     # )
+        #     # save the loss value in txt
+        #     with open(outpath/f"step_{self.global_step}-{batch_idx}/loss.txt", "w") as f:
+        #         f.write(str(output["loss"].detach().cpu().numpy()))
+
+        #     sn.write(sig, outpath/f"step_{self.global_step}-{batch_idx}/a.wav")
+        #     sn.write(outsig, outpath/f"step_{self.global_step}-{batch_idx}/_1step.wav")
+        #     sn.write(zmaskedsig, outpath/f"step_{self.global_step}-{batch_idx}/_masked.wav")
+        #     sn.write(outz, outpath/f"step_{self.global_step}-{batch_idx}/_z.wav")
+
         return output["loss"]
 
     def validation_step(self, batch, batch_idx):
@@ -294,9 +349,42 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             target=target,
             flat_mask=flat_mask,
             dict_to_update=output,
+            n_codebooks=vn.n_codebooks,
         )
 
         self.log_dict(output, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        # # generate some samples, save to folder
+        # with torch.inference_mode():
+        #     # save the input sig, generated audio, 
+        #     # and the mask
+        #     z_hat = z_hat.argmax(dim=-2)
+        #     z_hat = codebook_unflatten(z_hat, vn.n_codebooks)
+        #     outsig = sn.Signal(self.decode(z_hat).float(), sr=sig.sr)
+        #     zmaskedsig = sn.Signal(
+        #         self.decode(torch.where(z_mask == vn.mask_token, 0, z_mask)).float(), sr=sig.sr
+        #     )
+        #     outz = sn.Signal(self.decode(z).float(), sr=sig.sr)
+        #     sig.wav = sig.wav.to("cpu")
+        #     outsig.to("cpu")
+        #     mask = mask.to("cpu")
+
+        #     outpath = Path("validation/")
+        #     outpath.mkdir(exist_ok=True)
+        #     z = z.detach().cpu()
+        #     mask = mask.detach().cpu()
+        #     self.eiface.visualize(
+        #         sig=sig, 
+        #         codes=z, 
+        #         mask=mask, 
+        #         ctrls=ctrls,
+        #         ctrl_masks=ctrl_masks,
+        #         out_dir=outpath/f"step_{self.global_step}-{batch_idx}"
+        #     )
+        #     sn.write(sig, outpath/f"step_{self.global_step}-{batch_idx}/a.wav")
+        #     sn.write(outsig, outpath/f"step_{self.global_step}-{batch_idx}/_1step.wav")
+        #     sn.write(zmaskedsig, outpath/f"step_{self.global_step}-{batch_idx}/_masked.wav")
+        #     sn.write(outz, outpath/f"step_{self.global_step}-{batch_idx}/_z.wav")
         
         return output
 
@@ -452,7 +540,7 @@ def accuracy(
 
     return acc
 
-def log_accuracy_metrics(z_hat, r, target, flat_mask, dict_to_update):
+def log_accuracy_metrics(z_hat, r, target, flat_mask, dict_to_update, n_codebooks):
     for r_range in [(0, 0.5), (0.5, 1.0)]:
         unmasked_target = target.masked_fill(flat_mask.bool(), IGNORE_INDEX)
         masked_target = target.masked_fill(~flat_mask.bool(), IGNORE_INDEX)
@@ -482,6 +570,47 @@ def log_accuracy_metrics(z_hat, r, target, flat_mask, dict_to_update):
                 ignore_index=IGNORE_INDEX,
                 top_k=topk,
             )
+
+    # # now do it per codebook
+    # # unflatte the target and z_hat
+    # target = rearrange(target, "b (t c) -> b c t", c=n_codebooks)
+    # z_hat = rearrange(z_hat, "b p (t c) -> b c p t", c=n_codebooks)
+    # flat_mask = rearrange(flat_mask, "b (t c) -> b c t", c=n_codebooks)
+
+    # for i in range(n_codebooks):
+    #     _target = target[:, i, :]
+    #     _z_hat = z_hat[:, i, :]
+    #     _flat_mask = flat_mask[:, i, :]
+    #     for r_range in [(0, 0.5), (0.5, 1.0)]:
+    #         unmasked_target = _target.masked_fill(_flat_mask.bool(), IGNORE_INDEX)
+    #         masked_target = _target.masked_fill(~_flat_mask.bool(), IGNORE_INDEX)
+
+    #         assert _target.shape[0] == r.shape[0]
+    #         # grab the indices of the r values that are in the range
+    #         r_idx = (r >= r_range[0]) & (r < r_range[1])
+
+    #         # grab the target and z_hat values that are in the range
+    #         r_unmasked_target = unmasked_target[r_idx]
+    #         r_masked_target = masked_target[r_idx]
+    #         r_z_hat = _z_hat[r_idx]
+
+    #         for topk in (1, 25):
+    #             s, e = r_range
+    #             tag = f"accuracy-{s}-{e}/top{topk}/codebook-{i}"
+
+    #             dict_to_update[f"{tag}/unmasked"] = accuracy(
+    #                 preds=r_z_hat,
+    #                 target=r_unmasked_target,
+    #                 ignore_index=IGNORE_INDEX,
+    #                 top_k=topk,
+    #             )
+    #             dict_to_update[f"{tag}/masked"] = accuracy(
+    #                 preds=r_z_hat,
+    #                 target=r_masked_target,
+    #                 ignore_index=IGNORE_INDEX,
+    #                 top_k=topk,
+    #             )
+
 
 class AudioSampleLoggingCallback(Callback):
 
@@ -520,8 +649,19 @@ class AudioSampleLoggingCallback(Callback):
             # replace masked with original
             z_hat = torch.where(~mask.bool(), z, z_hat)
 
+            # replace the masked tokens with a fixed token
+            z_mask = torch.where(mask.bool(), 0, z_mask)
+            zmaskaudio = module.decode(z_mask)
             outwav = module.decode(z_hat)
             recons = module.decode(z)
+            
+            #log the total number of tokens that were masked
+            n_masked = mask.sum()
+            n_total = mask.numel()
+            mask_ratio = n_masked / n_total
+            trainer.logger.experiment.add_scalar(
+                "masked_tokens_ratio", mask_ratio, global_step=trainer.global_step
+            )
 
             trainer.logger.experiment.add_text(f"text/{i}", text, global_step=trainer.global_step)
 
@@ -545,6 +685,15 @@ class AudioSampleLoggingCallback(Callback):
                 global_step=trainer.global_step,
                 sample_rate=sig.sr,
             )
+
+            trainer.logger.experiment.add_audio(
+                f"masked/{i}-r={r[0]:.2f}",
+                zmaskaudio[0][0],
+                global_step=trainer.global_step,
+                sample_rate=sig.sr,
+            )
+
+            
 
     @torch.inference_mode()
     def _save_generations(self, module):
@@ -576,6 +725,7 @@ class AudioSampleLoggingCallback(Callback):
             )
 
             outwav = module.decode(z_hat)
+        
             trainer.logger.experiment.add_text(f"text/{i}", text, global_step=trainer.global_step)
             trainer.logger.experiment.add_audio(
                 f"generated/{i}",
@@ -729,6 +879,7 @@ if __name__ == "__main__":
 
         accumulate_grad_batches = configure_trainer()
         print(f"accumulating gradients over {accumulate_grad_batches} batches")
+        num_batches_in_train_data = len(dm.train_data) // (dm.batch_size * n_gpus)
         trainer = L.Trainer(
             devices=n_gpus,
             default_root_dir=f"runs/{get_model_tag(model)}",
@@ -736,7 +887,8 @@ if __name__ == "__main__":
             limit_val_batches=20,
             gradient_clip_val=1.0,
             # val_check_interval=100,
-            val_check_interval=min(1000, len(dm.train_data) // (dm.batch_size*n_gpus)),
+            # check_val_every_n_epoch=5 if num_batches_in_train_data < 1000 else 1,
+            val_check_interval=min(1000, num_batches_in_train_data),
             callbacks=callbacks,
             precision="bf16-mixed", 
             strategy="ddp_find_unused_parameters_true", 
