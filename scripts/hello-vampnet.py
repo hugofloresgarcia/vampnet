@@ -10,11 +10,12 @@ from vampnet.mask import apply_mask
 from vampnet.train import VampNetTrainer
 
 # pick a device and seed
-ckpt = "hugggof/vampnetv2-tria-d1026-l8-h8-mode-vampnet_rms-median-latest"
+ckpt = "hugggof/vampnetv2-bbcsubtria-d792-l12-h12-mode-stemgen_rmsq16-clap-latest"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-sig_spl = sn.read_from_file("assets/noodle.wav", duration=1.0)
-sig = sn.read_from_file("assets/a-beautiful-loop.wav", duration=5.0)
+# sig_spl = sn.read_from_file("assets/noodle.wav", duration=1.0)
+sig_spl = None
+sig = sn.read_from_file("assets/example.wav", duration=10.0)
 sig = sn.to_mono(sig)
 # seed(0)
 
@@ -30,13 +31,16 @@ controller = bundle.controller # and the controller
 eiface = Interface(
     codec=codec,
     vn=vn,
-    controller=controller
+    controller=controller,
+    text_conditioner=bundle.text_conditioner,
 )
 eiface.to(device)
 
 # preprocess the signal (but remember the loudness, we'll need it later)
 ldns = sn.loudness(sig)
 sig = eiface.preprocess(sig)
+
+text_query = "Telephones" if eiface.text_conditioner is not None else None
 
 # load a drum sample
 if sig_spl is not None:
@@ -53,7 +57,7 @@ if len(ctrls) > 0:
     ctrl_masks[rms_key] = eiface.rms_mask(
         ctrls[rms_key], onset_idxs=onset_idxs, 
         periodic_prompt=0, 
-        drop_amt=0.0
+        drop_amt=1.0
     )
     # use the rms mask for the other controls
     for k in ctrls.keys():
@@ -70,6 +74,8 @@ print(f"encoded to codes of shape {codes.shape}")
 mask = eiface.build_codes_mask(codes, 
     periodic_prompt=0, upper_codebook_mask=0
 )
+
+cond = eiface.get_cond(text_query)
 
 # encode the sample
 if sig_spl is not None:
@@ -98,12 +104,13 @@ eiface.visualize(
 gcodes = vn.generate(
     codes=mcodes,
     temperature=1.0,
-    cfg_scale=5.0,
-    mask_temperature=10.0,
-    typical_filtering=True,
+    cfg_scale=3.0,
+    mask_temperature=1000.0,
+    typical_filtering=False,
     typical_mass=0.15,
     ctrls=ctrls,
     ctrl_masks=ctrl_masks,
+    cond=cond,
     typical_min_tokens=128,
     sampling_steps=24 if vn.mode == "vampnet" else [16, 8, 4, 4],
     causal_weight=0.0,
