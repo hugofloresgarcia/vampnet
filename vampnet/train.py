@@ -29,6 +29,7 @@ from vampnet.modules.transformer import VampNet
 from vampnet.util import codebook_unflatten, codebook_flatten, flip_coin
 from vampnet import mask as pmask
 from vampnet.dac.model.dac import DAC
+from vampnet.lac.model.lac import LAC
 from vampnet.text import CLAPTextConditioner
 import vampnet.dsp.signal as sn
 
@@ -40,6 +41,7 @@ torch.backends.cudnn.benchmark = bool(int(os.getenv("CUDNN_BENCHMARK", 1)))
 
 IGNORE_INDEX = -100
 CODEC_CKPT = "~/.cache/descript/dac/weights_44khz_8kbps_0.0.1.pth"
+LAC_CKPT = "models/codec.pth"
 SEED = 1
 
 DEFAULT_QUERY = """
@@ -54,7 +56,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
     def __init__(self,
         prefix_tag: str = "",
         # ~~~ codec ~~~
-        codec_ckpt: str = CODEC_CKPT,
+        codec_choice: str = "dac",
         # ~~~ model ~~~
         mode: str = "stemgen",
         ctrl_keys: tuple[str] = ("rms", ),
@@ -72,11 +74,19 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.save_hyperparameters()
         self.prefix_tag = prefix_tag    
 
-        codec_ckpt = Path(codec_ckpt).expanduser().resolve()
         
         # the codec
-        self.codec = DAC.load(codec_ckpt, map_location="cpu")
+        if codec_choice == "dac":
+            codec_ckpt = Path(CODEC_CKPT).expanduser().resolve()
+            self.codec = DAC.load(codec_ckpt, map_location="cpu")
+        elif codec_choice == "lac":
+            codec_ckpt = Path(LAC_CKPT).expanduser().resolve()
+            self.codec = LAC.load(codec_ckpt, map_location="cpu")
+        else:
+            raise ValueError(f"unknown codec choice {codec_choice}")
+            
         self.codec = torch.compile(self.codec)
+        assert self.codec.sample_rate == 44100, "uh oh, time to change the magic number!"
 
         # the controller:
         ctrl_keys = ctrl_keys if ctrl_keys is not None else []
