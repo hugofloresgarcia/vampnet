@@ -34,7 +34,7 @@ VampNetTrainer.lr: 0.001
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~ data setup ~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-batch_size: 32
+batch_size: 16
 num_workers: 14
 
 # configure the number of samples to draw from the dataset. 
