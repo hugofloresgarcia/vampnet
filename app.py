@@ -198,9 +198,10 @@ def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks):
     for p in OUT_DIR.glob("*"):
         p.unlink()
     OUT_DIR.mkdir(exist_ok=True)
-    outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
+    # outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
+    from pyharp import AudioLabel, LabelList, save_audio
+    outpath = save_audio(sig)
     sig.write(outpath)
-    from pyharp import AudioLabel, LabelList
     output_labels = LabelList()
     output_labels.append(AudioLabel(label='~', t=0.0, amplitude=0.5, description='generated audio'))
     return outpath, output_labels
