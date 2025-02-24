@@ -57,6 +57,47 @@ def shift_pitch(signal, interval: int):
     return signal
 
 
+def onsets(sig: at.AudioSignal, hop_length: int):
+    assert sig.batch_size == 1, "batch size must be 1"
+    assert sig.num_channels == 1, "mono signals only"
+    import librosa
+    onset_frame_idxs = librosa.onset.onset_detect(
+        y=sig.samples[0][0].detach().cpu().numpy(), sr=sig.sample_rate, 
+        hop_length=hop_length,
+        backtrack=True,
+    )
+    return onset_frame_idxs
+
+
+def new_vampnet_mask(self, 
+    codes, 
+    onset_idxs, 
+    width: int = 5, 
+    periodic_prompt=2, 
+    upper_codebook_mask=1,
+    drop_amt: float = 0.1
+):
+    from vampnet.newmask import mask_and, mask_or, onset_mask, periodic_mask, drop_ones, codebook_mask
+    mask =  mask_and(
+        periodic_mask(codes, periodic_prompt, 1, random_roll=False),
+        mask_or( # this re-masks the onsets, according to a periodic schedule
+            onset_mask(onset_idxs, codes, width=width),
+            periodic_mask(codes, periodic_prompt, 1, random_roll=False),
+        )
+    ).int()
+    # make sure the onset idxs themselves are unmasked
+    # mask = 1 - mask
+    mask[:, :, onset_idxs] = 0
+    mask = mask.cpu() # debug
+    mask = 1-drop_ones(1-mask, drop_amt)
+    mask = codebook_mask(mask, upper_codebook_mask)
+
+    
+    # save mask as txt (ints)
+    np.savetxt("scratch/rms_mask.txt", mask[0].cpu().numpy(), fmt='%d')
+    mask = mask.to(self.device)
+    return mask[:, :, :]
+
 @spaces.GPU
 def _vamp(
         seed, input_audio, model_choice, 
@@ -78,7 +119,7 @@ def _vamp(
     sr, input_audio = input_audio
     input_audio = input_audio / np.iinfo(input_audio.dtype).max
     
-    sig = at.AudioSignal(input_audio, sr)
+    sig = at.AudioSignal(input_audio, sr).to_mono()
 
     # reload the model if necessary
     interface.load_finetuned(model_choice)
@@ -88,18 +129,15 @@ def _vamp(
 
     codes = interface.encode(sig)
 
-    mask = interface.build_mask(
-        codes, sig,
-        rand_mask_intensity=1.0,
-        prefix_s=0.0,
-        suffix_s=0.0,
-        periodic_prompt=int(periodic_p),
-        periodic_prompt_width=periodic_w,
-        onset_mask_width=onset_mask_width,
-        _dropout=dropout,
-        upper_codebook_mask=int(n_mask_codebooks), 
-    )
-
+    mask = new_vampnet_mask(
+        interface, 
+        codes, 
+        onset_idxs=onsets(sig, hop_length=interface.codec.hop_length),
+        width=onset_mask_width,
+        periodic_prompt=periodic_p,
+        upper_codebook_mask=n_mask_codebooks,
+        drop_amt=dropout
+    ).long()
 
     # save the mask as a txt file
     interface.set_chunk_size(10.0)
@@ -145,24 +183,45 @@ def vamp(data):
         api=False, 
     )
 
-def api_vamp(data):
+# def api_vamp(data):
+#     return _vamp(
+#         seed=data[seed], 
+#         input_audio=data[input_audio],
+#         model_choice=data[model_choice],
+#         pitch_shift_amt=data[pitch_shift_amt],
+#         periodic_p=data[periodic_p],
+#         n_mask_codebooks=data[n_mask_codebooks],
+#         periodic_w=data[periodic_w],
+#         onset_mask_width=data[onset_mask_width],
+#         dropout=data[dropout],
+#         sampletemp=data[sampletemp],
+#         typical_filtering=data[typical_filtering],
+#         typical_mass=data[typical_mass],
+#         typical_min_tokens=data[typical_min_tokens],
+#         top_p=data[top_p],
+#         sample_cutoff=data[sample_cutoff],
+#         stretch_factor=data[stretch_factor],
+#         api=True, 
+#     )
+
+def api_vamp(input_audio, sampletemp, top_p, periodic_p, periodic_w, dropout, stretch_factor, onset_mask_width, typical_filtering, typical_mass, typical_min_tokens, seed, model_choice, n_mask_codebooks, pitch_shift_amt, sample_cutoff):
     return _vamp(
-        seed=data[seed], 
-        input_audio=data[input_audio],
-        model_choice=data[model_choice],
-        pitch_shift_amt=data[pitch_shift_amt],
-        periodic_p=data[periodic_p],
-        n_mask_codebooks=data[n_mask_codebooks],
-        periodic_w=data[periodic_w],
-        onset_mask_width=data[onset_mask_width],
-        dropout=data[dropout],
-        sampletemp=data[sampletemp],
-        typical_filtering=data[typical_filtering],
-        typical_mass=data[typical_mass],
-        typical_min_tokens=data[typical_min_tokens],
-        top_p=data[top_p],
-        sample_cutoff=data[sample_cutoff],
-        stretch_factor=data[stretch_factor],
+        seed=seed, 
+        input_audio=input_audio,
+        model_choice=model_choice,
+        pitch_shift_amt=pitch_shift_amt,
+        periodic_p=periodic_p,
+        n_mask_codebooks=n_mask_codebooks,
+        periodic_w=periodic_w,
+        onset_mask_width=onset_mask_width,
+        dropout=dropout,
+        sampletemp=sampletemp,
+        typical_filtering=typical_filtering,
+        typical_mass=typical_mass,
+        typical_min_tokens=typical_min_tokens,
+        top_p=top_p,
+        sample_cutoff=sample_cutoff,
+        stretch_factor=stretch_factor,
         api=True, 
     )
 
@@ -258,7 +317,7 @@ with gr.Blocks() as demo:
                     minimum=0,
                     maximum=100,
                     step=1,
-                    value=0, visible=False
+                    value=0, visible=True
                 )
 
                 n_mask_codebooks = gr.Slider(
@@ -419,8 +478,22 @@ with gr.Blocks() as demo:
     api_vamp_button = gr.Button("api vamp", visible=True)
     api_vamp_button.click(
         fn=api_vamp,
-        inputs=_inputs, 
-        outputs=[audio_outs[0]], 
+        inputs=[input_audio, 
+                sampletemp, top_p, 
+                periodic_p, periodic_w, 
+                dropout, 
+                stretch_factor,
+                onset_mask_width,
+                typical_filtering,
+                typical_mass,
+                typical_min_tokens,
+                seed,
+                model_choice,
+                n_mask_codebooks,
+                pitch_shift_amt,
+                sample_cutoff
+        ], 
+        outputs=[audio_outs[0]],
         api_name="vamp"
     )
 
