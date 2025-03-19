@@ -669,11 +669,50 @@ class VampNet(at.ml.BaseModel):
                 (mask, torch.full_like(mask, 1)), dim=0
             )
 
+        if debug:
+            DEBUG_FOLDER = "vampnet-debug"
+            import matplotlib.pyplot as plt
+            from pathlib import Path
+
+            Path(DEBUG_FOLDER).mkdir(exist_ok=True)
+            plt.rcParams['figure.dpi'] = 100            # Default DPI for figures
+            plt.rcParams['figure.figsize'] = (20, 0.4)  # Default size for a 4x2000 grid (2000/100, 4/100)
+            plt.rcParams['image.interpolation'] = 'nearest'  # Ensures no smoothing for imshow
+            plt.rcParams['image.aspect'] = 'auto'       # Maintains proper aspect ratio
+            plt.rcParams['axes.axisbelow'] = True       # Ensures axis is beneath the data (for clarity)
+            plt.rcParams['axes.xmargin'] = 0            # No extra space around data
+            plt.rcParams['axes.ymargin'] = 0            # Same for Y-axis
+
+            from functools import partial
+            plt.imshow = partial(plt.imshow, origin='lower')
+
+
+            # save the initial mask
+            plt.clf()
+            plt.imshow(mask[0].cpu().numpy())
+            plt.savefig(f"{DEBUG_FOLDER}/mask.png")
+
+            # save the initial z_masked
+            plt.clf()
+            plt.imshow(z_masked[0].cpu().numpy())
+            plt.savefig(f"{DEBUG_FOLDER}/z_masked.png")
+
+            # save the initial z
+            plt.clf()
+            plt.imshow(z[0].cpu().numpy())
+            plt.savefig(f"{DEBUG_FOLDER}/z.png")
+            
+
         #################
         # begin sampling #
         #################
         from tqdm import tqdm
         for i in range(sampling_steps):
+            if debug:
+                # save the mask at step i
+                # make a folder called step i 
+                STEP_FOLDER = (f"{DEBUG_FOLDER}/step_{i}")
+                Path(STEP_FOLDER).mkdir(exist_ok=True)
 
             # our current schedule step
             r = scalar_to_batch_tensor(
@@ -706,6 +745,19 @@ class VampNet(at.ml.BaseModel):
                 top_k=None, top_p=top_p, return_probs=True,
             )
 
+            if debug: 
+                # log the selected probs and sampled 
+                plt.clf()
+                _selected_probs = codebook_unflatten(selected_probs, n_infer_codebooks)
+                plt.imshow(_selected_probs[0].cpu().numpy(), )
+                plt.colorbar()
+                plt.savefig(f"{STEP_FOLDER}/selected_probs.png")
+
+                plt.clf()
+                plt.imshow(sampled_z.cpu().numpy())
+                plt.savefig(f"{STEP_FOLDER}/sampled_z.png")
+
+
 
             # flatten z_masked and mask, so we can deal with the sampling logic
             # we'll unflatten them at the end of the loop for the next forward pass
@@ -713,6 +765,17 @@ class VampNet(at.ml.BaseModel):
             z_masked = codebook_flatten(z_masked[:, self.n_conditioning_codebooks:, :])           
 
             mask = (z_masked == self.mask_token).int()
+
+            if debug: 
+
+                plt.clf()
+                # plt.imshow(mask.cpu().numpy())
+                _mask = codebook_unflatten(mask, n_infer_codebooks)
+                plt.imshow(_mask[0].cpu().numpy())
+                plt.savefig(f"{STEP_FOLDER}/mask.png")
+
+
+
             
             # update the mask, remove conditioning codebooks from the mask
             # add z back into sampled z where the mask was false

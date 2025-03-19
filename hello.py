@@ -13,6 +13,10 @@ print(f"available finetuned models: {finetuned_model_choices}")
 model_choice = random.choice(finetuned_model_choices)
 print(f"choosing model: {model_choice}")
 
+# or pick a specific finetuned model
+print(f"actually, forcing model: default")
+model_choice = "default"
+
 # load a finetuned model
 interface.load_finetuned(model_choice)
 
@@ -25,7 +29,7 @@ codes = interface.encode(signal)
 # build a mask for the audio
 mask = interface.build_mask(
     codes, signal,
-    periodic_prompt=7, 
+    periodic_prompt=13, 
     upper_codebook_mask=3,
 )
 
@@ -33,7 +37,8 @@ mask = interface.build_mask(
 output_tokens = interface.vamp(
     codes, mask, return_mask=False,
     temperature=1.0, 
-    typical_filtering=True, 
+    typical_filtering=False, 
+    debug=True
 )
 
 # convert them to a signal
