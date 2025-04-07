@@ -1,12 +1,13 @@
 import torch
 from torch import nn
-from msclap import CLAP
+
 
 
 class CLAPTextConditioner(nn.Module):
 
     def __init__(self, ):
         super().__init__()
+        from msclap import CLAP
         self.clap_model = CLAP(version = '2023', use_cuda=True)
         # self.clap_model.eval()
         self.clap = self.clap_model.clap

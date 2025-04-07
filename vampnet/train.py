@@ -88,6 +88,13 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
         self.codec = torch.compile(self.codec)
         assert self.codec.sample_rate == 44100, "uh oh, time to change the magic number!"
 
+        print("~"*80)
+        print(f"loaded codec from {codec_ckpt}")
+        print(f"codec has sample rate {self.codec.sample_rate}")
+        print(f"codec has hop length {self.codec.hop_length}")
+        print(f"codec has n_codebooks {self.codec.quantizer.n_codebooks}")
+        print("~"*80)
+
         # the controller:
         ctrl_keys = ctrl_keys if ctrl_keys is not None else []
         self.controller = Sketch2SoundController(
@@ -111,6 +118,7 @@ class VampNetTrainer(L.LightningModule, PyTorchModelHubMixin):
             n_layers=n_layers,
             embedding_dim=embedding_dim,
             latent_dim=self.codec.quantizer.quantizers[0].codebook_dim,
+            n_codebooks=self.codec.quantizer.n_codebooks,
             mode=mode,
             ctrl_dims=self.controller.ctrl_dims, 
             vocab_size=self.codec.quantizer.quantizers[0].codebook_size,
@@ -739,6 +747,7 @@ if __name__ == "__main__":
 
         accumulate_grad_batches = configure_trainer()
         print(f"accumulating gradients over {accumulate_grad_batches} batches")
+        batches_per_epoch = len(dm.train_data) // (dm.batch_size * n_gpus)
         trainer = L.Trainer(
             devices=n_gpus,
             default_root_dir=f"runs/{get_model_tag(model)}",
@@ -746,7 +755,8 @@ if __name__ == "__main__":
             limit_val_batches=20,
             gradient_clip_val=1.0,
             # val_check_interval=100,
-            val_check_interval=min(1000, len(dm.train_data) // (dm.batch_size*n_gpus)),
+            # val_check_interval=min(1000, len(dm.train_data) // (dm.batch_size*n_gpus)),
+            check_val_every_n_epoch=1 if batches_per_epoch > 1000 else int(1000 / batches_per_epoch),
             callbacks=callbacks,
             precision="bf16-mixed", 
             strategy="ddp_find_unused_parameters_true", 

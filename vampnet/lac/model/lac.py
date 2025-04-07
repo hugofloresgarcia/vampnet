@@ -282,7 +282,7 @@ class LAC(BaseModel, CodecMixin):
         out = {}
         x = self.decoder(z)
         out["audio"] = x[..., :length]
-        return out
+        return out["audio"]
 
     def forward(
         self,
