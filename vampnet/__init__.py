@@ -41,7 +41,7 @@ def download_default():
         paths.append(path)
     
     # load the models
-    return paths[0], paths[1]
+    return paths[0], paths[1], paths[2]
 
 
 def download_finetuned(name):
