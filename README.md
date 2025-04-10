@@ -170,6 +170,10 @@ In the tape controls, check the heartbeat (`<3`) to make sure the connection to 
 
 have fun!
 
+# Token Telephone
+
+Instructions forthcoming, but the sauce is in `token_telephone/tt.py`
+
 ## A note on argbind
 This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
 Config files are stored in the `conf/` folder. 
