@@ -163,13 +163,17 @@ def dropout(
     mask: torch.Tensor,
     p: float,
 ):
-    assert 0 <= p <= 1, "p must be between 0 and 1"
-    assert mask.max() <= 1, "mask must be binary"
-    assert mask.min() >= 0, "mask must be binary"
-    mask = (~mask.bool()).float()
-    mask = torch.bernoulli(mask * (1 - p))
-    mask = ~mask.round().bool()
+    # instead of the above, mask along the last dimensions
+    tsteps = mask.shape[-1]
+    tsteps_to_drop = int(tsteps * p)
+    tsteps_to_keep = tsteps - tsteps_to_drop
+    idxs_to_drop = torch.randint(0, tsteps, (tsteps_to_drop,))
+    mask = mask.clone()
+    mask[:, :, idxs_to_drop] = 1
     return mask.long()
+
+
+
 
 def mask_or(
     mask1: torch.Tensor, 

@@ -59,7 +59,7 @@ class Interface(torch.nn.Module):
         coarse2fine_ckpt: str = None,
         coarse2fine_lora_ckpt: str = None,
         codec_ckpt: str = None,
-        wavebeat_ckpt: str = None,
+        wavebeat_ckpt: str = "./models/vampnet/wavebeat.pth",
         device: str = "cpu",
         coarse_chunk_size_s: int =  10, 
         coarse2fine_chunk_size_s: int =  3,
@@ -96,7 +96,7 @@ class Interface(torch.nn.Module):
 
         if wavebeat_ckpt is not None:
             logging.debug(f"loading wavebeat from {wavebeat_ckpt}")
-            self.beat_tracker = WaveBeat(wavebeat_ckpt)
+            self.beat_tracker = WaveBeat(wavebeat_ckpt, device=device)
             self.beat_tracker.model.to(device)
         else:
             self.beat_tracker = None
@@ -253,6 +253,7 @@ class Interface(torch.nn.Module):
         places 1s at and around the beat, and 0s everywhere else. 
         """
         assert self.beat_tracker is not None, "No beat tracker loaded"
+
 
         # get the beat times
         beats, downbeats = self.beat_tracker.extract_beats(signal)
@@ -516,12 +517,19 @@ class Interface(torch.nn.Module):
         # the forward pass
         logging.debug(z.shape)
         logging.debug("coarse!")
-        zv, mask_z = self.coarse_vamp(
-            z,
-            mask=mask,
-            return_mask=True, 
-            **kwargs
-        )
+        zv = z
+        for i in range(feedback_steps):
+            zv, mask_z = self.coarse_vamp(
+                zv, 
+                mask=mask,
+                return_mask=True, 
+                **kwargs)
+            # roll the mask around a random amount
+            mask_z = mask_z.roll(
+                shifts=(i + 1) % feedback_steps, 
+                dims=-1
+            )
+
 
         # add the top codebooks back in
         if zv.shape[1] < z.shape[1]:

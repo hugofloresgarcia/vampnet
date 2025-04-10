@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import vampnet
 from vampnet.modules.transformer import VampNet
+# from vampnet.control import Sketch2SoundController
 from vampnet.util import codebook_unflatten, codebook_flatten
 from vampnet import mask as pmask
 # from dac.model.dac import DAC
@@ -65,6 +66,8 @@ AudioLoader = argbind.bind(at.datasets.AudioLoader)
 AudioDataset = argbind.bind(at.datasets.AudioDataset, "train", "val")
 
 IGNORE_INDEX = -100
+
+# Sketch2SoundController = argbind.bind(Sketch2SoundController)
 
 
 @argbind.bind("train", "val", without_prefix=True)
@@ -118,6 +121,36 @@ def add_num_params_repr_hook(model):
 
         setattr(m, "extra_repr", partial(num_params_hook, o=o, p=p))
 
+def get_controls(state, sig: at.AudioSignal):
+    # get controls
+    n_batch = sig.samples.shape[0]  
+    if state.controller is not None:
+        ctrls = state.controller.extract(sig)
+        # draw control masks
+        ctrl_masks = state.controller.random_mask(
+            ctrls, 
+            r=state.rng.draw(n_batch)[:, 0].to(state.device)
+        )
+    else:
+        ctrls = None
+        ctrl_masks = None
+    
+    return ctrls, ctrl_masks
+
+
+def generate_z_mask(state, z, vn, n_batch, ctrl_masks=None):
+    r = state.rng.draw(n_batch)[:, 0].to(state.device)
+
+    mask, ii = state.model.random_mask(z, r)
+    mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
+
+    # outpaint? 
+    # if state.outpaint_prob > 0:
+    #     if flip_coin(state.outpaint_prob):
+    #         mask, ctrl_masks = state.build_tria_mask(mask, ctrl_masks)
+    z_mask = pmask.apply_mask(z, mask, vn.mask_token)
+    
+    return z_mask, mask, ii, r, ctrl_masks
 
 def accuracy(
     preds: torch.Tensor,
@@ -184,6 +217,8 @@ def _metrics(z_hat, r, target, flat_mask, output):
 class State:
     model: VampNet
     codec: DAC
+    # controller: Sketch2SoundController
+    controller: Optional[object]
 
     optimizer: AdamW
     scheduler: NoamScheduler
@@ -218,6 +253,11 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
         mask = pmask.random(z, r)
         mask = pmask.codebook_unmask(mask, vn.n_conditioning_codebooks)
         z_mask, mask = pmask.apply_mask(z, mask, vn.mask_token)
+
+        # get controls
+        ctrls, ctrl_masks = get_controls(state, signal)
+
+        # TODO: KEEP INCORPORATING ZMASK CODE
         
         z_mask_latent = vn.embedding.from_codes(z_mask, state.codec)
 
@@ -265,6 +305,22 @@ def train_loop(state: State, batch: dict, accel: Accelerator):
 
 
     return {k: v for k, v in sorted(output.items())}
+
+# def get_controls(self, sig: sn.Signal, controller):
+#     # get controls
+#     n_batch = sig.wav.shape[0]  
+#     if self.controller is not None:
+#         ctrls = self.controller.extract(sig)
+#         # draw control masks
+#         ctrl_masks = self.controller.random_mask(
+#             ctrls, 
+#             r=self.rng.draw(n_batch)[:, 0].to(self.device)
+#         )
+#     else:
+#         ctrls = None
+#         ctrl_masks = None
+    
+#     return ctrls, ctrl_masks
 
 
 @timer()
@@ -561,6 +617,8 @@ def load(
     # load the datasets
     train_data, val_data = build_datasets(args, sample_rate)
 
+    # controller = Sketch2SoundController(sample_rate=sample_rate, hop_length=codec.hop_length)
+
     return State(
         tracker=tracker,
         model=model,
@@ -572,6 +630,7 @@ def load(
         train_data=train_data,
         val_data=val_data,
         grad_clip_val=grad_clip_val,
+        controller=None,
     )
 
 
@@ -612,6 +671,7 @@ def train(
         tracker=tracker, 
         save_path=save_path)
     print("initialized state.")
+    state.device = accel.device
 
     train_dataloader = accel.prepare_dataloader(
         state.train_data,

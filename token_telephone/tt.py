@@ -16,10 +16,25 @@ import numpy as np
 import torch
 from einops import rearrange
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+# ~~~~~~  configs!     ~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+MAX_LOUDNESS = -20
+MIN_LOUDNESS = -40
+COLS = 40
+ROWS = 13
+
+device = 'Scarlett 4i4 4th Gen'
+sample_rate = 48000
+num_channels = 4
+blocksize = 16384
+
 PROFILE = False
 DEBUG = False
 DEBUG_NO_VAMPNET = False
 set_debug(DEBUG)
+
 # if DEBUG:
 #     import gc
 #     # log when gc start and stops
@@ -80,19 +95,6 @@ Thread(target=draw_intro_screen).start()
 from audiotools import AudioSignal
 from vamp_helper import load_interface, ez_variation
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
-# ~~~~~~  configs!     ~~~~~~~~
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-MAX_LOUDNESS = -20
-MIN_LOUDNESS = -40
-COLS = 40
-ROWS = 13
-
-device = 'Scarlett 4i4 4th Gen'
-sample_rate = 48000
-num_channels = 4
-blocksize = 16384
 
 
 # TODO: 

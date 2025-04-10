@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from einops import rearrange
 import loralib as lora
 import audiotools as at
@@ -405,7 +406,7 @@ class TransformerStack(nn.Module):
         )
 
         # Perform last normalization
-        self.norm = RMSNorm(d_model) if last_layer else None
+        self.norm = RMSNorm(d_model) if last_layer else None   
 
     def subsequent_mask(self, size):
         return torch.ones(1, size, size).tril().bool()
@@ -461,6 +462,75 @@ class TransformerStack(nn.Module):
         else:
             return out
 
+class CFGDropout(nn.Module):
+    
+    def __init__(self, p: float = 0.2):
+        super().__init__()
+        self.p = p
+
+    def forward(self, x: Tensor):
+        # dropout along the batch dim
+        if self.training:
+            mask = torch.rand(x.shape[0], 1, 1, device=x.device) > self.p
+        else:
+            mask = torch.ones(x.shape[0], 1, 1, device=x.device)
+        return x * mask
+
+class ControlEncoder(nn.Module):
+
+    def __init__(self, 
+        ctrl_dims: dict[str, int], 
+        embedding_dim: int,
+        cfg_dropout_prob: float
+    ):
+        super().__init__()
+        self.ctrl_encoders = nn.ModuleDict({
+            key: nn.Linear(dim, embedding_dim)
+                for key, dim in ctrl_dims.items()
+        })
+
+        self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
+        self.all_dropout = CFGDropout(p=cfg_dropout_prob / 2)
+
+    def forward(self, 
+        embedding: Tensor, # embedding to which we will add ctrls
+        ctrls: dict[str, Tensor], 
+        ctrl_masks: dict[str, Tensor]
+    ):
+        # INPUT: ctrl tensor should be shape (b d n)
+
+        # assert that we got all the right ctrls and ctrl_masks according to the encoders that we have
+        assert list(sorted(ctrls.keys())) == list(sorted(self.ctrl_encoders.keys())), "ctrls and ctrl_encoders keys do not match"
+        assert list(sorted(ctrl_masks.keys())) == list(sorted(self.ctrl_encoders.keys())), "ctrl_masks and ctrl_encoders keys do not match"
+
+        out_emb = torch.zeros_like(embedding)
+        for ck in ctrls:
+            ctrld = ctrls[ck]
+            ctrlmask = ctrl_masks[ck]
+
+            assert ctrld.shape[-1] == embedding.shape[-1], "ctrls should match x along time dimension"
+            assert ctrlmask.ndim == 2, "ctrlmask should be 2d"
+            assert ctrlmask.shape[-1] == ctrld.shape[-1], "ctrlmask should match ctrld along time dimension"
+
+            # project ctrl with encoder
+            ctrld = rearrange(ctrld, "b d n -> b n d")
+            ctrl_emb = self.ctrl_encoders[ck](ctrld)
+            ctrld = rearrange(ctrld, "b n d -> b d n")
+            ctrl_emb = rearrange(ctrl_emb, "b n d -> b d n")
+
+            # apply ctrl mask
+            ctrl_emb = ctrl_emb * ctrlmask[:, None, :]
+
+            # apply cfg dropout
+            ctrl_emb = self.cfg_dropout(ctrl_emb)
+
+            # add to the out_emb
+            out_emb = out_emb + ctrl_emb
+
+        # randomly dropout all ctrls
+        out_emb = self.all_dropout(out_emb)
+
+        return out_emb
 
 class VampNet(at.ml.BaseModel):
     def __init__(
@@ -475,7 +545,10 @@ class VampNet(at.ml.BaseModel):
         vocab_size: int = 1024,
         flash_attn: bool = True,
         noise_mode: str = "mask",
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        ctrl_dims: Optional[dict[str, int]] = None, 
+        cfg_dropout_prob: float = 0.2, 
+        cond_dim: int = 0,
     ):
         super().__init__()
         assert r_cond_dim == 0, f"r_cond_dim must be 0 (not supported), but got {r_cond_dim}"
@@ -489,6 +562,11 @@ class VampNet(at.ml.BaseModel):
         self.latent_dim = latent_dim
         self.flash_attn = flash_attn
         self.noise_mode = noise_mode
+        self.cond_dim = cond_dim
+        self.r_cond_dim = r_cond_dim
+        self.dropout = dropout
+        self.cfg_dropout_prob = cfg_dropout_prob
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         assert self.noise_mode == "mask", "deprecated"
 
@@ -525,10 +603,25 @@ class VampNet(at.ml.BaseModel):
             ),
         )
 
-    def forward(self, x, return_activations: bool = False):
+        if self.cond_dim > 0:
+            self.cfg_dropout = CFGDropout(p=cfg_dropout_prob)
+
+        self.ctrl_dims = ctrl_dims
+        if self.ctrl_dims is not None:
+            self.ctrl_encoder = ControlEncoder(
+                ctrl_dims, 
+                embedding_dim=embedding_dim, 
+                cfg_dropout_prob=cfg_dropout_prob
+            )
+
+    def forward(self, x, ctrls=None, ctrl_masks=None, return_activations: bool = False):
         x = self.embedding(x)
         x_mask = torch.ones_like(x, dtype=torch.bool)[:, :1, :].squeeze(1)
 
+        if self.ctrl_dims is not None:
+            # apply controls
+            x = x + self.ctrl_encoder(x, ctrls, ctrl_masks)
+            
         x = rearrange(x, "b d n -> b n d")
         out = self.transformer(x=x, x_mask=x_mask, return_activations=return_activations)
         if return_activations:
@@ -600,6 +693,8 @@ class VampNet(at.ml.BaseModel):
         temperature: float = 1.0,
         mask: Optional[torch.Tensor] = None,
         mask_temperature: float = 10.5,
+        ctrls:dict = None,
+        ctrl_masks:dict = None,
         typical_filtering=True,
         typical_mass=0.15,
         typical_min_tokens=64,
@@ -609,7 +704,9 @@ class VampNet(at.ml.BaseModel):
         return_signal=True,
         debug=False,
         causal_weight: float = 0.0,
+        cfg_scale: float = 3.0,
         cfg_guidance: float = None,
+        cond = None # unused
     ):
         if seed is not None:
             at.util.seed(seed)
@@ -621,6 +718,22 @@ class VampNet(at.ml.BaseModel):
         #####################
         z = start_tokens
         nb = z.shape[0]
+
+        use_cfg = ctrls is not None
+        tocfg = lambda x: x.repeat(2, 1, 1) if use_cfg else x
+        tocfgblank = lambda x: torch.cat([x, torch.zeros_like(x)], dim=0) if use_cfg else x
+        def fromcfg(x):
+            if use_cfg:
+                xcond, xuncond = x.chunk(2)
+                return xuncond + cfg_scale * (xcond - xuncond)
+            return x
+
+        z = tocfg(z)
+        if ctrls is not None:
+            ctrls = {k: tocfg(v) for k, v in ctrls.items()}
+            ctrl_masks = {k: tocfgblank(v) for k, v in ctrl_masks.items()}
+        if cond is not None:
+            cond = tocfg(cond)
 
         if z is None:
             z = torch.full((1, self.n_codebooks, time_steps), self.mask_token).to(
@@ -727,6 +840,7 @@ class VampNet(at.ml.BaseModel):
             # infer from latents
             # NOTE: this collapses the codebook dimension into the sequence dimension
             logits = self.forward(latents) # b, prob, seq
+            logits = fromcfg(logits)
 
             if cfg_guidance is not None:
                 logits_cond, logits_uncond = logits[:nb], logits[nb:]
@@ -774,9 +888,6 @@ class VampNet(at.ml.BaseModel):
                 plt.imshow(_mask[0].cpu().numpy())
                 plt.savefig(f"{STEP_FOLDER}/mask.png")
 
-
-
-            
             # update the mask, remove conditioning codebooks from the mask
             # add z back into sampled z where the mask was false
             sampled_z = torch.where(

@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - scratch/sounds
+Interface.coarse2fine_ckpt: ./runs/saxophone/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/saxophone/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth

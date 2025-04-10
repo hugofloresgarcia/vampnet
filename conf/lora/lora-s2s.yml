@@ -20,3 +20,8 @@ AdamW.lr: 0.0001
 # let's us organize sound classes into folders and choose from those sound classes uniformly
 AudioDataset.without_replacement: False
 num_iters: 500000
+
+
+# control signals to use as conditioning. 
+Sketch2SoundController.ctrl_keys: ['rmsq16',]
+
