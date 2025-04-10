@@ -408,6 +408,7 @@ class Interface(torch.nn.Module):
             # discontinuity when we stitch the chunks back together
             # only if there's already a 0 somewhere in the chunk
             if torch.any(mask_chunk == 0):
+                mask_chunk = mask_chunk.clone()
                 mask_chunk[:, :, 0] = 0
                 mask_chunk[:, :, -1] = 0
 
