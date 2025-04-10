@@ -1,10 +1,9 @@
 from pathlib import Path
 
-run_dir = Path("runs/sample-instrument")
+run_dir = Path("runs/lazaro-ros-sep")
 name = run_dir.name
 
 repo_dir = Path("models/vampnet")
-
 
 for part in ("coarse", "c2f"):
     outdir = repo_dir / "loras" / name 
@@ -16,7 +15,7 @@ for part in ("coarse", "c2f"):
 
 # now, push to hub
 from huggingface_hub import Repository
-repo = Repository(repo_dir, git_user="hugofloresgarcia", git_email="huferflo@gmail.com")
+repo = Repository(str(repo_dir),  git_user="hugofloresgarcia", git_email="huferflo@gmail.com")
 repo.push_to_hub(
     commit_message=f"add {name}"
 )

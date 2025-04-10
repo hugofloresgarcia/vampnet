@@ -213,10 +213,11 @@ class WaveBeat(BeatTracker):
     def extract_beats(self, signal: AudioSignal) -> Tuple[np.ndarray, np.ndarray]:
         """returns beat and downbeat times, in  seconds"""
         # extract beats
+        self.model.to('cuda' if torch.cuda.is_available() else 'cpu')
         beats, downbeats = self.model.predict_beats_from_array(
             audio=signal.audio_data.squeeze(0),
             sr=signal.sample_rate,
-            use_gpu=self.device != "cpu",
+            use_gpu=torch.cuda.is_available(),
         )
 
         return beats, downbeats

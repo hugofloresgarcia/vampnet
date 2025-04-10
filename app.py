@@ -21,6 +21,7 @@ interface = Interface.default()
 init_model_choice = open("DEFAULT_MODEL").read().strip()
 # load the init model
 interface.load_finetuned(init_model_choice)
+interface.to(device)
     
 def to_output(sig):
     return sig.sample_rate, sig.cpu().detach().numpy()[0][0]
@@ -105,8 +106,32 @@ def _vamp(
         n_mask_codebooks, periodic_w, onset_mask_width, 
         dropout, sampletemp, typical_filtering, 
         typical_mass, typical_min_tokens, top_p, 
-        sample_cutoff, stretch_factor, api=False
+        sample_cutoff, stretch_factor, sampling_steps, beat_mask_ms, num_feedback_steps, api=False
     ):
+
+    print("args!")
+    print(f"seed: {seed}")
+    print(f"input_audio: {input_audio}")
+    print(f"model_choice: {model_choice}")
+    print(f"pitch_shift_amt: {pitch_shift_amt}")
+    print(f"periodic_p: {periodic_p}")
+    print(f"n_mask_codebooks: {n_mask_codebooks}")
+    print(f"periodic_w: {periodic_w}")
+    print(f"onset_mask_width: {onset_mask_width}")
+    print(f"dropout: {dropout}")
+    print(f"sampletemp: {sampletemp}")
+    print(f"typical_filtering: {typical_filtering}")
+    print(f"typical_mass: {typical_mass}")
+    print(f"typical_min_tokens: {typical_min_tokens}")
+    print(f"top_p: {top_p}")
+    print(f"sample_cutoff: {sample_cutoff}")
+    print(f"stretch_factor: {stretch_factor}")
+    print(f"sampling_steps: {sampling_steps}")
+    print(f"api: {api}")
+    print(f"beat_mask_ms: {beat_mask_ms}")
+    print(f"using device {interface.device}")
+    print(f"num feedback steps: {num_feedback_steps}")
+
 
     t0 = time.time()
     interface.to("cuda" if torch.cuda.is_available() else "cpu")
@@ -121,6 +146,9 @@ def _vamp(
     
     sig = at.AudioSignal(input_audio, sr).to_mono()
 
+    loudness = sig.loudness()
+    sig = interface._preprocess(sig)
+
     # reload the model if necessary
     interface.load_finetuned(model_choice)
 
@@ -129,38 +157,70 @@ def _vamp(
 
     codes = interface.encode(sig)
 
-    mask = new_vampnet_mask(
-        interface, 
-        codes, 
-        onset_idxs=onsets(sig, hop_length=interface.codec.hop_length),
-        width=onset_mask_width,
-        periodic_prompt=periodic_p,
-        upper_codebook_mask=n_mask_codebooks,
-        drop_amt=dropout
-    ).long()
+    # mask = new_vampnet_mask(
+    #     interface, 
+    #     codes, 
+    #     onset_idxs=onsets(sig, hop_length=interface.codec.hop_length),
+    #     width=onset_mask_width,
+    #     periodic_prompt=periodic_p,
+    #     upper_codebook_mask=n_mask_codebooks,
+    #     drop_amt=dropout
+    # ).long()
 
-    # save the mask as a txt file
+    
+    mask = interface.build_mask(
+        codes,
+        sig=sig, 
+        periodic_prompt=periodic_p,
+        periodic_prompt_width=periodic_w,
+        onset_mask_width=onset_mask_width,
+        _dropout=dropout,
+        upper_codebook_mask=n_mask_codebooks,
+    )
+    if beat_mask_ms > 0:
+        # bm = pmask.mask_or(
+        #     pmask.periodic_mask(
+        #         codes, periodic_p, periodic_w, random_roll=False
+        #     ),
+        # )
+        mask = pmask.mask_and(
+            mask, interface.make_beat_mask(
+                sig, after_beat_s=beat_mask_ms/1000.,
+            )
+        )
+        mask = pmask.codebook_mask(mask, n_mask_codebooks)
+    np.savetxt("scratch/rms_mask.txt", mask[0].cpu().numpy(), fmt='%d')
+
     interface.set_chunk_size(10.0)
+
+    # lord help me
+    if top_p is not None:
+        if top_p > 0:
+            pass
+        else:
+            top_p = None
+
     codes, mask = interface.vamp(
         codes, mask,
-        batch_size=1 if api else 1,
-        feedback_steps=1,
-        _sampling_steps=12 if sig.duration <6.0 else 24,
+        batch_size=2,
+        feedback_steps=num_feedback_steps,
+        _sampling_steps=sampling_steps,
         time_stretch_factor=stretch_factor,
         return_mask=True,
         temperature=sampletemp,
         typical_filtering=typical_filtering, 
         typical_mass=typical_mass, 
         typical_min_tokens=typical_min_tokens, 
-        top_p=None,
+        top_p=top_p,
         seed=_seed,
-        sample_cutoff=1.0,
+        sample_cutoff=sample_cutoff,
     )
     print(f"vamp took {time.time() - t0} seconds")
 
     sig = interface.decode(codes)
+    sig = sig.normalize(loudness)
 
-    return to_output(sig)
+    return to_output(sig[0]), to_output(sig[1])
 
 def vamp(data):
     return _vamp(
@@ -180,31 +240,29 @@ def vamp(data):
         top_p=data[top_p],
         sample_cutoff=data[sample_cutoff],
         stretch_factor=data[stretch_factor],
+        sampling_steps=data[sampling_steps],
+        beat_mask_ms=data[beat_mask_ms],
+        num_feedback_steps=data[num_feedback_steps],
         api=False, 
     )
 
-# def api_vamp(data):
-#     return _vamp(
-#         seed=data[seed], 
-#         input_audio=data[input_audio],
-#         model_choice=data[model_choice],
-#         pitch_shift_amt=data[pitch_shift_amt],
-#         periodic_p=data[periodic_p],
-#         n_mask_codebooks=data[n_mask_codebooks],
-#         periodic_w=data[periodic_w],
-#         onset_mask_width=data[onset_mask_width],
-#         dropout=data[dropout],
-#         sampletemp=data[sampletemp],
-#         typical_filtering=data[typical_filtering],
-#         typical_mass=data[typical_mass],
-#         typical_min_tokens=data[typical_min_tokens],
-#         top_p=data[top_p],
-#         sample_cutoff=data[sample_cutoff],
-#         stretch_factor=data[stretch_factor],
-#         api=True, 
-#     )
 
-def api_vamp(input_audio, sampletemp, top_p, periodic_p, periodic_w, dropout, stretch_factor, onset_mask_width, typical_filtering, typical_mass, typical_min_tokens, seed, model_choice, n_mask_codebooks, pitch_shift_amt, sample_cutoff):
+def api_vamp(input_audio, 
+                sampletemp, top_p, 
+                periodic_p, periodic_w, 
+                dropout, 
+                stretch_factor,
+                onset_mask_width,
+                typical_filtering,
+                typical_mass,
+                typical_min_tokens,
+                seed,
+                model_choice,
+                n_mask_codebooks,
+                pitch_shift_amt,
+                sample_cutoff, 
+                sampling_steps, 
+                beat_mask_ms, num_feedback_steps):
     return _vamp(
         seed=seed, 
         input_audio=input_audio,
@@ -222,49 +280,11 @@ def api_vamp(input_audio, sampletemp, top_p, periodic_p, periodic_w, dropout, st
         top_p=top_p,
         sample_cutoff=sample_cutoff,
         stretch_factor=stretch_factor,
+        sampling_steps=sampling_steps,
+        beat_mask_ms=beat_mask_ms,
+        num_feedback_steps=num_feedback_steps,
         api=True, 
     )
-
-OUT_DIR = Path("gradio-outputs")
-OUT_DIR.mkdir(exist_ok=True)
-def harp_vamp(input_audio_file, periodic_p, n_mask_codebooks):
-    sig = at.AudioSignal(input_audio_file)
-    sr, samples = sig.sample_rate, sig.samples[0][0].detach().cpu().numpy()
-    # convert to int32
-    samples = (samples * np.iinfo(np.int32).max).astype(np.int32)
-    sr, samples =  _vamp(
-        seed=0,
-        input_audio=(sr, samples),
-        model_choice=init_model_choice,
-        pitch_shift_amt=0,
-        periodic_p=periodic_p,
-        n_mask_codebooks=n_mask_codebooks,
-        periodic_w=1,
-        onset_mask_width=0,
-        dropout=0.0,
-        sampletemp=1.0,
-        typical_filtering=True,
-        typical_mass=0.15,  
-        typical_min_tokens=64,
-        top_p=0.0,
-        sample_cutoff=1.0,
-        stretch_factor=1,
-    )
-    
-    sig = at.AudioSignal(samples, sr)
-    # write to file
-    # clear the outdir
-    for p in OUT_DIR.glob("*"):
-        p.unlink()
-    OUT_DIR.mkdir(exist_ok=True)
-    # outpath = OUT_DIR / f"{uuid.uuid4()}.wav"
-    from pyharp import AudioLabel, LabelList, save_audio
-    outpath = save_audio(sig)
-    sig.write(outpath)
-    output_labels = LabelList()
-    output_labels.append(AudioLabel(label='~', t=0.0, amplitude=0.5, description='generated audio'))
-    return outpath, output_labels
-    
 
 with gr.Blocks() as demo:
     with gr.Row():
@@ -359,6 +379,11 @@ with gr.Blocks() as demo:
                     value=1,
                 )
 
+                beat_mask_ms = gr.Number(
+                    label="beat mask width (milliseconds)",
+                    value=0,
+                )
+
 
             with gr.Accordion("sampling settings", open=False):
                 sampletemp = gr.Slider(
@@ -399,6 +424,22 @@ with gr.Blocks() as demo:
                     value=1.0, 
                     step=0.01
                 )
+                sampling_steps = gr.Slider(
+                    label="sampling steps",
+                    minimum=1,
+                    maximum=128,
+                    step=1,
+                    value=36
+                )
+                num_feedback_steps = gr.Slider(
+                    label="feedback steps",
+                    minimum=1,
+                    maximum=16,
+                    step=1,
+                    value=1
+                )
+
+
 
 
             dropout = gr.Slider(
@@ -433,7 +474,7 @@ with gr.Blocks() as demo:
 
             audio_outs = []
             use_as_input_btns = []
-            for i in range(1):
+            for i in range(2):
                 with gr.Column():
                     audio_outs.append(gr.Audio(
                         label=f"output audio {i+1}",
@@ -466,13 +507,16 @@ with gr.Blocks() as demo:
             n_mask_codebooks,
             pitch_shift_amt, 
             sample_cutoff, 
+            sampling_steps, 
+            beat_mask_ms,
+            num_feedback_steps
         }
   
     # connect widgets
     vamp_button.click(
         fn=vamp,
         inputs=_inputs,
-        outputs=[audio_outs[0]], 
+        outputs=[audio_outs[0], audio_outs[1]], 
     )
 
     api_vamp_button = gr.Button("api vamp", visible=True)
@@ -491,30 +535,14 @@ with gr.Blocks() as demo:
                 model_choice,
                 n_mask_codebooks,
                 pitch_shift_amt,
-                sample_cutoff
+                sample_cutoff, 
+                sampling_steps, 
+                beat_mask_ms,
+                num_feedback_steps
         ], 
-        outputs=[audio_outs[0]],
+        outputs=[audio_outs[0], audio_outs[1]],
         api_name="vamp"
     )
-
-    from pyharp import ModelCard, build_endpoint
-    card = ModelCard(
-        name="vampnet", 
-        description="vampnet! is a model for generating audio from audio",
-        author="hugo flores garcía", 
-        tags=["music generation"], 
-        midi_in=False, 
-        midi_out=False
-    )
-        
-    # Build a HARP-compatible endpoint
-    app = build_endpoint(model_card=card,
-                         components=[
-                            periodic_p, 
-                            n_mask_codebooks,
-                        ],
-                         process_fn=harp_vamp)
-
 
 
 try:

@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - sound-journal-march-31
+Interface.coarse2fine_ckpt: ./runs/march-31/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/march-31/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth

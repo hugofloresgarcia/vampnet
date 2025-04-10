@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - ./scratch/miguel/saxophone-new/
+Interface.coarse2fine_ckpt: ./runs/sax-new/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/sax-new/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth

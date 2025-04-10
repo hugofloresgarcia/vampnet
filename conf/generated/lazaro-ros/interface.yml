@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - ./scratch/miguel/lazaro-ros
+Interface.coarse2fine_ckpt: ./runs/lazaro-ros/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/lazaro-ros/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth
