@@ -8,3 +8,4 @@ descript-audiotools @ git+https://github.com/hugofloresgarcia/audiotools.git
 -e git+https://github.com/audacitorch/pyharp.git@develop#egg=pyharp
 torch_pitch_shift
 gradio
+pydantic==2.10.6
