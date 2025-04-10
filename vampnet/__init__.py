@@ -30,7 +30,7 @@ def download_codec():
     
 
 def download_default():
-    filenames = ["coarse.pth", "c2f.pth"]
+    filenames = ["coarse.pth", "c2f.pth", "wavebeat.pth"]
     repo_id = DEFAULT_HF_MODEL_REPO
     paths = []
     for filename in filenames:
