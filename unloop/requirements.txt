@@ -1,0 +1,4 @@
+python-osc
+descript-audiotools
+tqdm
+argbind

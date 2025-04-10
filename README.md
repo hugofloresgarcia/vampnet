@@ -159,6 +159,7 @@ This will run a vampnet gradio API on your GPU server. Copy the address. It will
 Now, **on your local machine**, run the unloop gradio client.
 ```
 cd unloop
+pip install -r requirements.txt
 python client.py --vampnet_url https://127.0.0.1:7860/ # replace with your gradio server address
 ```
 This will start a gradio client that connects to the gradio server running on your GPU server.
