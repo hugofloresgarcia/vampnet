@@ -167,7 +167,10 @@ ckpt/
 tests/assets/
 archived/
 
-scratch/
+# scratch/
+scratch/miguel
+scratch/saxophone
+scratch/*.wav
 
 runs-archive
 lyrebird-audiotools
