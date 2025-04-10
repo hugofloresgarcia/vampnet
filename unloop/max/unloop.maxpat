@@ -61,7 +61,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 341.322295129299164, 304.958660781383514, 123.0, 15.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 242.269274294376373, 267.648158993571997, 17.976592421531677, 15.0 ],
+					"presentation_rect" : [ 242.269274294376373, 267.648158993571997, 18.0, 15.0 ],
 					"text" : "<3"
 				}
 
@@ -1887,7 +1887,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 5449.000162392854691, 3381.000100761651993, 72.0, 31.0 ],
-					"text" : "/Users/hugo/projects/research/unloop-2025/unloop-unsound/.gradio/89ab28854bccc2c89f5dd25b5f8af364dcc6fd30241571ebc501df7f3d974729/audio.wav"
+					"text" : "/Users/hugo/projects/research/unloop-2025/vampnet/unloop/.gradio/384973df6f24ec001f1859428a040628c4edd363c8023c090feb960c59077c15/audio.wav"
 				}
 
 			}
@@ -1901,7 +1901,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 5373.000160127878189, 3381.000100761651993, 71.0, 31.0 ],
-					"text" : "/Users/hugo/projects/research/unloop-2025/unloop-unsound/.gradio/2db41d2f82050f18608bdbf767f7ab697226e368e9c0f4a718b6b81cd7cb506a/audio.wav"
+					"text" : "/Users/hugo/projects/research/unloop-2025/vampnet/unloop/.gradio/61ed705c6d143ed98a313ae58c9ed1010cae9dcb5817d4117956398c1dd8cdb2/audio.wav"
 				}
 
 			}
@@ -4563,7 +4563,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 5988.0, 3491.20005202293396, 153.0, 22.0 ],
-					"text" : "text default"
+					"text" : "text choir"
 				}
 
 			}
@@ -5952,7 +5952,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 5432.00016188621521, 4274.000127375125885, 63.0, 22.0 ],
-					"text" : "#0-buf1"
+					"text" : "#0-buf2"
 				}
 
 			}
@@ -6921,7 +6921,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 4916.0, 3037.5, 213.0, 76.0 ],
-					"text" : "/process 61 vampnet /Users/hugo/projects/research/unloop-2025/unloop-unsound/max/audio/#01in.wav default 3 0. 7669 10000. 0 0.15 64 4 0 32 1. 0. 0. 1"
+					"text" : "/process 19469 vampnet /Users/hugo/projects/research/unloop-2025/vampnet/unloop/max/audio/#01in.wav choir 13 0.158268 20468 10000. 1 0.15 64 4 0 32 1. 0.9 0. 4"
 				}
 
 			}
@@ -8800,7 +8800,7 @@
 									"outlettype" : [ "list", "float", "float", "float", "float", "list", "int" ],
 									"parameter_enable" : 0,
 									"patching_rect" : [ 52.0, 245.668089365878586, 360.0, 155.0 ],
-									"setfilter" : [ 0, 1, 1, 0, 0, 6271.9267578125, 1.047243118286133, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 ],
+									"setfilter" : [ 0, 1, 1, 0, 0, 5831.7216796875, 1.047243118286133, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 ],
 									"varname" : "filtergraph~"
 								}
 
@@ -15990,13 +15990,13 @@
 		"dependency_cache" : [ 			{
 				"name" : "dry-wet.maxpat",
 				"bootpath" : "~/projects/max/utils",
-				"patcherrelativepath" : "../../../../max/utils",
+				"patcherrelativepath" : "../../../../../max/utils",
 				"type" : "JSON",
 				"implicit" : 1
 			}
 , 			{
 				"name" : "vampnet-ui.maxpat",
-				"bootpath" : "~/projects/research/unloop-2025/unloop-unsound/max",
+				"bootpath" : "~/projects/research/unloop-2025/vampnet/unloop/max",
 				"patcherrelativepath" : ".",
 				"type" : "JSON",
 				"implicit" : 1
