@@ -2,3 +2,4 @@ python-osc
 descript-audiotools
 tqdm
 argbind
+gradio-client
