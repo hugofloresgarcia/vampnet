@@ -13,15 +13,9 @@ license: cc-by-nc-4.0
 
 # VampNet
 
-This repository contains recipes for training generative music models on top of the Descript Audio Codec.
+## setting up
 
-# Setting up
-
-**Requires Python 3.9**. 
-
-you'll need a Python 3.9 environment to run VampNet. This is due to a [known issue with madmom](https://github.com/hugofloresgarcia/vampnet/issues/15). 
-
-(for example, using conda)
+python 3.9-3.11 works well. (for example, using conda)
 ```bash
 conda create -n vampnet python=3.9
 conda activate vampnet
@@ -34,7 +28,7 @@ git clone https://github.com/hugofloresgarcia/vampnet.git
 pip install -e ./vampnet
 ```
 
-# Usage
+## programmatic usage
 
 quick start!
 ```python
@@ -144,6 +138,37 @@ launch the c2f job:
 ```bash
 python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml 
 ```
+
+# Unloop
+
+Make sure you have Max installed on your laptop!
+
+**NOTE**: To run unloop (with a GPU-powered server), you will need to install the vampnet repo in both your local machine and your GPU server.
+
+## start a vampnet gradio server
+
+First, **on your GPU server**, run the gradio server:
+```bash
+python app.py --args.load conf/interface.yml --Interface.device cuda
+```
+This will run a vampnet gradio API on your GPU server. Copy the address. It will be something like `https://127.0.0.1:7860/`. 
+
+**IMPORTANT** Make sure that this gradio port (by default `7860`) is forwarded to your local machine, where you have Max installed. 
+
+## start the unloop gradio client
+Now, **on your local machine**, run the unloop gradio client.
+```
+cd unloop
+python client.py --vampnet_url https://127.0.0.1:7860/ # replace with your gradio server address
+```
+This will start a gradio client that connects to the gradio server running on your GPU server.
+
+## start the unloop Max patch
+Now, open the unloop Max patch. It's located at `unloop/max/unloop.maxpat`.
+
+In the tape controls, check the heartbeat (`<3`) to make sure the connection to the local gradio client is working. 
+
+have fun!
 
 ## A note on argbind
 This repository relies on [argbind](https://github.com/pseeth/argbind) to manage CLIs and config files. 
