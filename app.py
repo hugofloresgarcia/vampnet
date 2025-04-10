@@ -15,7 +15,14 @@ import gradio as gr
 from vampnet.interface import Interface, signal_concat
 from vampnet import mask as pmask
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available():
+    device = "mps"
+else:
+    device = "cpu"
+
+print(f"using device {device}\n"*10)
 
 interface = Interface.default()
 init_model_choice = open("DEFAULT_MODEL").read().strip()
@@ -134,7 +141,7 @@ def _vamp(
 
 
     t0 = time.time()
-    interface.to("cuda" if torch.cuda.is_available() else "cpu")
+    interface.to(device)
     print(f"using device {interface.device}")
     _seed = seed if seed > 0 else None
     if _seed is None:

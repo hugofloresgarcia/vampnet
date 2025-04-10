@@ -82,7 +82,7 @@ output_signal.write("scratch/output.wav")
 You can launch a gradio UI to play with vampnet. 
 
 ```bash
-python app.py --args.load conf/interface.yml --Interface.device cuda
+python app.py 
 ```
 
 # Training / Fine-tuning 
