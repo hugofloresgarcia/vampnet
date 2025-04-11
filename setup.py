@@ -26,7 +26,7 @@ setup(
     license="MIT",
     packages=find_packages(),
     install_requires=[
-        "torch",
+        "torch==2.4.1",
         "argbind>=0.3.2",
         "numpy==1.23",
         "wavebeat @ git+https://github.com/hugofloresgarcia/wavebeat",
@@ -37,5 +37,6 @@ setup(
         "torch_pitch_shift",
         "plotly",
         "pydantic==2.10.6",
+        "spaces",
     ],
 )
