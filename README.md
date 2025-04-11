@@ -179,7 +179,12 @@ Now, log in to huggingface using the command line:
 huggingface-cli login
 ```
 
-replace the contents of the file named `./DEFAULT_MODEL_REPO` with your `<HUGGINGFACE_USERNAME>/vampnet`. A model repo will be automatically created for you with `export.py`. The default is `hugggof/vampnet`. 
+replace the contents of the file named `./DEFAULT_HF_MODEL_REPO` with your `<HUGGINGFACE_USERNAME>/vampnet`. A model repo will be automatically created for you with `export.py`. The default is `hugggof/vampnet`. 
+
+for example, if my username is `hugggof`, I would run the following command:`
+```bash
+echo 'hugggof/vampnet' > ./DEFAULT_HF_MODEL_REPO
+```
 
 Now, run the following command to export your model (replace `<your_finetuned_model_name>` with the name of your model):
 
