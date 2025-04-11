@@ -156,7 +156,19 @@ In order to use your model in `app.py`, you will need to export it to HuggingFac
 
 You need to fork the [vampnet models repo](https://huggingface.co/hugggof/vampnet) which stores the default vampnet models. 
 
-Now, replace the 
+Now, replace the contents of the file named `./DEFAULT_HF_MODEL_REPO` in the root folder with the name of your repo (usually `[your_username]/vampnet`). 
+
+Now, log in to huggingface using the command line:
+```bash
+huggingface-cli login
+```
+
+Now, run the following command to export your model:
+
+```bash
+python scripts/exp/export.py --name <your_finetuned_model_name> --model latest
+```
+
 
 # Unloop
 
