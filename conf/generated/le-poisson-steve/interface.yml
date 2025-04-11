@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - scratch/steve
+Interface.coarse2fine_ckpt: ./runs/le-poisson-steve/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/le-poisson-steve/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth

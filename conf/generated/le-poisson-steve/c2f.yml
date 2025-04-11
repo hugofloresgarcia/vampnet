@@ -1,0 +1,15 @@
+$include:
+- conf/lora/lora.yml
+AudioDataset.duration: 3.0
+AudioDataset.loudness_cutoff: -40.0
+VampNet.embedding_dim: 1280
+VampNet.n_codebooks: 14
+VampNet.n_conditioning_codebooks: 4
+VampNet.n_heads: 20
+VampNet.n_layers: 16
+fine_tune: true
+fine_tune_checkpoint: ./models/vampnet/c2f.pth
+save_path: ./runs/le-poisson-steve/c2f
+train/AudioLoader.sources: &id001
+- scratch/steve
+val/AudioLoader.sources: *id001

@@ -159,6 +159,13 @@ launch the c2f job:
 python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml 
 ```
 
+# Resuming a Training/Finetuning Job from checkpoint. 
+
+To resume from checkpoint, use the `--resume` flag and the `--save_path` to point to the checkpoint you want to resume from.
+```bash
+python scripts/exp/train.py --args.load conf/generated/steve/coarse.yml --save_path runs/steve/coarse --resume
+```
+
 # Exporting your model
 
 Once your model has been fine-tuned, you can export it to a HuggingFace model. 
@@ -167,9 +174,23 @@ In order to use your model in `app.py`, you will need to export it to HuggingFac
 
 **NOTE**: In order to export, you will need a [huggingface account](https://huggingface.co/). 
 
-You need to fork the [vampnet models repo](https://huggingface.co/hugggof/vampnet) which stores the default vampnet models. 
+<!-- You need to fork the [vampnet models repo](https://huggingface.co/hugggof/vampnet) which stores the default vampnet models.  -->
 
-Now, replace the contents of the file named `./DEFAULT_HF_MODEL_REPO` in the root folder with the name of your repo (usually `[your_username]/vampnet`). 
+Now, create a repo on huggingface. You can do this by going to the huggingface website and clicking on the "Create a new model" button.
+Copy your repo name. It should look something like `<USERNAME>/vampnet`.
+
+Now, navigate to `models/vampnet` and add your new repo as a remote:
+
+```bash
+cd ./models/vampnet && git init && git remote add origin https://huggingface.co/<YOUR_REPO_NAME> && git pull origin main
+```
+go back
+
+```bash
+cd ../../
+```
+
+Now, replace the contents of the file named `./DEFAULT_HF_MODEL_REPO` in the root folder with the name of your repo (usually `<USERNAME>/vampnet`). 
 
 Now, log in to huggingface using the command line:
 ```bash
