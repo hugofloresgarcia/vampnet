@@ -172,35 +172,17 @@ Once your model has been fine-tuned, you can export it to a HuggingFace model.
 
 In order to use your model in `app.py`, you will need to export it to HuggingFace.
 
-**NOTE**: In order to export, you will need a [huggingface account](https://huggingface.co/). 
-
-<!-- You need to fork the [vampnet models repo](https://huggingface.co/hugggof/vampnet) which stores the default vampnet models.  -->
-
-Now, create a repo on huggingface. You can do this by going to the huggingface website and clicking on the "Create a new model" button.
-Copy your repo name. It should look something like `<USERNAME>/vampnet`.
-
-Now, navigate to `models/vampnet` and add your new repo as a remote:
-
-```bash
-cd ./models/vampnet && git init && git remote add origin https://huggingface.co/<YOUR_REPO_NAME> && git pull origin main
-```
-go back
-
-```bash
-cd ../../
-```
-
-Now, replace the contents of the file named `./DEFAULT_HF_MODEL_REPO` in the root folder with the name of your repo (usually `<USERNAME>/vampnet`). 
+**NOTE**: In order to export, you will need a [huggingface account](https://huggingface.co/).
 
 Now, log in to huggingface using the command line:
 ```bash
 huggingface-cli login
 ```
 
-Now, run the following command to export your model:
+Now, run the following command to export your model (replace `<your_finetuned_model_name>` with the name of your model, and `<HUGGINGFACE_USERNAME>` with your huggingface username):
 
 ```bash
-python scripts/exp/export.py --name <your_finetuned_model_name> --model latest
+python scripts/exp/export.py --name <your_finetuned_model_name> --model latest --repo <HUGGINGFACE_USERNAME>/vampnet
 ```
 
 Once that's done, your model should appear on the list of available models in the gradio interface.
