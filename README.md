@@ -13,6 +13,22 @@ license: cc-by-nc-4.0
 
 # VampNet
 
+# Table of contents
+
+- [setting up](#setting-up)
+- [programmatic usage](#programmatic-usage)
+- [launching the web app](#launching-the-web-app)
+- [training / fine-tuning](#training--fine-tuning)
+  - [training a model](#training-a-model)
+  - [debugging training](#debugging-training)
+  - [fine-tuning](#fine-tuning)
+- [exporting your model](#exporting-your-model)
+- [unloop](#unloop)
+- [token telephone](#token-telephone)
+- [a note on argbind](#a-note-on-argbind)
+- [take a look at the pretrained models](#take-a-look-at-the-pretrained-models)
+- [licensing for pretrained models](#licensing-for-pretrained-models)
+
 ## setting up
 
 python 3.9-3.11 works well. (for example, using conda)
@@ -78,7 +94,7 @@ output_signal.write("scratch/output.wav")
 ```
 
 
-## Launching the Gradio Interface
+# Launching the Web app
 You can launch a gradio UI to play with vampnet. 
 
 ```bash
@@ -115,7 +131,7 @@ To debug training, it's easier to debug with 1 gpu and 0 workers
 CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampnet.yml --save_path /path/to/checkpoints --num_workers 0
 ```
 
-## Fine-tuning
+# Fine-tuning
 
 To fine-tune a model, use the script in `scripts/exp/fine_tune.py` 
 
@@ -143,7 +159,7 @@ launch the c2f job:
 python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml 
 ```
 
-## Exporting your model
+# Exporting your model
 
 Once your model has been fine-tuned, you can export it to a HuggingFace model. 
 
