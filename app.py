@@ -26,6 +26,7 @@ print(f"using device {device}\n"*10)
 
 interface = Interface.default()
 init_model_choice = open("DEFAULT_MODEL").read().strip()
+
 # load the init model
 interface.load_finetuned(init_model_choice)
 interface.to(device)

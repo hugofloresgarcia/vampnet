@@ -119,6 +119,13 @@ CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampn
 To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
 The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to launch the gradio interface.
 
+
+for an audio folder
+```bash
+python scripts/exp/fine_tune.py /path/to/audio/folder <fine_tune_name>
+```
+
+for multiple files
 ```bash
 python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/audio3.wav" <fine_tune_name>
 ```
@@ -138,6 +145,18 @@ launch the c2f job:
 ```bash
 python  scripts/exp/train.py --args.load conf/generated/<fine_tune_name>/c2f.yml 
 ```
+
+## Exporting your model
+
+Once your model has been fine-tuned, you can export it to a HuggingFace model. 
+
+In order to use your model in `app.py`, you will need to export it to HuggingFace.
+
+**NOTE**: In order to export, you will need a [huggingface account](https://huggingface.co/). 
+
+You need to fork the [vampnet models repo](https://huggingface.co/hugggof/vampnet) which stores the default vampnet models. 
+
+Now, replace the 
 
 # Unloop
 

@@ -12,7 +12,9 @@ ROOT = Path(__file__).parent.parent
 MODELS_DIR = ROOT / "models" / "vampnet"
 
 from huggingface_hub import hf_hub_download, HfFileSystem
-DEFAULT_HF_MODEL_REPO = "hugggof/vampnet"
+DEFAULT_HF_MODEL_REPO_DIR = ROOT / "DEFAULT_HF_MODEL_REPO"
+DEFAULT_HF_MODEL_REPO = DEFAULT_HF_MODEL_REPO_DIR.read_text().strip()
+# DEFAULT_HF_MODEL_REPO = "hugggof/vampnet"
 FS = HfFileSystem()
 
 def download_codec():
