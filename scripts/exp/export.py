@@ -49,13 +49,14 @@ for part in ("coarse", "c2f"):
     # path.rename(outpath)
     shutil.copy(path, outpath)
     paths.append(outpath)
-    print(f"moved {path} to {outpath}")
+    print(f"copied {path} to {outpath}")
 
 print(f"uploading files to {args.repo}")
 # upload files to the repo
 
 # if it's a new repo, let's add the default models too
-defaults = [repo_dir / "c2f.pth", repo_dir / "coarse.pth", repo_dir / "codec.pth", repo_dir / "wavebeat.pth"]
+if new_repo:
+    paths.extend([repo_dir / "c2f.pth", repo_dir / "coarse.pth", repo_dir / "codec.pth", repo_dir / "wavebeat.pth"])
 
 api = HfApi()
 

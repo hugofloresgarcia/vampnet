@@ -179,10 +179,12 @@ Now, log in to huggingface using the command line:
 huggingface-cli login
 ```
 
-Now, run the following command to export your model (replace `<your_finetuned_model_name>` with the name of your model, and `<HUGGINGFACE_USERNAME>` with your huggingface username):
+replace the contents of the file named `./DEFAULT_MODEL_REPO` with your `<HUGGINGFACE_USERNAME>/vampnet`. A model repo will be automatically created for you with `export.py`. The default is `hugggof/vampnet`. 
+
+Now, run the following command to export your model (replace `<your_finetuned_model_name>` with the name of your model):
 
 ```bash
-python scripts/exp/export.py --name <your_finetuned_model_name> --model latest --repo <HUGGINGFACE_USERNAME>/vampnet
+python scripts/exp/export.py --name <your_finetuned_model_name> --model latest
 ```
 
 Once that's done, your model should appear on the list of available models in the gradio interface.
