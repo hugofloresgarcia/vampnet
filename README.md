@@ -116,9 +116,8 @@ CUDA_VISIBLE_DEVICES=0 python -m pdb scripts/exp/train.py --args.load conf/vampn
 ```
 
 ## Fine-tuning
-To fine-tune a model, use the script in `scripts/exp/fine_tune.py` to generate 3 configuration files: `c2f.yml`, `coarse.yml`, and `interface.yml`. 
-The first two are used to fine-tune the coarse and fine models, respectively. The last one is used to launch the gradio interface.
 
+To fine-tune a model, use the script in `scripts/exp/fine_tune.py` 
 
 for an audio folder
 ```bash
@@ -130,9 +129,7 @@ for multiple files
 python scripts/exp/fine_tune.py "/path/to/audio1.mp3 /path/to/audio2/ /path/to/audio3.wav" <fine_tune_name>
 ```
 
-This will create a folder under `conf/<fine_tune_name>/` with the 3 configuration files.
-
-The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`. 
+This creates configuration files for a fine tuning train job. The save_paths will be set to `runs/<fine_tune_name>/coarse` and `runs/<fine_tune_name>/c2f`. 
 
 launch the coarse job: 
 ```bash
@@ -168,6 +165,9 @@ Now, run the following command to export your model:
 ```bash
 python scripts/exp/export.py --name <your_finetuned_model_name> --model latest
 ```
+
+Once that's done, your model should appear on the list of available models in the gradio interface.
+Simply run `python app.py` and select your model from the dropdown list.
 
 
 # Unloop
