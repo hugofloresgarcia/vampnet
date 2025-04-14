@@ -46,8 +46,7 @@ def download_default():
     return paths[0], paths[1]
 
 
-def download_finetuned(name):
-    repo_id = f"{DEFAULT_HF_MODEL_REPO}"
+def download_finetuned(name, repo_id=DEFAULT_HF_MODEL_REPO):
     filenames = ["coarse.pth", "c2f.pth"]
     paths = []
     for filename in filenames:
@@ -60,8 +59,8 @@ def download_finetuned(name):
     # load the models
     return paths[0], paths[1]
     
-def list_finetuned():
-    diritems = FS.listdir(f"{DEFAULT_HF_MODEL_REPO}/loras")
+def list_finetuned(repo_id=DEFAULT_HF_MODEL_REPO):
+    diritems = FS.listdir(f"{repo_id}/loras")
     # iterate through all the names
     valid_diritems = []
     for item in diritems:
