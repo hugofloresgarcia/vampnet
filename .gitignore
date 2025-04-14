@@ -200,3 +200,5 @@ lib/
 
 _outputs/
 debug.txt
+
+scratch/*
