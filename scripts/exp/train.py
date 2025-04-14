@@ -709,7 +709,7 @@ def train(
     save_samples = when(lambda: accel.local_rank == 0)(save_samples)
     checkpoint = when(lambda: accel.local_rank == 0)(checkpoint)
 
-    print("starting training loop.")
+    print("starting training loop. model will compile. this will take a while. hold on a sec! go get a coffee!")
     with tracker.live:
         for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
             train_loop(state, batch, accel)
