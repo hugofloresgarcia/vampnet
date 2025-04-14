@@ -68,8 +68,14 @@ def fine_tune(audio_files_or_folders: List[str], name: str):
         yaml.dump(interface_conf, f)
 
 
-    print(f"generated confs in {finetune_dir}. run training jobs with `python scripts/exp/train.py --args.load {finetune_dir}/<c2f/coarse>.yml` ")
+    # print(f"generated confs in {finetune_dir}. 
+    # run training jobs with `python scripts/exp/train.py --args.load {finetune_dir}/<c2f/coarse>.yml` ")
 
+    print(f"generated confs in {finetune_dir}.")
+    print()
+    print(f"you'll need to run two training jobs, though they can run in parallel on separate GPUs.")
+    print(f"run the coarse job with \n\tpython scripts/exp/train.py --args.load {finetune_dir}/coarse.yml\n")
+    print(f"run the c2f job with \n\tpython scripts/exp/train.py --args.load {finetune_dir}/c2f.yml\n")
 if __name__ == "__main__":
     args = argbind.parse_args()
 
