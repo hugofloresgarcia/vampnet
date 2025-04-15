@@ -2,42 +2,17 @@
 	"patcher" : 	{
 		"fileversion" : 1,
 		"appversion" : 		{
-			"major" : 8,
-			"minor" : 6,
+			"major" : 9,
+			"minor" : 0,
 			"revision" : 5,
 			"architecture" : "x64",
 			"modernui" : 1
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 34.0, 87.0, 1212.0, 929.0 ],
-		"bglocked" : 0,
+		"rect" : [ 34.0, 87.0, 814.0, 779.0 ],
 		"openinpresentation" : 1,
-		"default_fontsize" : 12.0,
-		"default_fontface" : 0,
-		"default_fontname" : "Arial",
-		"gridonopen" : 1,
 		"gridsize" : [ 15.0, 15.0 ],
-		"gridsnaponopen" : 1,
-		"objectsnaponopen" : 1,
-		"statusbarvisible" : 2,
-		"toolbarvisible" : 1,
-		"lefttoolbarpinned" : 0,
-		"toptoolbarpinned" : 0,
-		"righttoolbarpinned" : 0,
-		"bottomtoolbarpinned" : 0,
-		"toolbars_unpinned_last_save" : 0,
-		"tallnewobj" : 0,
-		"boxanimatetime" : 200,
-		"enablehscroll" : 1,
-		"enablevscroll" : 1,
-		"devicewidth" : 0.0,
-		"description" : "",
-		"digest" : "",
-		"tags" : "",
-		"style" : "",
-		"subpatcher_template" : "",
-		"assistshowspatchername" : 0,
 		"boxes" : [ 			{
 				"box" : 				{
 					"fontsize" : 8.0,
@@ -686,7 +661,7 @@
 				"box" : 				{
 					"fontsize" : 8.0,
 					"id" : "obj-346",
-					"items" : [ "default", ",", "supermetroid", ",", "percussion", ",", "machines", ",", "choir", ",", "n64", ",", "opera", ",", "orchestral", ",", "sample-instrument", ",", "xeno-canto", ",", "march-31", ",", "saxophone", ",", "sax-new", ",", "sax-sep", ",", "lazaro-ros", ",", "lazaro-ros-sep" ],
+					"items" : [ "default", ",", "supermetroid", ",", "percussion", ",", "machines", ",", "choir", ",", "n64", ",", "opera", ",", "orchestral", ",", "sample-instrument", ",", "xeno-canto", ",", "march-31", ",", "saxophone", ",", "sax-new", ",", "sax-sep", ",", "lazaro-ros", ",", "lazaro-ros-sep", ",", "cat10" ],
 					"maxclass" : "umenu",
 					"numinlets" : 1,
 					"numoutlets" : 3,
@@ -1318,7 +1293,8 @@
 				}
 
 			}
- ]
+ ],
+		"originid" : "pat-150"
 	}
 
 }
