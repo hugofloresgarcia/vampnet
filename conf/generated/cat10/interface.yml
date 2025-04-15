@@ -1,0 +1,6 @@
+AudioLoader.sources:
+- - scratch/cat-audio-10s
+Interface.coarse2fine_ckpt: ./runs/cat10/c2f/latest/vampnet/weights.pth
+Interface.coarse_ckpt: ./runs/cat10/coarse/latest/vampnet/weights.pth
+Interface.codec_ckpt: ./models/vampnet/codec.pth
+Interface.wavebeat_ckpt: ./models/wavebeat.pth

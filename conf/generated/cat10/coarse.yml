@@ -1,0 +1,8 @@
+$include:
+- conf/lora/lora.yml
+fine_tune: true
+fine_tune_checkpoint: ./models/vampnet/coarse.pth
+save_path: ./runs/cat10/coarse
+train/AudioLoader.sources: &id001
+- scratch/cat-audio-10s
+val/AudioLoader.sources: *id001
