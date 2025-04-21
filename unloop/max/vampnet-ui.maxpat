@@ -31,7 +31,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 1 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[9]",
+							"parameter_longname" : "number[24]",
 							"parameter_mmax" : 64.0,
 							"parameter_mmin" : 1.0,
 							"parameter_modmode" : 3,
@@ -94,7 +94,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 0.0 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[8]",
+							"parameter_longname" : "number[26]",
 							"parameter_mmax" : 400.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[2]",
@@ -126,7 +126,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 0.0 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[7]",
+							"parameter_longname" : "number[20]",
 							"parameter_mmax" : 1.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[2]",
@@ -186,7 +186,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 1.0 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[6]",
+							"parameter_longname" : "number[22]",
 							"parameter_mmax" : 5.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[2]",
@@ -217,7 +217,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 32 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[5]",
+							"parameter_longname" : "number[27]",
 							"parameter_mmax" : 64.0,
 							"parameter_mmin" : 8.0,
 							"parameter_modmode" : 3,
@@ -263,7 +263,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 0 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[4]",
+							"parameter_longname" : "number[23]",
 							"parameter_mmax" : 1024.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[3]",
@@ -336,7 +336,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 4 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number",
+							"parameter_longname" : "number[25]",
 							"parameter_mmax" : 14.0,
 							"parameter_mmin" : 1.0,
 							"parameter_modmode" : 3,
@@ -368,7 +368,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 64 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[3]",
+							"parameter_longname" : "number[19]",
 							"parameter_mmax" : 1024.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[3]",
@@ -430,7 +430,7 @@
 						"valueof" : 						{
 							"parameter_initial" : [ 0.15 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "number[2]",
+							"parameter_longname" : "number[21]",
 							"parameter_mmax" : 1.0,
 							"parameter_modmode" : 3,
 							"parameter_shortname" : "number[2]",
@@ -474,7 +474,7 @@
 							"parameter_enum" : [ "off", "on" ],
 							"parameter_initial" : [ 1 ],
 							"parameter_initial_enable" : 1,
-							"parameter_longname" : "toggle",
+							"parameter_longname" : "toggle[7]",
 							"parameter_mmax" : 1,
 							"parameter_modmode" : 0,
 							"parameter_shortname" : "toggle",
@@ -529,8 +529,8 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 249.88550066947937, 94.488193988800049, 192.0, 22.0 ],
-					"text" : "print #0-VAMPNET_UI_ERROR"
+					"patching_rect" : [ 326.666805624961853, 88.0, 335.0, 22.0 ],
+					"text" : "print #0-VAMPNET_UI_COMMAND_NOT_UNDERSTOOD"
 				}
 
 			}
@@ -538,11 +538,11 @@
 				"box" : 				{
 					"id" : "obj-6",
 					"maxclass" : "newobj",
-					"numinlets" : 4,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "", "", "" ],
-					"patching_rect" : [ 56.666805624961853, 56.64739465713501, 208.0, 22.0 ],
-					"text" : "route queryid audiofile looplength_ms"
+					"numinlets" : 6,
+					"numoutlets" : 6,
+					"outlettype" : [ "", "", "", "", "", "" ],
+					"patching_rect" : [ 56.666805624961853, 56.64739465713501, 289.0, 22.0 ],
+					"text" : "route queryid audiofile looplength_ms model periodic"
 				}
 
 			}
@@ -584,7 +584,7 @@
 							"parameter_initial" : [ 0.0 ],
 							"parameter_initial_enable" : 1,
 							"parameter_linknames" : 1,
-							"parameter_longname" : "drop",
+							"parameter_longname" : "drop[2]",
 							"parameter_mmax" : 1.0,
 							"parameter_modmode" : 0,
 							"parameter_shortname" : "drop",
@@ -642,7 +642,7 @@
 							"parameter_initial" : [ 3 ],
 							"parameter_initial_enable" : 1,
 							"parameter_linknames" : 1,
-							"parameter_longname" : "periodic",
+							"parameter_longname" : "periodic[2]",
 							"parameter_mmax" : 128.0,
 							"parameter_modmode" : 0,
 							"parameter_shortname" : "periodic",
@@ -1281,8 +1281,22 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-7", 0 ],
+					"destination" : [ "obj-346", 0 ],
 					"source" : [ "obj-6", 3 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-347", 0 ],
+					"source" : [ "obj-6", 4 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-7", 0 ],
+					"source" : [ "obj-6", 5 ]
 				}
 
 			}
@@ -1294,7 +1308,7 @@
 
 			}
  ],
-		"originid" : "pat-150"
+		"originid" : "pat-136"
 	}
 
 }
