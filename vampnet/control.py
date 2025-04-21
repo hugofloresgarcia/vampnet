@@ -4,8 +4,8 @@ from typing import Optional
 
 from torch import nn
 
-import vampnet.dsp.signal as sn
-from vampnet.dsp.signal import Signal
+import soundmaterial.dsp.signal as sn
+from soundmaterial.dsp.signal import Signal
 from vampnet.mask import random_along_time
 from torch import Tensor
 import torch

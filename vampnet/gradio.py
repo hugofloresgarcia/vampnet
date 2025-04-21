@@ -11,7 +11,7 @@ from vampnet.interface import Interface
 from vampnet.serve import create_param_manager
 from vampnet.train import VampNetTrainer
 from vampnet.mask import apply_mask
-import vampnet.dsp.signal as sn 
+import soundmaterial.dsp.signal as sn 
 from vampnet.util import Timer
 
 

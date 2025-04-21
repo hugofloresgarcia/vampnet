@@ -30,7 +30,7 @@ from vampnet.util import codebook_unflatten, codebook_flatten, flip_coin
 from vampnet import mask as pmask
 from vampnet.dac.model.dac import DAC
 from vampnet.text import CLAPTextConditioner
-import vampnet.dsp.signal as sn
+import soundmaterial.dsp.signal as sn
 
 
 # Enable cudnn autotuner to speed up training

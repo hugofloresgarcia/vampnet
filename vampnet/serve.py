@@ -12,7 +12,7 @@ from gradio_client import Client, handle_file
 
 import torch
 import vampnet
-import vampnet.dsp.signal as sn
+import soundmaterial.dsp.signal as sn
 from vampnet.mask import apply_mask
 from vampnet.train import VampNetTrainer
 from vampnet.util import Timer

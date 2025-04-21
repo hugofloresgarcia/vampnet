@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-import vampnet.dsp.signal as sn
+import soundmaterial.dsp.signal as sn
 
 from .util import scalar_to_batch_tensor
 
