@@ -442,6 +442,14 @@ with gr.Blocks() as demo:
                     value=0.0
                 )
 
+                num_feedback_steps = gr.Slider(
+                    label="feedback steps (token telephone) -- turn it up for better timbre/rhythm transfer quality, but it's slower!",
+                    minimum=1,
+                    maximum=8,
+                    step=1,
+                    value=1
+                )
+
                 preset_dropdown = gr.Dropdown(
                     label="preset",
                     choices=["timbre transfer", "small variation", "small variation (follow beat)", "medium variation", "medium variation (follow beat)", "large variation", "large variation (follow beat)", "unconditional"],
@@ -576,13 +584,7 @@ with gr.Blocks() as demo:
                     step=1,
                     value=36
                 )
-                num_feedback_steps = gr.Slider(
-                    label="feedback steps",
-                    minimum=1,
-                    maximum=16,
-                    step=1,
-                    value=1
-                )
+
 
 
             seed = gr.Number(
