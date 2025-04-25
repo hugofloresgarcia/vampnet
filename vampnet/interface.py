@@ -568,7 +568,7 @@ class Interface(torch.nn.Module):
         # in subplots, plot z[0] and the mask
         # set title to "codes" and "mask"
         fig.add_subplot(2, 1, 1)
-        plt.imshow(z[0].cpu().numpy(), aspect='auto', origin='lower', cmap="tab20")
+        plt.imshow(z[0].cpu().numpy(), aspect='auto', origin='lower', cmap="tab20", interpolation='none')
         plt.title("codes")
         plt.ylabel("codebook index")
         # set the xticks to seconds

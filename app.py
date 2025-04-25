@@ -107,11 +107,30 @@ def new_vampnet_mask(self,
     mask = mask.to(self.device)
     return mask[:, :, :]
 
+def mask_preview(periodic_p, n_mask_codebooks, onset_mask_width, dropout):
+    # make a mask preview
+    codes = torch.zeros((1, 14, 80)).to(device)
+    mask = interface.build_mask(
+        codes,
+        periodic_prompt=periodic_p,
+        # onset_mask_width=onset_mask_width,
+        _dropout=dropout,
+        upper_codebook_mask=n_mask_codebooks,
+    )
+    # mask = mask.cpu().numpy()
+    import matplotlib.pyplot as plt
+    plt.clf()
+    interface.visualize_codes(mask)
+    plt.title("mask preview")
+    plt.savefig("scratch/mask-prev.png")
+    return "scratch/mask-prev.png"
+
+
 @spaces.GPU
-def _vamp(
+def _vamp_internal(
         seed, input_audio, model_choice, 
         pitch_shift_amt, periodic_p, 
-        n_mask_codebooks, periodic_w, onset_mask_width, 
+        n_mask_codebooks, onset_mask_width, 
         dropout, sampletemp, typical_filtering, 
         typical_mass, typical_min_tokens, top_p, 
         sample_cutoff, stretch_factor, sampling_steps, beat_mask_ms, num_feedback_steps, api=False
@@ -124,7 +143,6 @@ def _vamp(
     print(f"pitch_shift_amt: {pitch_shift_amt}")
     print(f"periodic_p: {periodic_p}")
     print(f"n_mask_codebooks: {n_mask_codebooks}")
-    print(f"periodic_w: {periodic_w}")
     print(f"onset_mask_width: {onset_mask_width}")
     print(f"dropout: {dropout}")
     print(f"sampletemp: {sampletemp}")
@@ -149,6 +167,8 @@ def _vamp(
         _seed = int(torch.randint(0, 2**32, (1,)).item())
     at.util.seed(_seed)
 
+    if input_audio is None:
+        raise gr.Error("no input audio received!")
     sr, input_audio = input_audio
     input_audio = input_audio / np.iinfo(input_audio.dtype).max
     
@@ -180,7 +200,6 @@ def _vamp(
         codes,
         sig=sig, 
         periodic_prompt=periodic_p,
-        periodic_prompt_width=periodic_w,
         onset_mask_width=onset_mask_width,
         _dropout=dropout,
         upper_codebook_mask=n_mask_codebooks,
@@ -188,7 +207,7 @@ def _vamp(
     if beat_mask_ms > 0:
         # bm = pmask.mask_or(
         #     pmask.periodic_mask(
-        #         codes, periodic_p, periodic_w, random_roll=False
+        #         codes, periodic_p, random_roll=False
         #     ),
         # )
         mask = pmask.mask_and(
@@ -208,7 +227,7 @@ def _vamp(
         else:
             top_p = None
 
-    codes, mask = interface.vamp(
+    codes, mask_z = interface.vamp(
         codes, mask,
         batch_size=2,
         feedback_steps=num_feedback_steps,
@@ -228,36 +247,64 @@ def _vamp(
     sig = interface.decode(codes)
     sig = sig.normalize(loudness)
 
-    return to_output(sig[0]), to_output(sig[1])
+    import matplotlib.pyplot as plt
+    plt.clf()
+    # plt.imshow(mask_z[0].cpu().numpy(), aspect='auto
+    interface.visualize_codes(mask)
+    plt.title("actual mask")
+    plt.savefig("scratch/mask.png")
+    plt.clf()
 
-def vamp(data):
-    return _vamp(
-        seed=data[seed], 
-        input_audio=data[input_audio],
-        model_choice=data[model_choice],
-        pitch_shift_amt=data[pitch_shift_amt],
-        periodic_p=data[periodic_p],
-        n_mask_codebooks=data[n_mask_codebooks],
-        periodic_w=data[periodic_w],
-        onset_mask_width=data[onset_mask_width],
-        dropout=data[dropout],
-        sampletemp=data[sampletemp],
-        typical_filtering=data[typical_filtering],
-        typical_mass=data[typical_mass],
-        typical_min_tokens=data[typical_min_tokens],
-        top_p=data[top_p],
-        sample_cutoff=data[sample_cutoff],
-        stretch_factor=data[stretch_factor],
-        sampling_steps=data[sampling_steps],
-        beat_mask_ms=data[beat_mask_ms],
-        num_feedback_steps=data[num_feedback_steps],
-        api=False, 
+    if not api:
+        return to_output(sig[0]), to_output(sig[1]), "scratch/mask.png"
+    else:
+        return to_output(sig[0]), to_output(sig[1])
+
+
+def vamp(input_audio, 
+        sampletemp,
+        top_p,
+        periodic_p, 
+        dropout,
+        stretch_factor, 
+        onset_mask_width, 
+        typical_filtering,
+        typical_mass,
+        typical_min_tokens,
+        seed, 
+        model_choice,
+        n_mask_codebooks,
+        pitch_shift_amt, 
+        sample_cutoff, 
+        sampling_steps, 
+        beat_mask_ms,
+        num_feedback_steps):
+    return _vamp_internal(
+        seed=seed,
+        input_audio=input_audio,
+        model_choice=model_choice,
+        pitch_shift_amt=pitch_shift_amt,
+        periodic_p=periodic_p,
+        n_mask_codebooks=n_mask_codebooks,
+        onset_mask_width=onset_mask_width,
+        dropout=dropout,
+        sampletemp=sampletemp,
+        typical_filtering=typical_filtering,
+        typical_mass=typical_mass,
+        typical_min_tokens=typical_min_tokens,
+        top_p=top_p,
+        sample_cutoff=sample_cutoff,
+        stretch_factor=stretch_factor,
+        sampling_steps=sampling_steps,
+        beat_mask_ms=beat_mask_ms,
+        num_feedback_steps=num_feedback_steps,
+        api=False,
     )
 
 
 def api_vamp(input_audio, 
                 sampletemp, top_p, 
-                periodic_p, periodic_w, 
+                periodic_p,
                 dropout, 
                 stretch_factor,
                 onset_mask_width,
@@ -271,14 +318,13 @@ def api_vamp(input_audio,
                 sample_cutoff, 
                 sampling_steps, 
                 beat_mask_ms, num_feedback_steps):
-    return _vamp(
+    return _vamp_internal(
         seed=seed, 
         input_audio=input_audio,
         model_choice=model_choice,
         pitch_shift_amt=pitch_shift_amt,
         periodic_p=periodic_p,
         n_mask_codebooks=n_mask_codebooks,
-        periodic_w=periodic_w,
         onset_mask_width=onset_mask_width,
         dropout=dropout,
         sampletemp=sampletemp,
@@ -293,6 +339,29 @@ def api_vamp(input_audio,
         num_feedback_steps=num_feedback_steps,
         api=True, 
     )
+
+def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, model_choice, beat_mask_ms):
+    return _vamp_internal(
+        seed=0, 
+        input_audio=input_audio,
+        model_choice=model_choice,
+        pitch_shift_amt=0,
+        periodic_p=periodic_p,
+        n_mask_codebooks=n_mask_codebooks,
+        onset_mask_width=0,
+        dropout=dropout,
+        sampletemp=sampletemp,
+        typical_filtering=False,
+        typical_mass=0.15,
+        typical_min_tokens=1,
+        top_p=None,
+        sample_cutoff=1.0,
+        stretch_factor=1.0,
+        sampling_steps=36,
+        beat_mask_ms=beat_mask_ms,
+        num_feedback_steps=1
+    )
+
 
 with gr.Blocks() as demo:
     with gr.Row():
@@ -309,11 +378,11 @@ with gr.Blocks() as demo:
                 type="numpy",
             )
 
-            audio_mask = gr.Audio(
-                label="audio mask (listen to this to hear the mask hints)",
-                interactive=False, 
-                type="numpy",
-            )
+            # audio_mask = gr.Audio(
+            #     label="audio mask (listen to this to hear the mask hints)",
+            #     interactive=False, 
+            #     type="numpy",
+            # )
 
             # connect widgets
             load_example_audio_button.click(
@@ -341,11 +410,20 @@ with gr.Blocks() as demo:
                 )
 
                 onset_mask_width = gr.Slider(
-                    label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) ",
+                    label="onset mask width (multiplies with the periodic mask, 1 step ~= 10milliseconds) does not affect mask preview",
                     minimum=0,
                     maximum=100,
                     step=1,
                     value=0, visible=True
+                )
+
+                beat_mask_ms = gr.Slider(
+                    label="beat mask width (milliseconds) does not affect mask preview",
+                    minimum=1,
+                    maximum=200, 
+                    step=1,
+                    value=0, 
+                    visible=True
                 )
 
                 n_mask_codebooks = gr.Slider(
@@ -355,7 +433,15 @@ with gr.Blocks() as demo:
                     maximum=14,
                     step=1,
                 )
-            
+
+                dropout = gr.Slider(
+                    label="mask dropout",
+                    minimum=0.0,
+                    maximum=1.0,
+                    step=0.01,
+                    value=0.0
+                )
+
             maskimg = gr.Image(
                 label="mask image",
                 interactive=False,
@@ -379,18 +465,7 @@ with gr.Blocks() as demo:
                     value=1, 
                 )
 
-                periodic_w = gr.Slider(
-                    label="periodic prompt width (steps, 1 step ~= 10milliseconds)",
-                    minimum=1,
-                    maximum=20,
-                    step=1,
-                    value=1,
-                )
 
-                beat_mask_ms = gr.Number(
-                    label="beat mask width (milliseconds)",
-                    value=0,
-                )
 
 
             with gr.Accordion("sampling settings", open=False):
@@ -448,17 +523,6 @@ with gr.Blocks() as demo:
                 )
 
 
-
-
-            dropout = gr.Slider(
-                label="mask dropout",
-                minimum=0.0,
-                maximum=1.0,
-                step=0.01,
-                value=0.0
-            )
-
-
             seed = gr.Number(
                 label="seed (0 for random)",
                 value=0,
@@ -499,11 +563,24 @@ with gr.Blocks() as demo:
             # download = gr.File(type="filepath", label="download outputs")
 
 
-    _inputs = {
+    # mask preview change
+    for widget in (
+        periodic_p, n_mask_codebooks, 
+        onset_mask_width, dropout
+    ):
+        widget.change(
+            fn=mask_preview,
+            inputs=[periodic_p, n_mask_codebooks, 
+                    onset_mask_width, dropout],
+            outputs=[maskimg]
+        )
+
+
+    _inputs = [
             input_audio, 
             sampletemp,
             top_p,
-            periodic_p, periodic_w,
+            periodic_p,
             dropout,
             stretch_factor, 
             onset_mask_width, 
@@ -518,13 +595,13 @@ with gr.Blocks() as demo:
             sampling_steps, 
             beat_mask_ms,
             num_feedback_steps
-        }
+    ]
   
     # connect widgets
     vamp_button.click(
         fn=vamp,
         inputs=_inputs,
-        outputs=[audio_outs[0], audio_outs[1]], 
+        outputs=[audio_outs[0], audio_outs[1], maskimg], 
     )
 
     api_vamp_button = gr.Button("api vamp", visible=True)
@@ -532,7 +609,7 @@ with gr.Blocks() as demo:
         fn=api_vamp,
         inputs=[input_audio, 
                 sampletemp, top_p, 
-                periodic_p, periodic_w, 
+                periodic_p, 
                 dropout, 
                 stretch_factor,
                 onset_mask_width,

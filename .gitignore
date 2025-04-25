@@ -202,3 +202,5 @@ _outputs/
 debug.txt
 
 scratch/*
+
+.gradio

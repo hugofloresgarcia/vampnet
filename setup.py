@@ -21,7 +21,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Hugo Flores García, Prem Seetharaman",
-    author_email="hfgacrcia@descript.com",
+    author_email="hugggofloresgarcia@gmail.com",
     url="https://github.com/hugofloresgarcia/vampnet",
     license="MIT",
     packages=find_packages(),
