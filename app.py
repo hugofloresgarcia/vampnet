@@ -442,6 +442,68 @@ with gr.Blocks() as demo:
                     value=0.0
                 )
 
+                preset_dropdown = gr.Dropdown(
+                    label="preset",
+                    choices=["timbre transfer", "small variation", "small variation (follow beat)", "medium variation", "medium variation (follow beat)", "large variation", "large variation (follow beat)", "unconditional"],
+                    value="medium variation"
+                )
+                def change_preset(preset_dropdown):
+                    if preset_dropdown == "timbre transfer":
+                        periodic_p = 2
+                        n_mask_codebooks = 1
+                        onset_mask_width = 0
+                        dropout = 0.0
+                        beat_mask_ms = 0
+                    elif preset_dropdown == "small variation":
+                        periodic_p = 5
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0
+                        dropout = 0.0
+                        beat_mask_ms = 0
+                    elif preset_dropdown == "small variation (follow beat)":
+                        periodic_p = 7
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0
+                        dropout = 0.0
+                        beat_mask_ms = 50
+                    elif preset_dropdown == "medium variation":
+                        periodic_p = 7
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0
+                        dropout = 0.0
+                        beat_mask_ms = 0
+                    elif preset_dropdown == "medium variation (follow beat)":
+                        periodic_p = 13
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0
+                        dropout = 0.0
+                        beat_mask_ms = 50
+                    elif preset_dropdown == "large variation":
+                        periodic_p = 13
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0
+                        dropout = 0.2
+                        beat_mask_ms = 0 
+                    elif preset_dropdown == "large variation (follow beat)":
+                        periodic_p = 0
+                        n_mask_codebooks = 4
+                        onset_mask_width = 0 
+                        dropout = 0.0
+                        beat_mask_ms=80 
+                    elif preset_dropdown == "unconditional":
+                        periodic_p=0
+                        n_mask_codebooks=1
+                        onset_mask_width=0 
+                        dropout=0.0
+                    return periodic_p, n_mask_codebooks, onset_mask_width, dropout, beat_mask_ms
+                preset_dropdown.change(
+                    fn=change_preset,
+                    inputs=[preset_dropdown],
+                    outputs=[periodic_p, n_mask_codebooks, onset_mask_width, dropout, beat_mask_ms]
+                )
+                # preset_dropdown.change(
+
+
             maskimg = gr.Image(
                 label="mask image",
                 interactive=False,
