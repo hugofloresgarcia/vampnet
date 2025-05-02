@@ -345,8 +345,8 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
     sig = at.AudioSignal(input_audio).to_mono()
 
     input_audio = sig.cpu().detach().numpy()[0][0]
-    input_audio = input_audio / np.iinfo(input_audio.dtype).max
-    input_audio = input_audio.astype(np.float32)
+    input_audio = input_audio * np.iinfo(np.int16).max
+    input_audio = input_audio.astype(np.int16)
     input_audio = input_audio.reshape(1, -1)
     input_audio = (sig.sample_rate, input_audio)
 
