@@ -10,6 +10,7 @@ import argbind
 import shutil
 import torch
 from datetime import datetime
+from pyharp import load_audio, save_audio, OutputLabel, LabelList, build_endpoint, ModelCard
 
 import gradio as gr
 from vampnet.interface import Interface, signal_concat
@@ -341,7 +342,7 @@ def api_vamp(input_audio,
     )
 
 def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, model_choice, beat_mask_ms):
-    return _vamp_internal(
+    out =  _vamp_internal(
         seed=0, 
         input_audio=input_audio,
         model_choice=model_choice,
@@ -361,6 +362,13 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
         beat_mask_ms=beat_mask_ms,
         num_feedback_steps=1
     )
+    sr, output_audio = out
+    # save the output audio
+    sig = at.AudioSignal(output_audio, sr).to_mono()
+
+    ll = LabelList()
+    ll.append(OutputLabel(label='short label', t=0.0, description='longer description'))
+    return save_audio(sig), ll
 
 
 with gr.Blocks() as demo:
@@ -693,6 +701,21 @@ with gr.Blocks() as demo:
         api_name="vamp"
     )
 
+
+    app = build_endpoint(
+        model_card=ModelCard(
+            name="vampnet",
+            description="generating audio by filling in the blanks.",
+            author="hugo flores garcía et al. (descript/northwestern)",
+            tags=["sound", "generation",],
+            midi_in=False,
+            midi_out=False,
+        ), 
+        components=[
+            sampletemp, periodic_p, dropout, n_mask_codebooks, model_choice, beat_mask_ms
+        ],
+        process_fn=harp_vamp,
+    )
 
 try:
     demo.queue()
