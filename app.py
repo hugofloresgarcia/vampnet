@@ -134,7 +134,7 @@ def _vamp_internal(
         n_mask_codebooks, onset_mask_width, 
         dropout, sampletemp, typical_filtering, 
         typical_mass, typical_min_tokens, top_p, 
-        sample_cutoff, stretch_factor, sampling_steps, beat_mask_ms, num_feedback_steps, api=False
+        sample_cutoff, stretch_factor, sampling_steps, beat_mask_ms, num_feedback_steps, api=False, harp=False
     ):
 
     print("args!")
@@ -256,6 +256,9 @@ def _vamp_internal(
     plt.savefig("scratch/mask.png")
     plt.clf()
 
+    if harp: 
+        return sig
+
     if not api:
         return to_output(sig[0]), to_output(sig[1]), "scratch/mask.png"
     else:
@@ -350,7 +353,7 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
     input_audio = input_audio.reshape(1, -1)
     input_audio = (sig.sample_rate, input_audio)
 
-    out =  _vamp_internal(
+    sig =  _vamp_internal(
         seed=0, 
         input_audio=input_audio,
         model_choice=model_choice,
@@ -368,15 +371,14 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
         stretch_factor=1.0,
         sampling_steps=36,
         beat_mask_ms=int(beat_mask_ms),
-        num_feedback_steps=1
+        num_feedback_steps=1,
+        api=False, 
+        harp=True,
     )
-    sr, output_audio = out
-    # save the output audio
-    sig = at.AudioSignal(output_audio, sr).to_mono()
 
     ll = LabelList()
     ll.append(OutputLabel(label='short label', t=0.0, description='longer description'))
-    return save_audio(sig), ll
+    return save_audio(sig.detach().cpu()), ll
 
 
 with gr.Blocks() as demo:
