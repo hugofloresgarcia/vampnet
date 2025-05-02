@@ -355,8 +355,8 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
         input_audio=input_audio,
         model_choice=model_choice,
         pitch_shift_amt=0,
-        periodic_p=periodic_p,
-        n_mask_codebooks=n_mask_codebooks,
+        periodic_p=int(periodic_p),
+        n_mask_codebooks=int(n_mask_codebooks),
         onset_mask_width=0,
         dropout=dropout,
         sampletemp=sampletemp,
@@ -367,7 +367,7 @@ def harp_vamp(input_audio, sampletemp, periodic_p, dropout, n_mask_codebooks, mo
         sample_cutoff=1.0,
         stretch_factor=1.0,
         sampling_steps=36,
-        beat_mask_ms=beat_mask_ms,
+        beat_mask_ms=int(beat_mask_ms),
         num_feedback_steps=1
     )
     sr, output_audio = out
