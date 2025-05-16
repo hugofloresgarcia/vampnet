@@ -30,7 +30,6 @@ init_model_choice = open("DEFAULT_MODEL").read().strip()
 
 # load the init model
 interface.load_finetuned(init_model_choice)
-interface.to(device)
     
 def to_output(sig):
     return sig.sample_rate, sig.cpu().detach().numpy()[0][0]
