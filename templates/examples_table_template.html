@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Examples Table</title>
+    <style>
+        table { border-collapse: collapse; }
+        th, td { border: 1px solid #aaa; padding: 8px; }
+        th { background-color: #f2f2f2; }
+        audio { width: 180px; }
+    </style>
+</head>
+<body>
+    <h1>Generated Examples</h1>
+    <table>
+        <tr>
+            <th>Sound</th>
+            {% for experiment in experiments %}
+                <th>{{ experiment }}</th>
+            {% endfor %}
+        </tr>
+        {% for sound in sounds %}
+        <tr>
+            <td>{{ sound }}</td>
+            {% for experiment in experiments %}
+                <td>
+                    {% if audio_exists[experiment][sound] %}
+                        <audio controls>
+                            <source src="{{ audio_exists[experiment][sound] }}" type="audio/wav">
+                            Your browser does not support the audio element.
+                        </audio>
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

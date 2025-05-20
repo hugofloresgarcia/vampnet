@@ -141,6 +141,7 @@ notebooks/*.mp4
 *runs/
 boards/
 samples/
+examples/
 *.ipynb
 
 results.json
@@ -159,6 +160,7 @@ mprofile*
 env.sh
 _codebraid/
 **/*.html
+!templates/*.html
 **/*.exec.md
 flagged/
 log.txt
