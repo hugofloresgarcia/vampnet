@@ -31,9 +31,9 @@ license: cc-by-nc-4.0
 
 ## setting up
 
-python 3.9-3.11 works well. (for example, using conda)
+python 3.10-3.11 works well. (for example, using conda)
 ```bash
-conda create -n vampnet python=3.9
+conda create -n vampnet python=3.10
 conda activate vampnet
 ```
 
