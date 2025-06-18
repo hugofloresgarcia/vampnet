@@ -2,6 +2,7 @@
 """
 VampNet Launcher: orchestrates a single SSH session (with port-forwarding
 and real-time remote stdout/stderr), local client startup, and Max patch loading.
+Supports a --hold mode to delay cleanup until this script is killed, even after Max exits.
 """
 import argparse
 import json
@@ -23,12 +24,13 @@ def setup_logger():
 
 
 class VampNetLauncher:
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path, hold: bool = False):
         self.logger = setup_logger()
         self.config = self._load_config(config_path)
         self.ssh_proc = None
         self.client_proc = None
         self.max_proc = None
+        self.hold = hold
 
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda s, f: self._handle_exit())
@@ -38,10 +40,12 @@ class VampNetLauncher:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         cfg = json.loads(path.read_text())
-        missing = [k for k in ('host','remote_python','remote_dir','port','maxpat')
-                   if k not in cfg]
+        required = ('host', 'remote_python', 'remote_dir', 'port', 'maxpat')
+        missing = [k for k in required if k not in cfg]
         if missing:
             raise KeyError(f"Missing config keys: {', '.join(missing)}")
+        if cfg['host'] == "user@your-server" or cfg['remote_python'] == "/path/to/python" or cfg['remote_dir'] == "/path/to/vampnet":
+            raise ValueError("First update host, remote_python and _remote_dir in config.json.")
         return cfg
 
     @staticmethod
@@ -58,25 +62,25 @@ class VampNetLauncher:
         remote_py  = self.config['remote_python']
         cmd = [
             "ssh",
-            "-tt",  # Allocate pseudo-terminal so that remote app is killed once the SSH session ends
+            "-tt", # Force pseudo-terminal allocation, so that app.py is killed once the ssh session ends
             "-o", "ExitOnForwardFailure=yes",
             "-L", f"{port}:localhost:{port}",
             self.config['host'],
-            f"bash -lc \"cd {remote_dir} && exec {remote_py} -u app.py --args.load conf/interface.yml --Interface.device cuda\""
+            f"bash -lc \"cd {remote_dir} && exec {remote_py} -u app.py "
+            f"--args.load conf/interface.yml --Interface.device cuda\""
         ]
         self.logger.info(f"SSH+remote cmd: {' '.join(cmd)}")
         self.ssh_proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-
-        # Demote stderr to INFO so warnings aren’t marked as errors
+        # Demote stderr to INFO
         threading.Thread(
             target=self._stream_pipe,
-            args=(self.ssh_proc.stderr, "[Remote][stderr]", self.logger.info),
+            args=(self.ssh_proc.stderr, "[Remote][ERR]", self.logger.info),
             daemon=True
         ).start()
 
-        # Read stdout until we see the readiness marker
+        # Read stdout until readiness marker appears
         ready_marker = "Running on local URL"
         for raw in self.ssh_proc.stdout:
             line = raw.decode().rstrip()
@@ -85,7 +89,7 @@ class VampNetLauncher:
                 self.logger.info("✔ Remote service is ready")
                 break
 
-        # Drain any remaining stdout in background
+        # Drain remaining stdout asynchronously
         threading.Thread(
             target=self._stream_pipe,
             args=(self.ssh_proc.stdout, "[Remote]", self.logger.info),
@@ -146,7 +150,7 @@ class VampNetLauncher:
             # 1) SSH + remote app + port-forward + log streaming
             self._run_remote()
 
-            # 2) launch local client
+            # 2) Launch local client
             port = int(self.config['port'])
             client_cmd = [
                 sys.executable, str(client),
@@ -167,7 +171,7 @@ class VampNetLauncher:
                 daemon=True
             ).start()
 
-            # 3) open Max and wait
+            # 3) Open Max and wait for it to exit
             self.logger.info(f"Opening Max patch and waiting: {patch}")
             self.max_proc = subprocess.Popen(
                 ["open", "-n", "-W", "-a", "Max", str(patch)],
@@ -183,9 +187,18 @@ class VampNetLauncher:
                 args=(self.max_proc.stderr, "[Max][ERR]", self.logger.info),
                 daemon=True
             ).start()
+
             self.max_proc.wait()
 
-        except (subprocess.SubprocessError, RuntimeError) as e:
+            # 4) After Max exits, keep the launcher alive until it's killed
+            if self.hold:
+                # prevent SIGCHLD (child exit) from waking us up
+                signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+                self.logger.info("Max exited; awaiting SIGINT/SIGTERM to clean up.")
+                while True:
+                    signal.pause()
+
+        except (subprocess.SubprocessError, RuntimeError, ValueError) as e:
             self.logger.error(f"Launcher error: {e}")
         finally:
             self._teardown()
@@ -193,9 +206,15 @@ class VampNetLauncher:
 
 def main():
     parser = argparse.ArgumentParser(description="Launch VampNet with JSON config.")
-    parser.add_argument('--config', default="config.json", help='Path to JSON config')
+    parser.add_argument(
+        '--config',    required=True,      help='Path to JSON config'
+    )
+    parser.add_argument(
+        '--hold', action='store_true',
+        help='Delay cleanup until this script is killed, even after Max exits.'
+    )
     args = parser.parse_args()
-    VampNetLauncher(Path(args.config)).run()
+    VampNetLauncher(Path(args.config), hold=args.hold).run()
 
 
 if __name__ == '__main__':
