@@ -228,6 +228,27 @@ In the tape controls, check the heartbeat (`<3`) to make sure the connection to 
 
 have fun!
 
+## Automating the full workflow with `launch.py`
+
+Instead of running each step by hand, `unloop/launch.py` attempts to handle the entire workflow for you: it will
+(1) launch the gradio server on your GPU machine and set up the SSH port-forward, (2) launch the local Python client,
+and (3) open the Max patch. Once you close the Max patch, it will clean up everything.
+
+Before running `launch.py`, you need to create a config file by editing `unloop/config.json`:
+
+```json
+{
+  "host": "user@your-server",
+  "remote_python": "/path/to/python",
+  "remote_dir": "/path/to/vampnet",
+  "port": 7860,
+  "maxpat": "unloop/max/unloop.maxpat"
+}
+```
+
+**Note:** This launcher assumes a clean setup—it doesn’t check for or handle existing SSH tunnels, leftover processes, or other edge cases. For best results, make sure no port-forwarders or vampnet app instances are already running before you invoke `launch.py`.
+
+
 # Token Telephone
 
 Instructions forthcoming, but the sauce is in `token_telephone/tt.py`

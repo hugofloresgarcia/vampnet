@@ -1,0 +1,7 @@
+{
+  "host": "user@your-server",
+  "remote_python": "/path/to/python",
+  "remote_dir": "/path/to/vampnet",
+  "port": 7860,
+  "maxpat": "unloop/max/unloop.maxpat"
+}
