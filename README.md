@@ -240,13 +240,13 @@ Instead of running each step by hand, `unloop/launch.py` automates the entire `u
 
 ### Usage
 
-Before running, edit `unloop/launch_config.json`:
+First, edit `unloop/launch_config.json` and update with the gradio server, the path to Python on that server (e.g. if it needs a specific conda environment), the path to VampNet on that server, and the path to the specific Maxpatch you want to use locally:
 
 ```json
 {
-  "host": "user@your-server",
-  "remote_python": "/path/to/python",
-  "remote_dir": "/path/to/vampnet",
+  "server": "user@your-server",
+  "python_path_server": "/path/to/python",
+  "vampnet_dir_server": "/path/to/vampnet",
   "port": 7860,
   "maxpat": "unloop/max/unloop.maxpat"
 }

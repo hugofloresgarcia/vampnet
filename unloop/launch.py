@@ -40,11 +40,11 @@ class VampNetLauncher:
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         cfg = json.loads(path.read_text())
-        required = ('host', 'remote_python', 'remote_dir', 'port', 'maxpat')
+        required = ('server', 'python_path_server', 'vampnet_dir_server', 'port', 'maxpat')
         missing = [k for k in required if k not in cfg]
         if missing:
             raise KeyError(f"Missing config keys: {', '.join(missing)}")
-        if cfg['host'] == "user@your-server" or cfg['remote_python'] == "/path/to/python" or cfg['remote_dir'] == "/path/to/vampnet":
+        if cfg['server'] == "user@your-server" or cfg['python_path_server'] == "/path/to/python" or cfg['vampnet_dir_server'] == "/path/to/vampnet":
             raise ValueError("First update host, remote_python and _remote_dir in launch_config.json.")
         return cfg
 
@@ -57,15 +57,24 @@ class VampNetLauncher:
             pipe.close()
 
     def _run_remote(self):
+        # test SSH connection before anything else
+        try:
+            subprocess.check_call([
+                "ssh", "-q", "-o", "BatchMode=yes", self.config['server'], "true"
+            ])
+        except subprocess.CalledProcessError:
+            raise RuntimeError(f"SSH connection to {self.config['server']} failed. "
+                               "Please check your SSH config, keys, and server status.")
+
         port = int(self.config['port'])
-        remote_dir = self.config['remote_dir']
-        remote_py  = self.config['remote_python']
+        remote_dir = self.config['vampnet_dir_server']
+        remote_py  = self.config['python_path_server']
         cmd = [
             "ssh",
             "-tt", # Force pseudo-terminal allocation, so that app.py is killed once the ssh session ends
             "-o", "ExitOnForwardFailure=yes",
             "-L", f"{port}:localhost:{port}",
-            self.config['host'],
+            self.config['server'],
             f"bash -lc \"cd {remote_dir} && exec {remote_py} -u app.py "
             f"--args.load conf/interface.yml --Interface.device cuda\""
         ]
