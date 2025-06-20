@@ -60,11 +60,14 @@ class VampNetLauncher:
         # test SSH connection before anything else
         try:
             subprocess.check_call([
-                "ssh", "-q", "-o", "BatchMode=yes", self.config['server'], "true"
+                "ssh", "-q",
+                "-o", "ConnectTimeout=5",
+                "-o", "BatchMode=yes",
+                self.config['server'], "true"
             ])
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             raise RuntimeError(f"SSH connection to {self.config['server']} failed. "
-                               "Please check your SSH config, keys, and server status.")
+                               f"Try running `ssh {self.config['server']}` and check for issues.")
 
         port = int(self.config['port'])
         remote_dir = self.config['vampnet_dir_server']
