@@ -230,11 +230,17 @@ have fun!
 
 ## Automating the full workflow with `launch.py`
 
-Instead of running each step by hand, `unloop/launch.py` attempts to handle the entire workflow for you: it will
-(1) launch the gradio server on your GPU machine and set up the SSH port-forward, (2) launch the local Python client,
-and (3) open the Max patch. Once you close the Max patch, it will clean up everything.
+Instead of running each step by hand, `unloop/launch.py` automates the entire `unloop` workflow:
 
-Before running `launch.py`, be sure to edit `unloop/launch_config.json`:
+1. Launches the remote Gradio server via SSH  
+2. Sets up port forwarding  
+3. Starts the local `client.py`  
+4. Opens the Max patch  
+5. Cleans up everything when finished
+
+### Usage
+
+Before running, edit `unloop/launch_config.json`:
 
 ```json
 {
@@ -246,8 +252,15 @@ Before running `launch.py`, be sure to edit `unloop/launch_config.json`:
 }
 ```
 
-**Note:** This launcher assumes a clean setup—it doesn’t check for or handle existing SSH tunnels, leftover processes, or other edge cases. For best results, make sure no port-forwarders or vampnet app instances are already running before you invoke `launch.py`.
+Then launch with:
 
+```bash
+python unloop/launch.py
+```
+
+By default, the script shuts everything down when Max is closed.  To keep the remote server and local client running after Max exits (e.g. if you plan to reopen the Max patch), use `--hold`. Then all processes stay alive until you terminate the script manually (e.g., with Ctrl-C).
+
+NOTE: `launch.py` is intended for clean, minimal setups. It won't handle edge cases like existing tunnels or zombie processes.
 
 # Token Telephone
 
