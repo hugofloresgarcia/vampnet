@@ -58,6 +58,7 @@ class VampNetLauncher:
 
     def _run_remote(self):
         # test SSH connection before anything else
+        self.logger.info(f"Testing SSH connection to {self.config['server']}...")
         try:
             subprocess.check_call([
                 "ssh", "-q",
@@ -68,7 +69,7 @@ class VampNetLauncher:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"SSH connection to {self.config['server']} failed. "
                                f"Try running `ssh {self.config['server']}` and check for issues.")
-
+        self.logger.info(f"SSH connection to {self.config['server']} is OK")
         port = int(self.config['port'])
         remote_dir = self.config['vampnet_dir_server']
         remote_py  = self.config['python_path_server']
