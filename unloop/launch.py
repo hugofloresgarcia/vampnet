@@ -45,7 +45,7 @@ class VampNetLauncher:
         if missing:
             raise KeyError(f"Missing config keys: {', '.join(missing)}")
         if cfg['host'] == "user@your-server" or cfg['remote_python'] == "/path/to/python" or cfg['remote_dir'] == "/path/to/vampnet":
-            raise ValueError("First update host, remote_python and _remote_dir in config.json.")
+            raise ValueError("First update host, remote_python and _remote_dir in launch_config.json.")
         return cfg
 
     @staticmethod

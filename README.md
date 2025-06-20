@@ -234,7 +234,7 @@ Instead of running each step by hand, `unloop/launch.py` attempts to handle the 
 (1) launch the gradio server on your GPU machine and set up the SSH port-forward, (2) launch the local Python client,
 and (3) open the Max patch. Once you close the Max patch, it will clean up everything.
 
-Before running `launch.py`, you need to create a config file by editing `unloop/config.json`:
+Before running `launch.py`, be sure to edit `unloop/launch_config.json`:
 
 ```json
 {
