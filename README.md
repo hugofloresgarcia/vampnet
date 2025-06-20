@@ -228,7 +228,7 @@ In the tape controls, check the heartbeat (`<3`) to make sure the connection to 
 
 have fun!
 
-## Automating the full workflow with `launch.py`
+## Automatic setup with `unloop/launch.py`
 
 Instead of running each step by hand, `unloop/launch.py` automates the entire `unloop` workflow:
 
