@@ -228,6 +228,40 @@ In the tape controls, check the heartbeat (`<3`) to make sure the connection to 
 
 have fun!
 
+## Automatic setup with `unloop/launch.py`
+
+Instead of running each step by hand, `unloop/launch.py` automates the entire `unloop` workflow:
+
+1. Launches the remote Gradio server via SSH  
+2. Sets up port forwarding  
+3. Starts the local `client.py`  
+4. Opens the Max patch  
+5. Cleans up everything when finished
+
+### Usage
+
+First, edit `unloop/launch_config.json` and update with the gradio server, the path to Python on that server (e.g. if it needs a specific conda environment), the path to VampNet on that server, and the path to the specific Maxpatch you want to use locally:
+
+```json
+{
+  "server": "user@your-server",
+  "python_path_server": "/path/to/python",
+  "vampnet_dir_server": "/path/to/vampnet",
+  "port": 7860,
+  "maxpat": "unloop/max/unloop.maxpat"
+}
+```
+
+Then launch with:
+
+```bash
+python unloop/launch.py
+```
+
+By default, the script shuts everything down when Max is closed.  To keep the remote server and local client running after Max exits (e.g. if you plan to reopen the Max patch), use `--hold`. Then all processes stay alive until you terminate the script manually (e.g., with Ctrl-C).
+
+NOTE: `launch.py` is intended for clean, minimal setups. It won't handle edge cases like existing tunnels or zombie processes.
+
 # Token Telephone
 
 Instructions forthcoming, but the sauce is in `token_telephone/tt.py`

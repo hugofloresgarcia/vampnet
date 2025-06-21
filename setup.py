@@ -38,5 +38,6 @@ setup(
         "plotly",
         "pydantic==2.10.6",
         "spaces",
+        "python-osc", # For unloop
     ],
 )
